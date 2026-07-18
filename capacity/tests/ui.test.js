@@ -104,7 +104,7 @@ async function settle(ms = 400) {
 // ---------------- drive the app ----------------
 async function run() {
   const tabs = [...document.querySelectorAll('[role="tab"]')];
-  t("all 7 tabs present", () => eq(tabs.length, 7, "tab count"));
+  t("all tabs present", () => eq(tabs.length, 8, "tab count"));
 
   t("clicking every tab shows its panel and hides the rest", () => {
     for (const tabEl of tabs) {
@@ -161,7 +161,7 @@ async function run() {
   });
 
   // Scenarios
-  click(tabs.find((x) => x.textContent === "Scenarios"));
+  click(tabs.find((x) => x.textContent === "Scenarios & views"));
   t("toggling a scenario flips its checked state", () => {
     const toggle = document.querySelector('#panel-scenarios input[type=checkbox]');
     ok(toggle, "scenario toggle exists");

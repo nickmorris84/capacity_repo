@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Ribbon } from "./Ribbon.jsx";
-import { Card, Hint } from "./primitives.jsx";
+import { Card } from "./primitives.jsx";
+import { HolisticPanel } from "./HolisticPanel.jsx";
 import { CoverageChart, HeadcountChart, VolumeChart, CostChart, IdleChurnChart, BurnoutChart } from "./charts.jsx";
-import { money, moneyFull, pct, num, secs } from "../format.js";
+import { money, pct, num, secs } from "../format.js";
 
 // Findings strip — colour-coded advisory cards from the engine summary.
 function Findings({ findings }) {
@@ -50,7 +51,7 @@ function QueueCard({ q, s }) {
   );
 }
 
-export function PlanTab({ sim }) {
+export function PlanTab({ sim, viewLabel }) {
   const cfg = sim.config;
   const [selectedWeek, setSelectedWeek] = useState(0);
   const wk = Math.min(selectedWeek, sim.weeks.length - 1);
@@ -59,7 +60,13 @@ export function PlanTab({ sim }) {
   const cur = cfg.engine.currency;
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
+    <div
+      className="grid"
+      style={{ gap: 16 }}
+      data-testid="plan-panel"
+      data-active-strategy={sm.strategy}
+      data-active-allin={Math.round(sm.allIn)}
+    >
       <Card title="Findings" hint="Auto-written from the active strategy. Red demands a decision; amber is a watch item.">
         <Findings findings={sm.findings} />
       </Card>
@@ -72,7 +79,7 @@ export function PlanTab({ sim }) {
         <Ribbon sim={sim} selectedWeek={wk} onScrub={setSelectedWeek} />
       </Card>
 
-      <Card title={`Queue status — week ${wk + 1}`} sub={sm.strategy + " active"}>
+      <Card title={`Queue status — week ${wk + 1}`} sub={`${sm.strategy} active · view: ${viewLabel || "Plan of record"}`}>
         <div className="qcards">
           {cfg.queues.map((q) => (
             <QueueCard key={q.id} q={q} s={week.queues[q.id]} />
@@ -96,36 +103,7 @@ export function PlanTab({ sim }) {
         <BurnoutChart sim={sim} selectedWeek={wk} />
       </div>
 
-      <Card title="Holistic requirement panel" hint="A full P3 build renders the weekly cap-allocation trace here.">
-        <HolisticPlaceholder sim={sim} />
-      </Card>
-    </div>
-  );
-}
-
-// Placeholder per the P2 scope note ("holistic panel placeholder is fine"), but
-// it already surfaces the real feasibility verdict from the engine summary.
-function HolisticPlaceholder({ sim }) {
-  const sm = sim.summary;
-  const cfg = sim.config;
-  const cur = cfg.engine.currency;
-  const totReq = sim.weeks[sim.weeks.length - 1].totals.reqFte;
-  const totPaid = sim.weeks[sim.weeks.length - 1].totals.paid;
-  const binding = (sim.allocTrace || []).filter((t) => t.binding).length;
-  return (
-    <div>
-      <div className="stat-row">
-        <div className="stat"><div className="l">Required FTE (final wk)</div><div className="v">{num(totReq, 0)}</div></div>
-        <div className="stat"><div className="l">Paid FTE (final wk)</div><div className="v">{num(totPaid, 0)}</div></div>
-        <div className="stat"><div className="l">Global cap</div><div className="v">{cfg.hiring.cap}<small>/wk</small></div></div>
-        <div className="stat"><div className="l">Cap-bound weeks</div><div className="v">{binding}</div></div>
-      </div>
-      <p className="note" style={{ marginTop: 12 }}>
-        {sm.flags.capInfeasible
-          ? "Feasibility: the global hiring cap binds — some queues go short and the shortfall lands as churn. See findings above."
-          : "Feasibility: the plan fits within the global hiring cap across the horizon."}
-        {" "}The full weekly allocation trace (grants / denied / binding order) renders here in P3.
-      </p>
+      <HolisticPanel sim={sim} />
     </div>
   );
 }

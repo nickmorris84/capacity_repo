@@ -1,4 +1,5 @@
 import { NumField, TextField, SelectField, Toggle } from "../components/primitives.jsx";
+import { ViewsManager } from "../components/ViewsManager.jsx";
 
 const TYPE_LABELS = {
   growth: "Growth %/mo",
@@ -117,6 +118,8 @@ export function ScenariosEditor({ config, ops }) {
         ))}
         {config.scenarios.length === 0 && <div className="empty">No scenarios. Add one above.</div>}
       </div>
+
+      <ViewsManager config={config} ops={ops} />
     </div>
   );
 }

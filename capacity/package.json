@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/ui.test.js",
+    "test": "node tests/engine.test.js && node tests/ui.test.js && node tests/strategies.test.js",
     "test:engine": "node tests/engine.test.js",
     "test:ui": "node tests/ui.test.js",
+    "test:strategies": "node tests/strategies.test.js",
     "build:html": "echo 'placeholder until P5' && exit 1"
   },
   "dependencies": {

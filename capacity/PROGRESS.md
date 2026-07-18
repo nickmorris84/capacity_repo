@@ -82,6 +82,68 @@ per-week grants/denied/binding table plus the 4-strategy/4-view overlay comparis
 `simulate()` already accepts `viewIds` for this. Data-table tab (§6), Report/PDF (§8), xlsx
 round-trip (§9) and the Model notes tab are out of P2 scope by design.
 
-## P3 — Strategies + views: not started
+## P3 — Strategies + scenario views: ✅ COMPLETE (P1/P2 gates still green; new P3 gate green)
+
+Multi-simulation layer + comparison UI over the P2 shell.
+
+Budgeted multi-sim engine (ui/sim-set.js, `useStrategyViews`):
+- Computes exactly the sims the screen needs: the four strategies for the ACTIVE
+  view (comparison table + dashboard) plus, only while comparing views, the
+  active strategy across the OVERLAY views. Active dashboard sim is always one of
+  the four strategy sims, so it's free. Worst case 4 + 4 − 1 = 7 ≤ 8 (SPEC §0).
+- Memoised by a (configHash | strategy | viewId) key in a size-capped ref cache.
+  A parameter edit misses (correct — must re-simulate); flipping the dimension,
+  editing the overlay set, or switching the active strategy reuses cached sims
+  and resolves instantly. Debounced (160ms) with `pending` → the top-bar
+  "Recalculating…" indicator; `computeMs`/`computeCount` exposed for the gate.
+- E4 preserved: on a parameter edit (active sim not yet cached) the previous
+  snapshot stays visible so charts never read a half-built config; when only
+  overlay sims are stale (active sim cached) the dashboard updates immediately.
+
+Strategies tab (ui/components/StrategiesTab.jsx + ComparisonChart + HolisticPanel):
+- Strategy comparison table — all four run side by side for the active view: red
+  weeks, end HC, run cost, churn, all-in, feasibility; the active row is marked,
+  the recommended one (lowest all-in that holds SLA, else least-bad) badged, and
+  "Make active" drives every other tab.
+- Overlay comparison — cumulative all-in cost, one line per series, with the
+  single dimension toggle: strategies-within-active-view XOR views-within-active-
+  strategy, never both. `data-series` exposes the live line count. Overlay view
+  multi-select capped at 4.
+- Holistic requirement panel — required vs paid vs pipeline, feasibility verdict,
+  and the week-by-week cap-allocation trace (cap / wanted / per-queue grants /
+  denied shortfall / projected churn), binding weeks highlighted, rendering the
+  SPEC's "Week N: cap X, plan wants Y; … goes short — projected £Zk churn"
+  narrative. Also reused (compact) at the bottom of the Plan tab.
+
+Scenario views (ui/views.js, ui/components/ViewsManager.jsx, config.views):
+- A view = named set of enabled scenarios. Built-ins Plan of record (tracks the
+  live enabled set) and No scenarios (always empty); users create (from the
+  currently-enabled set), rename, re-member, and delete views. `viewIdsFor`
+  resolves a view to the scenario-id list simulate() takes; deleted scenarios are
+  filtered out and pruned from saved views.
+- Global active-strategy + active-view selectors live in the top bar (UI state,
+  deliberately kept out of the config hash so switching either reuses cache) and
+  drive Plan, Intraday and the dashboard. The active-strategy field was removed
+  from Money & engine (now the top-bar selector); the ViewsManager sits under the
+  Scenarios list on the renamed "Scenarios & views" tab.
+
+Gate: tests/strategies.test.js (JSDOM) — comparison table lists S1–S4; the
+dimension toggle flips the overlaid series (4 strategies ↔ N views); a user view
+is created and three views overlaid; switching the active strategy changes the
+dashboard's exact figures (data-active-allin / data-active-strategy on the Plan
+root); the overlay caps at 4; and a forced full recompute runs exactly 8 sims in
+<1s (observed ~350–400ms). `npm test` runs engine → ui → strategies; all green
+(20 / 12 / 9). tests/ui.test.js updated for the new 8-tab set and the renamed
+Scenarios tab.
+
+Design decision (SPEC §5 "view selector on every chart/table"): implemented as a
+single global active-view selector that every dashboard chart/table honours, plus
+the per-comparison overlay selector — rather than a redundant dropdown bolted to
+each chart, which would be UI noise and risk the sim budget. Per-table view
+selectors on the P4 data tables can still be layered on top of this state.
+
+Notes for P4+: `sim.allocTrace` is fully surfaced now. The per-queue data table
+(§6), Report/PDF (§8), xlsx round-trip (§9) and Model-notes tab remain unbuilt.
+
 ## P4 — Data + documents: not started
 ## P5 — Persistence + packaging: not started

@@ -146,7 +146,40 @@ export function useConfigOps(setConfig) {
   }, [setConfig]);
 
   const deleteScenario = useCallback((sid) => {
-    setConfig((c) => ({ ...c, scenarios: c.scenarios.filter((s) => s.id !== sid) }));
+    setConfig((c) => ({
+      ...c,
+      scenarios: c.scenarios.filter((s) => s.id !== sid),
+      // keep saved views coherent when a scenario disappears
+      views: c.views.map((v) => (Array.isArray(v.scenarioIds) ? { ...v, scenarioIds: v.scenarioIds.filter((id) => id !== sid) } : v)),
+    }));
+  }, [setConfig]);
+
+  // ---- scenario views (SPEC §5): named sets of enabled scenarios ----
+  const addView = useCallback((name, scenarioIds) => {
+    const id = "v_" + uid();
+    setConfig((c) => ({ ...c, views: [...c.views, { id, name: name || "New view", builtin: false, scenarioIds: [...(scenarioIds || [])] }] }));
+    return id;
+  }, [setConfig]);
+
+  const renameView = useCallback((vid, name) => {
+    setConfig((c) => ({ ...c, views: c.views.map((v) => (v.id === vid ? { ...v, name } : v)) }));
+  }, [setConfig]);
+
+  const toggleViewScenario = useCallback((vid, sid, on) => {
+    setConfig((c) => ({
+      ...c,
+      views: c.views.map((v) => {
+        if (v.id !== vid || !Array.isArray(v.scenarioIds)) return v;
+        const has = v.scenarioIds.includes(sid);
+        if (on && !has) return { ...v, scenarioIds: [...v.scenarioIds, sid] };
+        if (!on && has) return { ...v, scenarioIds: v.scenarioIds.filter((x) => x !== sid) };
+        return v;
+      }),
+    }));
+  }, [setConfig]);
+
+  const deleteView = useCallback((vid) => {
+    setConfig((c) => ({ ...c, views: c.views.filter((v) => v.id !== vid || v.builtin) }));
   }, [setConfig]);
 
   return useMemo(() => ({
@@ -154,5 +187,6 @@ export function useConfigOps(setConfig) {
     addHire, patchHire, deleteHire,
     addServiceTeam, patchServiceTeam, deleteServiceTeam,
     addScenario, patchScenario, deleteScenario,
-  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, patchScenario, deleteScenario]);
+    addView, renameView, toggleViewScenario, deleteView,
+  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView]);
 }

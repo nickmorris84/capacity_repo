@@ -1,4 +1,4 @@
-import { NumField, TextField, SelectField, Card, Hint } from "../components/primitives.jsx";
+import { NumField, TextField, Card, Hint } from "../components/primitives.jsx";
 
 /* Money & engine editor: engine parameters, hiring strategy + global cap, costs,
    CX economics, endogenous loops, and the service-team pool. */
@@ -30,18 +30,8 @@ export function MoneyEditor({ config, ops }) {
         <div className="fieldrow">
           <NumField label="Global cap" unit="/wk" value={hir.cap} onChange={(v) => P(["hiring", "cap"], v)} hint="Max total requisitions per week across all queues — a shared recruitment/training constraint." />
           <NumField label="Buffer" unit="%" value={+(hir.buffer * 100).toFixed(0)} onChange={(v) => P(["hiring", "buffer"], v / 100)} hint="S2 targets requirement × (1 + buffer)." />
-          <SelectField
-            label="Active strategy"
-            value={hir.activeStrategy}
-            onChange={(v) => P(["hiring", "activeStrategy"], v)}
-            options={[
-              { value: "S1", label: "S1 · Meet requirement" },
-              { value: "S2", label: "S2 · Buffer above" },
-              { value: "S3", label: "S3 · Forward backfill" },
-              { value: "S4", label: "S4 · Manual plan" },
-            ]}
-          />
         </div>
+        <p className="note" style={{ marginTop: 10 }}>All four strategies run side by side on the <strong>Strategies</strong> tab; pick the active one from the strategy selector in the top bar.</p>
       </Card>
 
       <Card title="Costs">
