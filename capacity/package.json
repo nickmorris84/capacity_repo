@@ -1,0 +1,9 @@
+{
+  "name": "capacity-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node tests/engine.test.js",
+    "build:html": "echo 'placeholder until P5' && exit 1"
+  }
+}
