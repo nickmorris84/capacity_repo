@@ -98,3 +98,21 @@ Storage adapter in priority order: artifact `window.storage` (async get/set/dele
 - Model notes tab explaining E1–E3 in plain language.
 
 Ask up to 5 clarifying questions only if something materially affects architecture; otherwise begin with P1.
+
+## 14. Revision 1
+
+14.1 Strategy model. Strategies become a config array; built-ins S1–S4 remain, and users add custom strategies by parameterising the common types: {name, baseType: meet|buffer|backfill|manual|schedule, bufferPct, excludedQueueIds[], segments[]}. The active strategy is a schedule — an ordered list of segments [{fromWeek, strategyId}] with a single segment (week 1) as the default, so "S3 until week 10, S1 after" is first-class. `decideHiring` looks up the strategy in force at each decision week; cohorts already in the pipeline when a pivot happens simply continue (realistic). A schedule can be saved as a named strategy (baseType "schedule") so merged approaches are reusable and comparable. The four comparison strategies remain pure single-type runs; the active plan may be a schedule.
+
+14.2 Supported queues. Each queue has resourcing mode `resourced | supported`. Supported ⇒ starting HC forced 0, hiring strategies and the allocator skip it entirely, and it is served only from supporter queues' spare hours and service teams. Supported queues keep their SLA RAG and appear in findings, badged "supported".
+
+14.3 Support routing. Replace `crossSkill` with `supports: [{queueId, priority, maxSharePct?}]` (outbound). Allocation is by priority tier, proportional within a tier: recipients with priority 1 are considered first; if a tier's combined need exceeds the donor's spare, the spare splits proportionally to each recipient's deficit; any remainder flows to the next tier. `maxSharePct` is an optional cap on the share of the donor's spare any one recipient may take. A donor never drops below its own requirement. Derive and expose the inbound "supported by" list per queue.
+
+14.4 Global starting HC. Settings gains `globalStartingHC`. Queues with blank HC receive shares of (global − Σ explicit) workload-weighted: volume × AHT ÷ concurrency; explicit per-queue HC always wins.
+
+14.5 Scenarios. `growth` gains `stopWeek` (multiplier holds flat after it). New additional types (existing scenarios untouched): `growthManual` {weeklyPct: sparse map week→%} — in weeks where a value exists it overrides the compounding growth multiplier for that week only; `freezeManual` {weeks: number[]} — no requisitions raised in listed weeks.
+
+14.6 Reporting fields. Weekly per-queue record additionally exposes: startingHC (week-0 resolved HC), active (= trained + ramping, excluding trainees), leavers # and attrition %/month in effect, volume on status cards. All "Paid/Req" labels become Active/Req; the coverage chart is titled simply Coverage. Hiring summary aggregates per queue and for Voice / Digital / Overall: volume, HC required, hiring (pipeline+reqs), training, active, agent churn (# and %).
+
+14.7 Views vs snapshots. Runs are renamed Snapshots: frozen results for before/after comparison and sharing. Views remain live scenario lenses on the current model. One shared comparison surface; one line of UI copy stating the distinction.
+
+14.8 Print and package. The global context bar carries a "Print / PDF this page" action on every tab (per-tab print stylesheet; charts render at fixed widths in print). The Summary tab's own button prints the Summary layout. The full Excel package (workbook per SPEC §9: Summary, Strategy comparison, Findings & risks, Parameters, Volumes, one tab per queue) remains exportable and importable after the restructure, reachable from both Settings and Snapshots.
