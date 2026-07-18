@@ -145,5 +145,72 @@ selectors on the P4 data tables can still be layered on top of this state.
 Notes for P4+: `sim.allocTrace` is fully surfaced now. The per-queue data table
 (§6), Report/PDF (§8), xlsx round-trip (§9) and Model-notes tab remain unbuilt.
 
-## P4 — Data + documents: not started
+## P4 — Data + documents: ✅ COMPLETE (P1–P3 gates still green; new P4 gate green)
+
+Data views, executive documents and Excel/file round-trip over the P3 app.
+
+Shared reporting layer (ui/reporting.js, DOM-free, one source of truth):
+- `buildWeeklyRows` — one row per week per queue with every §6 datapoint (base /
+  seasonal × / deflected / redial / total volume, coverage, ASA-or-response, SL,
+  abandon, occupancy, backlog, burnout, leavers, attrition-in-effect, reqs
+  raised, hires start, in training, ramping, trained, paid vs required FTE, run
+  cost, churn cost, customers lost, status). "Hires start" is derived from reqs
+  raised shifted by req-to-start (the engine doesn't store it, so no engine edit).
+- `columnsFor` — the column model grouped Week/Demand/Service/People/Money/Status,
+  Service group tailored per queue type; used by the Data table AND the per-queue
+  Excel/CSV sheets.
+- `buildVerdict` (recommended = lowest all-in that holds SLA, else least-bad, via
+  views.recommendStrategy), `buildAudienceBlocks` (Finance/HR/Business), and
+  `buildRiskRegister` (cap-infeasibility, tipping point, per-queue SLA breach,
+  burnout peaks, over-capacity carrying cost + time-to-rectify, deflection
+  spirals) with £/SLA severity and a suggested lever.
+
+Data tab (ui/components/DataTab.jsx): per-queue weekly table, queue + view
+selectors, column-group picker (all on by default), sticky header, horizontal
+scroll, per-table CSV export. Read-only — editing stays in the editor tabs.
+
+Summary tab (ui/components/SummaryTab.jsx): auto verdict paragraph with RAG
+counts, Finance/HR/Business stat blocks, and a sortable (risk/week/severity)
+risk register.
+
+Report tab (ui/components/ReportTab.jsx): executive summary, key findings, risk
+register, strategy comparison (table + cumulative all-in chart), a per-queue
+section (KPI row + coverage and headcount charts), and an assumptions table.
+Report charts render at a FIXED 640px width (never ResponsiveContainer, which
+collapses in print), each in a `break-inside: avoid` section; print stylesheet
+hides the chrome; a "Print / Save as PDF" button calls window.print() with the
+iPhone save-to-Files hint.
+
+Files/exports (ui/exports.js pure builders + ui/components/FilesCard.jsx):
+- One workbook (SheetJS): Summary, Strategy comparison, Findings & risks,
+  Parameters (path/setting/value), Volumes (week × queue), then one sheet per
+  queue with the full §6 table. Import reads back ONLY Parameters + Volumes and
+  path-patches the config (output sheets ignored).
+- Path-addressed patching by queue id (`queues.<id>.<field>`, `.wf.*`, `.burn.*`)
+  plus engine/hiring/costs/cx/loops/seasonality scalars; values coerced to the
+  existing type. Volumes export/import is the RAW per-week daily base (not the
+  seasonality-baked sim output) so it round-trips through weeklyVolumes with no
+  double-counting.
+- Config JSON export/import, saved-run .json export/import (compactRun + config;
+  importing loads its config — the P5 compare UI consumes the same shape), and
+  CSV fallbacks (per-queue results, parameters, volumes). Pure builders return
+  bytes/strings; a single anchor-based download wrapper is the only DOM touch.
+
+Gate: tests/documents.test.js (JSDOM) — mounts the app; asserts the Data table
+renders with a working column-group toggle; the Summary verdict + sortable risk
+register render; the Report charts render at the fixed 640px surface width; the
+print button calls window.print(); every export button fires a download (anchor
+mocked, blob captured); the captured workbook parses with xlsx and has the
+expected sheet list (5 fixed + one per queue); a modified Parameters sheet
+re-imports and the value is applied (and a neighbouring queue is untouched); and
+a modified workbook fed through the Files card's file input propagates into the
+live Data table. Zero console errors throughout. `npm test` runs engine → ui →
+strategies → documents; all green (20 / 12 / 11 / 11). tests/ui.test.js updated
+for the 11-tab set.
+
+Notes for P5: the storage adapter, saved-runs-in-storage with the index, preset/
+view persistence, the saved-run compare UI, the standalone HTML build, and the
+full cross-tab JSDOM interaction test remain. runJSON/parseRunJSON already
+produce/consume the shareable run-file shape the compare view will use.
+
 ## P5 — Persistence + packaging: not started

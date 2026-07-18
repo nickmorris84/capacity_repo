@@ -200,8 +200,22 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 }
 @media (max-width: 420px) { .qcards { grid-template-columns: 1fr; } }
 
+/* ---- report ---- */
+.report { display: flex; flex-direction: column; gap: 16px; }
+.report-section { break-inside: avoid; }
+.report-section h2 { font-size: 20px; }
+.report-section h3 { font-size: 15px; margin: 0 0 10px; }
+.report-section h4 { font-size: 13px; margin: 16px 0 8px; color: var(--muted); }
+.report-chart { overflow-x: auto; margin: 4px 0; }
+
 @media print {
-  .topbar, .tabs, .recalc, .btnbar, .hint { display: none !important; }
+  .topbar, .tabs, .recalc, .btnbar, .hint, .topctrls { display: none !important; }
+  body { background: #fff; font-size: 12px; }
+  .main { padding: 0; max-width: none; }
   .card, .chart { box-shadow: none; break-inside: avoid; }
+  .report-section { break-inside: avoid; page-break-inside: avoid; }
+  .report-chart { overflow: visible; }
+  /* only the report panel prints; other tab panels are already hidden */
+  [role="tabpanel"][hidden] { display: none !important; }
 }
 `;

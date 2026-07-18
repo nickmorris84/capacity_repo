@@ -7,6 +7,10 @@ import { STRATEGIES, viewName } from "./views.js";
 import { PlanTab } from "./components/PlanTab.jsx";
 import { IntradayTab } from "./components/IntradayTab.jsx";
 import { StrategiesTab } from "./components/StrategiesTab.jsx";
+import { DataTab } from "./components/DataTab.jsx";
+import { SummaryTab } from "./components/SummaryTab.jsx";
+import { ReportTab } from "./components/ReportTab.jsx";
+import { FilesCard } from "./components/FilesCard.jsx";
 import { QueuesEditor } from "./editors/QueuesEditor.jsx";
 import { WorkforceEditor } from "./editors/WorkforceEditor.jsx";
 import { MoneyEditor } from "./editors/MoneyEditor.jsx";
@@ -17,6 +21,9 @@ const TABS = [
   { id: "plan", label: "Plan" },
   { id: "intraday", label: "Intraday" },
   { id: "strategies", label: "Strategies" },
+  { id: "data", label: "Data" },
+  { id: "summary", label: "Summary" },
+  { id: "report", label: "Report" },
   { id: "queues", label: "Queues" },
   { id: "workforce", label: "Workforce" },
   { id: "money", label: "Money & engine" },
@@ -112,6 +119,8 @@ export default function App() {
                 onActivateStrategy={setActiveStrategy}
                 comparison={{ dimension: comparison.dimension, overlayViewIds: safeOverlay }}
                 setComparison={setComparison}
+                onSelectView={setActiveViewId}
+                onImportConfig={setConfig}
                 intradayPresets={intradayPresets}
                 setIntradayPresets={setIntradayPresets}
                 seasonalityPresets={seasonalityPresets}
@@ -140,6 +149,20 @@ function TabBody(props) {
         comparison={props.comparison}
         setComparison={props.setComparison}
       />
+    );
+    case "data": return (
+      <DataTab sim={activeSim} config={config} activeViewId={props.activeViewId} views={config.views} onSelectView={props.onSelectView} />
+    );
+    case "summary": return (
+      <SummaryTab sim={activeSim} strategySims={simSet.strategySims} config={config} activeStrategy={props.activeStrategy} activeViewId={props.activeViewId} />
+    );
+    case "report": return (
+      <>
+        <ReportTab sim={activeSim} strategySims={simSet.strategySims} config={config} activeStrategy={props.activeStrategy} activeViewId={props.activeViewId} />
+        <div style={{ marginTop: 16 }}>
+          <FilesCard sim={activeSim} strategySims={simSet.strategySims} config={config} activeStrategy={props.activeStrategy} activeViewId={props.activeViewId} onImportConfig={props.onImportConfig} />
+        </div>
+      </>
     );
     case "queues": return <QueuesEditor config={config} ops={ops} intradayPresets={props.intradayPresets} setIntradayPresets={props.setIntradayPresets} />;
     case "workforce": return <WorkforceEditor config={config} ops={ops} />;
