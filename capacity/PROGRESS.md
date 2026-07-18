@@ -213,4 +213,66 @@ view persistence, the saved-run compare UI, the standalone HTML build, and the
 full cross-tab JSDOM interaction test remain. runJSON/parseRunJSON already
 produce/consume the shareable run-file shape the compare view will use.
 
-## P5 — Persistence + packaging: not started
+## P5 — Persistence + packaging: ✅ COMPLETE — SHIPPED (all five gates green)
+
+Final gate tally: **P1 20 · P2 12 · P3 9 · P4 11 · P5/§13 20 = 72 tests, 0 failures.**
+`npm test` runs engine → ui → strategies → documents → harness.
+
+Storage adapter (ui/storage.js): artifact `window.storage` → `localStorage` →
+in-memory (with a visible "downloads are your durable save" notice). Uniform
+async get/set/del/list; JSON round-tripped; a missing key resolves to undefined
+(the artifact store throws on missing — caught). Slugged keys; `sim-index` +
+one `sim-<slug>` per run; `presets-intraday`, `presets-seasonality`, `views`.
+
+Persistence (App): preset libraries, scenario views and saved runs all hydrate
+on mount and persist through the adapter (only the user-authored subsets of
+presets/views are written; built-ins come from code). Verified in a real browser:
+two saved runs survive a page reload via localStorage.
+
+Saved runs + compare (ui/saved-runs.js, components/RunsTab.jsx): save the current
+plan (E4 — snapshots `activeSim.config`, never the live config), load-settings,
+download (a shareable run file the importer already reads), delete, refresh.
+Compare of ticked runs: totals delta table (vs baseline), cumulative all-in
+overlay, and per-queue blocks matched by NAME (red weeks, avg coverage, worst
+ASA/SL, cost, churn, coverage chart). The compare tick set lives in App, above
+the tabs, so switching tabs never clears it — the v3 defect this phase named.
+
+Model notes tab (components/NotesTab.jsx): E1–E3 explained in plain language plus
+the other key mechanics (§13 requirement).
+
+Parameters-CSV import (exports.parseParametersCSV + a robust CSV parser) added to
+the Files card, completing the §13 "load a parameters CSV back" step.
+
+Packaging (scripts/build.js, `npm run build:html`): from the single source
+ui/main.jsx it emits **dist/capacity-sim.html** (self-contained, offline,
+minified, production, React + recharts + xlsx + engine + UI all inlined into one
+`<script>` with `</script>` escaped and a responsive viewport meta — ~1.17 MB)
+and **dist/capacity-sim.jsx** (the React-artifact form: one bundled ESM file
+importing react/react-dom/recharts/xlsx from the host — ~242 KB). Both come from
+the same build so they cannot drift.
+
+§13 harness (tests/harness.test.js): the complete checklist run against BOTH the
+source (dev bundle + React `act`) and the built dist/capacity-sim.html (production,
+self-contained, driven with native events in its own JSDOM realm with a
+ResizeObserver shim) — click every tab; add/duplicate/delete a queue; add + toggle
+a scenario; save a run, tick it, see the per-queue comparison render; confirm the
+tick survives a tab switch; fire every export; load a parameters CSV back; render
+the print view — asserting zero console errors on both targets, and that the
+inlined bundle has exactly one literal `</script>`.
+
+Bug found & fixed during P5 integration (in the P3 sim-set hook): switching the
+active strategy while the comparison dimension was "strategies" left the set of
+needed sims unchanged, so the memoised recompute effect never re-ran and the
+dashboard's activeSim stayed on the old strategy — "active strategy drives every
+tab" was silently broken in that mode (the P3 gate only exercised the switch in
+"views" mode). Fixed by keying the effect on the active selection, not just the
+needed-sims set; the P3 gate now asserts the switch in strategies mode too, and
+the real-browser saved-run compare confirms S1 vs S2 now differ correctly.
+
+Deliverables: dist/capacity-sim.jsx and dist/capacity-sim.html (committed).
+
+## Build & run
+- `npm test` — all five phase gates.
+- `npm run build:html` — regenerate dist/ deliverables from source.
+- Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
+  into a React artifact host.

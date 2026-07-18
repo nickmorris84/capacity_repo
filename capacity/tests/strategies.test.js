@@ -134,6 +134,12 @@ async function run() {
   });
 
   await t("switching the active strategy changes the dashboard numbers", async () => {
+    // Force the comparison dimension back to strategies first: in that mode the
+    // set of needed sims is unchanged by a strategy switch, so this is the case
+    // that must still rebuild the dashboard snapshot.
+    goto("Strategies");
+    setDimension("strategies");
+    await settle(50);
     goto("Plan");
     await settle(50);
     const planPanel = () => document.querySelector('[data-testid="plan-panel"]');

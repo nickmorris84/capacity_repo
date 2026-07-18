@@ -26,3 +26,4 @@ const el = typeof document !== "undefined" ? document.getElementById("root") : n
 if (el) mount(el);
 
 export { App };
+export default App;

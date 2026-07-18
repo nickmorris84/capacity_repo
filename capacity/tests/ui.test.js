@@ -104,7 +104,7 @@ async function settle(ms = 400) {
 // ---------------- drive the app ----------------
 async function run() {
   const tabs = [...document.querySelectorAll('[role="tab"]')];
-  t("all tabs present", () => eq(tabs.length, 11, "tab count"));
+  t("all tabs present", () => eq(tabs.length, 13, "tab count"));
 
   t("clicking every tab shows its panel and hides the rest", () => {
     for (const tabEl of tabs) {

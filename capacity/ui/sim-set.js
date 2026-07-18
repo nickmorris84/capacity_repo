@@ -93,8 +93,12 @@ export function useStrategyViews(config, ctrl, delay = 160) {
       setPending(false);
     }, delay);
     return () => clearTimeout(id);
+    // Depend on the active selection too, not just the set of sims to compute:
+    // switching the active strategy in "strategies" mode leaves `needed`
+    // unchanged (all four are always needed) but must still rebuild the snapshot
+    // so the dashboard's activeSim tracks the new strategy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needed.map((x) => x.k).join("#")]);
+  }, [hash, activeStrategy, activeViewId, dimension, overlayViewIds.join(",")]);
 
   return { ...snap, pending };
 }

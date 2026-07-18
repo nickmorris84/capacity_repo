@@ -3,6 +3,7 @@ import { Card } from "./primitives.jsx";
 import {
   buildWorkbook, parseWorkbook, applyWorkbookImport,
   parametersCSV, volumesCSV, configJSON, parseConfigJSON, runJSON, parseRunJSON,
+  parseParametersCSV, applyParameters,
   downloadBytes, downloadText,
 } from "../exports.js";
 
@@ -25,7 +26,7 @@ const readText = (file) => new Promise((res, rej) => {
    inputs. */
 export function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, onImportConfig }) {
   const [msg, setMsg] = useState(null);
-  const wbInput = useRef(null), cfgInput = useRef(null), runInput = useRef(null);
+  const wbInput = useRef(null), cfgInput = useRef(null), runInput = useRef(null), csvInput = useRef(null);
   const say = (text, tone = "ok") => setMsg({ text, tone });
 
   const onWorkbook = () => {
@@ -48,6 +49,13 @@ export function FilesCard({ sim, strategySims, config, activeStrategy, activeVie
     try { const o = parseRunJSON(await readText(file)); onImportConfig(o.config); say("Saved run loaded — its config is now active."); }
     catch (e) { say("Run import failed: " + e.message, "err"); }
   };
+  const importParamsCSV = async (file) => {
+    try {
+      const rows = parseParametersCSV(await readText(file));
+      onImportConfig(applyParameters(config, rows));
+      say(`Imported ${rows.length} parameter(s) from CSV.`);
+    } catch (e) { say("Parameters CSV import failed: " + e.message, "err"); }
+  };
 
   return (
     <Card title="Files — export & import" hint="One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.">
@@ -67,9 +75,11 @@ export function FilesCard({ sim, strategySims, config, activeStrategy, activeVie
         <button type="button" className="btn" onClick={() => wbInput.current && wbInput.current.click()}>Import Excel (Parameters + Volumes)</button>
         <button type="button" className="btn" onClick={() => cfgInput.current && cfgInput.current.click()}>Import config JSON</button>
         <button type="button" className="btn" onClick={() => runInput.current && runInput.current.click()}>Import saved run</button>
+        <button type="button" className="btn" onClick={() => csvInput.current && csvInput.current.click()}>Import parameters CSV</button>
         <input ref={wbInput} type="file" accept=".xlsx" data-testid="import-workbook" style={{ display: "none" }} onChange={(e) => e.target.files[0] && importWorkbook(e.target.files[0])} />
         <input ref={cfgInput} type="file" accept=".json" data-testid="import-config" style={{ display: "none" }} onChange={(e) => e.target.files[0] && importConfig(e.target.files[0])} />
         <input ref={runInput} type="file" accept=".json" data-testid="import-run" style={{ display: "none" }} onChange={(e) => e.target.files[0] && importRun(e.target.files[0])} />
+        <input ref={csvInput} type="file" accept=".csv" data-testid="import-params-csv" style={{ display: "none" }} onChange={(e) => e.target.files[0] && importParamsCSV(e.target.files[0])} />
       </div>
 
       {msg && <p className="note" style={{ marginTop: 12, color: msg.tone === "err" ? "var(--red)" : undefined }}>{msg.text}</p>}
