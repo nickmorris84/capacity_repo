@@ -151,12 +151,25 @@ function StrategyEditor({ config, ops, activeStrategyId }) {
             </summary>
             <div className="erow-b">
               <p className="note">{strategyBlurb(s)}</p>
-              {!s.builtin && (
-                <div className="fieldrow">
-                  <TextField label="Name" value={s.name} onChange={(v) => ops.patchStrategy(s.id, ["name"], v)} />
-                  {s.baseType === "buffer" && <NumField label="Buffer" unit="%" value={+(((s.bufferPct != null ? s.bufferPct : config.hiring.buffer)) * 100).toFixed(0)} onChange={(v) => ops.patchStrategy(s.id, ["bufferPct"], v / 100)} />}
-                </div>
+              {s.baseType === "manual" && (
+                <p className="note" data-testid={"strat-manual-note-" + s.id}>Manual (S4): simulates exactly the hiring plan you enter on each queue, and ignores the hiring cap.</p>
               )}
+              {/* §24.4 editable parameters on EVERY strategy (built-ins included). */}
+              <div className="fieldrow">
+                {!s.builtin && <TextField label="Name" value={s.name} onChange={(v) => ops.patchStrategy(s.id, ["name"], v)} />}
+                {s.baseType === "buffer" && (
+                  <NumField label="Buffer" unit="%" id={"strat-buffer-" + s.id}
+                    value={+(((s.bufferPct != null ? s.bufferPct : config.hiring.buffer)) * 100).toFixed(0)}
+                    onChange={(v) => ops.patchStrategy(s.id, ["bufferPct"], v / 100)}
+                    hint="Target = requirement × (1 + buffer). Editable per strategy." />
+                )}
+                {s.baseType === "backfill" && (
+                  <NumField label="Forward months" id={"strat-fwd-" + s.id} min={1} max={6}
+                    value={s.forwardMonths != null ? s.forwardMonths : 3}
+                    onChange={(v) => ops.patchStrategy(s.id, ["forwardMonths"], Math.max(1, Math.min(6, Math.round(v || 3))))}
+                    hint="How far ahead (1–6 months) the leaver projection looks when sizing replacement hiring." />
+                )}
+              </div>
               {["meet", "buffer", "backfill", "manual"].includes(s.baseType) && (
                 <div>
                   <div className="lab" style={{ marginBottom: 6, display: "flex", gap: 6 }}>Excluded queues <Hint text="Queues this strategy raises no requisitions for." /></div>

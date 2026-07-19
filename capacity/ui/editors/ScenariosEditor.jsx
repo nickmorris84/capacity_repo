@@ -1,13 +1,8 @@
 import { useState } from "react";
 import { NumField, TextField, SelectField, Toggle, Card, Hint } from "../components/primitives.jsx";
-import { groupScenarioIds } from "../views.js";
+import { groupScenarioIds, channelOfQueue } from "../views.js";
 
-const LEGACY_LABELS = {
-  growth: "Growth %/mo", launch: "Product launch", p1: "P1 incident",
-  forecastError: "Forecast error", attritionShock: "Attrition shock",
-  hiringFreeze: "Hiring freeze", reducedTraining: "Reduced training",
-  growthManual: "Manual weekly growth", freezeManual: "Manual freeze",
-};
+const CHANNELS = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
 
 // Sparse week grid — click weeks to add/remove entries; optional value editor.
 function WeekGrid({ horizon, value, onToggle, render }) {
@@ -28,11 +23,11 @@ function WeekGrid({ horizon, value, onToggle, render }) {
   );
 }
 
-// §19 unified scenario parameter block.
-function UnifiedParams({ s, ti, ops, horizon, config }) {
+// §24.8 a single factor (unified scenario) inside a group — scope lives on the
+// group, so the factor block carries no scope of its own.
+function FactorParams({ s, ti, ops, horizon }) {
   const p = s.p || {};
   const set = (k, v) => ops.patchScenario(ti, ["p", k], v);
-  const scope = s.scope || "all";
   return (
     <>
       <div className="fieldrow">
@@ -48,8 +43,6 @@ function UnifiedParams({ s, ti, ops, horizon, config }) {
       <div className="fieldrow">
         <NumField label="Start week" value={s.startWeek + 1} min={1} onChange={(v) => ops.patchScenario(ti, ["startWeek"], Math.max(0, v - 1))} />
         <NumField label="Stop week" value={s.stopWeek == null ? "" : s.stopWeek + 1} onChange={(v) => ops.patchScenario(ti, ["stopWeek"], v ? v - 1 : null)} hint="Blank = runs to the horizon." />
-        <SelectField label="Scope" value={scope === "all" || scope.kind === "all" ? "all" : scope.kind} onChange={(v) => ops.patchScenario(ti, ["scope"], v === "all" ? "all" : { kind: v, channel: "voice", brandId: (config.brands[0] || {}).id, queueIds: [] })}
-          options={[{ value: "all", label: "All queues" }, { value: "template", label: "Channel" }, { value: "brand", label: "Brand" }, { value: "queues", label: "Queue list" }]} />
       </div>
       {s.mechanism === "step" && s.parameter !== "people" && s.parameter !== "profileShares" && (
         <NumField label="Step value" unit="%" value={+((p.value || 0) * 100).toFixed(1)} onChange={(v) => set("value", v / 100)} />
@@ -78,80 +71,75 @@ function UnifiedParams({ s, ti, ops, horizon, config }) {
   );
 }
 
-// Legacy-typed scenario parameters (kept so old configs and quick adds work).
-function LegacyParams({ s, ti, ops, horizon }) {
-  const set = (k, v) => ops.patchScenario(ti, ["p", k], v);
-  const p = s.p || {};
-  switch (s.type) {
-    case "growth": return <NumField label="Rate" unit="%/mo" value={+((p.rate || 0) * 100).toFixed(1)} onChange={(v) => set("rate", v / 100)} />;
-    case "growthManual": {
-      const wp = p.weeklyPct || {};
-      return (
-        <div style={{ gridColumn: "1 / -1", width: "100%" }}>
-          <div className="lab" style={{ marginBottom: 6 }}>Weekly % overrides — click a week, then set its %</div>
-          <WeekGrid horizon={horizon} value={(w) => wp[w] != null} onToggle={(w) => { const n = { ...wp }; if (n[w] != null) delete n[w]; else n[w] = 0.1; set("weeklyPct", n); }}
-            render={(w) => <input type="number" className="inp" style={{ width: 48, fontSize: 11, padding: "2px 4px" }} value={+(wp[w] * 100).toFixed(0)} onChange={(e) => set("weeklyPct", { ...wp, [w]: Number(e.target.value) / 100 })} aria-label={"Week " + (w + 1) + " %"} />} />
-        </div>
-      );
-    }
-    case "freezeManual": {
-      const weeks = p.weeks || [];
-      return (
-        <div style={{ gridColumn: "1 / -1", width: "100%" }}>
-          <div className="lab" style={{ marginBottom: 6 }}>Tick the weeks with no hiring</div>
-          <WeekGrid horizon={horizon} value={(w) => weeks.includes(w)} onToggle={(w) => set("weeks", weeks.includes(w) ? weeks.filter((x) => x !== w) : [...weeks, w].sort((a, b) => a - b))} />
-        </div>
-      );
-    }
-    case "launch": return <><NumField label="Ramp" unit="wk" value={p.ramp} onChange={(v) => set("ramp", v)} /><NumField label="Peak" unit="%" value={+(p.peak * 100).toFixed(0)} onChange={(v) => set("peak", v / 100)} /><NumField label="Decay" unit="wk" value={p.decay} onChange={(v) => set("decay", v)} /></>;
-    case "p1": return <><NumField label="Spike" unit="%" value={+(p.spike * 100).toFixed(0)} onChange={(v) => set("spike", v / 100)} /><NumField label="Days" value={p.days} min={1} max={7} onChange={(v) => set("days", v)} /></>;
-    case "forecastError": return <NumField label="Error" unit="%" value={+(p.error * 100).toFixed(0)} onChange={(v) => set("error", v / 100)} />;
-    case "attritionShock": return <NumField label="Added attrition" unit="%/mo" value={+(p.add * 100).toFixed(1)} onChange={(v) => set("add", v / 100)} />;
-    case "hiringFreeze": return <NumField label="Duration" unit="wk" value={p.weeks} onChange={(v) => set("weeks", v)} />;
-    case "reducedTraining": return <><NumField label="Cut weeks" value={p.cutWeeks} onChange={(v) => set("cutWeeks", v)} /><NumField label="AHT penalty" unit="%" value={+(p.ahtPenalty * 100).toFixed(0)} onChange={(v) => set("ahtPenalty", v / 100)} /></>;
-    default: return null;
-  }
+// §24.8 scope targets — brands / channels / queues; the group's factors inherit.
+function ScopeEditor({ config, group, ops }) {
+  const scope = group.scope || {};
+  const chip = (kind, id, label, on) => (
+    <label key={kind + id} className="switch">
+      <input type="checkbox" checked={on} onChange={(e) => ops.toggleGroupScopeTarget(group.id, kind, id, e.target.checked)} data-testid={"scope-" + kind + "-" + id} />
+      <span className="track" aria-hidden="true" /><span>{label}</span>
+    </label>
+  );
+  const anyTarget = (scope.brandIds || []).length || (scope.channels || []).length || (scope.queueIds || []).length;
+  return (
+    <div>
+      <div className="lab" style={{ marginBottom: 6 }}>Targets <Hint text="Brands, channels or queues this group's factors apply to. Empty = the whole operation." /></div>
+      <div className="rowflex" style={{ flexWrap: "wrap", marginBottom: 6 }}>
+        {(config.brands || []).map((b) => chip("brand", b.id, "Brand: " + b.name, (scope.brandIds || []).includes(b.id)))}
+      </div>
+      <div className="rowflex" style={{ flexWrap: "wrap", marginBottom: 6 }}>
+        {CHANNELS.map((c) => chip("channel", c.key, c.label, (scope.channels || []).includes(c.key)))}
+      </div>
+      <div className="rowflex" style={{ flexWrap: "wrap" }}>
+        {config.queues.map((q) => chip("queue", q.id, q.name, (scope.queueIds || []).includes(q.id)))}
+      </div>
+      {!anyTarget && <p className="note" style={{ marginTop: 6 }}>No targets — this group applies to the whole operation.</p>}
+    </div>
+  );
 }
 
-// §19 groups manager (replaces scenario views).
-function GroupsManager({ config, ops }) {
-  const [name, setName] = useState("");
-  const enabledIds = config.scenarios.filter((s) => s.enabled).map((s) => s.id);
+function GroupCard({ config, group, ops, horizon }) {
+  const factorIds = Array.isArray(group.scenarioIds) ? group.scenarioIds : null;
+  const editable = !group.builtin && factorIds != null;
+  const factors = (factorIds || []).map((id) => config.scenarios.findIndex((s) => s.id === id)).filter((i) => i >= 0);
   return (
-    <Card title="Scenario groups" hint="A group bundles scenarios; it becomes a row of the decision matrix and a choice in the context bar. Built-ins: Plan of record (tracks the enabled set) and No scenarios."
-      right={<div className="rowflex"><input type="text" className="inp" style={{ width: 160 }} placeholder="new group name" value={name} onChange={(e) => setName(e.target.value)} data-testid="group-name" /><button type="button" className="btn sm primary" disabled={!name.trim()} onClick={() => { ops.addGroup(name.trim(), enabledIds); setName(""); }} data-testid="add-group">Save enabled as group</button></div>}>
-      <div className="rows">
-        {(config.groups || []).map((g) => {
-          const ids = groupScenarioIds(config, g.id);
-          const editable = !g.builtin && Array.isArray(g.scenarioIds);
-          return (
-            <div className="erow" key={g.id}>
-              <div className="erow-h">
-                {g.builtin ? <span className="pill">built-in</span> : <span className="tag soft">saved</span>}
-                {editable ? <input type="text" className="inp" style={{ maxWidth: 240 }} value={g.name} aria-label="Group name" onChange={(e) => ops.renameGroup(g.id, e.target.value)} /> : <strong>{g.name}</strong>}
-                <span className="pill">{ids.length} scenario(s)</span>
-                <span className="spacer" />
-                {!g.builtin && <button type="button" className="btn sm danger" onClick={() => ops.deleteGroup(g.id)}>Delete</button>}
-              </div>
-              <div className="erow-b">
-                {!Array.isArray(g.scenarioIds) && <p className="note">Tracks the live enabled set.</p>}
-                {editable && (
-                  <div className="rowflex" style={{ flexWrap: "wrap" }}>
-                    {config.scenarios.map((s) => (
-                      <label key={s.id} className="switch">
-                        <input type="checkbox" checked={g.scenarioIds.includes(s.id)} onChange={(e) => ops.toggleGroupScenario(g.id, s.id, e.target.checked)} />
-                        <span className="track" aria-hidden="true" /><span>{s.name}</span>
-                      </label>
-                    ))}
-                    {config.scenarios.length === 0 && <span className="note" style={{ padding: "6px 10px" }}>No scenarios to add.</span>}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+    <div className="erow" data-testid="group-card">
+      <div className="erow-h">
+        {group.builtin ? <span className="pill">built-in</span> : <span className="tag soft">group</span>}
+        {editable ? <input type="text" className="inp" style={{ maxWidth: 240 }} value={group.name} aria-label="Group name" onChange={(e) => ops.renameGroup(group.id, e.target.value)} /> : <strong>{group.name}</strong>}
+        <span className="pill">{groupScenarioIds(config, group.id).length} factor(s)</span>
+        <span className="spacer" />
+        {editable && <button type="button" className="btn sm primary" onClick={() => ops.addFactor(group.id)} data-testid={"add-factor-" + group.id}>+ Add factor</button>}
+        {!group.builtin && <button type="button" className="btn sm danger" onClick={() => ops.deleteGroup(group.id)}>Delete</button>}
       </div>
-    </Card>
+      <div className="erow-b">
+        {!factorIds && <p className="note">Built-in group — tracks the live enabled set of every group's factors.</p>}
+        {editable && (
+          <>
+            <ScopeEditor config={config} group={group} ops={ops} />
+            <hr className="sep" style={{ margin: "12px 0" }} />
+            <div className="rows" data-testid="scenario-rows">
+              {factors.map((ti) => {
+                const s = config.scenarios[ti];
+                return (
+                  <div className="erow" key={s.id}>
+                    <div className="erow-h">
+                      <Toggle checked={s.enabled} onChange={(v) => ops.patchScenario(ti, ["enabled"], v)} />
+                      <input type="text" className="inp" style={{ maxWidth: 220 }} value={s.name} aria-label="Factor name" onChange={(e) => ops.patchScenario(ti, ["name"], e.target.value)} />
+                      <span className="pill">{s.parameter} · {s.mechanism}</span>
+                      <span className="spacer" />
+                      <button type="button" className="btn sm danger" onClick={() => ops.deleteScenario(s.id)}>Remove</button>
+                    </div>
+                    <div className="erow-b"><FactorParams s={s} ti={ti} ops={ops} horizon={horizon} /></div>
+                  </div>
+                );
+              })}
+              {factors.length === 0 && <p className="note">No factors yet. Add one above.</p>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -159,7 +147,7 @@ function GroupsManager({ config, ops }) {
 function ParameterTimeline({ config }) {
   const N = config.engine.horizonWeeks;
   const enabled = config.scenarios.filter((s) => s.enabled);
-  if (!enabled.length) return <p className="note">No scenarios enabled — nothing in force.</p>;
+  if (!enabled.length) return <p className="note">No factors enabled — nothing in force.</p>;
   const fires = (s, w) => {
     const start = s.startWeek || 0;
     const stop = s.stopWeek != null ? s.stopWeek : (s.p && s.p.stopWeek != null ? s.p.stopWeek : null);
@@ -171,7 +159,7 @@ function ParameterTimeline({ config }) {
   return (
     <div className="tbl-wrap">
       <table className="data" data-testid="parameter-timeline">
-        <thead><tr><th style={{ textAlign: "left" }}>Scenario</th>{weeks.filter((w) => w % 4 === 0).map((w) => <th key={w}>{w + 1}</th>)}</tr></thead>
+        <thead><tr><th style={{ textAlign: "left" }}>Factor</th>{weeks.filter((w) => w % 4 === 0).map((w) => <th key={w}>{w + 1}</th>)}</tr></thead>
         <tbody>
           {enabled.map((s) => (
             <tr key={s.id}>
@@ -185,71 +173,26 @@ function ParameterTimeline({ config }) {
   );
 }
 
+/* Scenarios tab (§24.8), group-first. Everything is a scenario GROUP: a named,
+   scoped bundle of factors. Create a group, target it at brands / channels /
+   queues, then add factors inside it — there are no orphan line-item scenarios.
+   Built-in groups (Plan of record, No scenarios) remain. */
 export function ScenariosEditor({ config, ops }) {
+  const [name, setName] = useState("");
   const horizon = config.engine.horizonWeeks;
   return (
     <div className="grid" style={{ gap: 14 }}>
       <div className="btnbar">
-        <SelectField label="Add scenario" value="" onChange={(v) => v && (v === "unified" ? ops.addUnifiedScenario() : ops.addScenario(v))}
-          options={[{ value: "", label: "Choose a type…" }, { value: "unified", label: "Unified" }, ...Object.entries(LEGACY_LABELS).map(([value, label]) => ({ value, label }))]} />
-        <span className="note" style={{ padding: "6px 10px", alignSelf: "flex-end" }}>{config.scenarios.filter((s) => s.enabled).length} enabled of {config.scenarios.length}.</span>
+        <input type="text" className="inp" style={{ maxWidth: 220 }} placeholder="new scenario group name" value={name} onChange={(e) => setName(e.target.value)} data-testid="group-name" />
+        <button type="button" className="btn primary" onClick={() => { ops.addGroup(name.trim() || "New group", []); setName(""); }} data-testid="add-group">+ New scenario group</button>
+        <span className="note" style={{ padding: "6px 10px" }}>A group scopes its factors to brands, channels or queues. {config.groups.length} group(s).</span>
       </div>
 
-      <div className="rows" data-testid="scenario-rows">
-        {config.scenarios.map((s, ti) => (
-          <div className="erow" key={s.id}>
-            <div className="erow-h">
-              <Toggle checked={s.enabled} onChange={(v) => ops.patchScenario(ti, ["enabled"], v)} />
-              <strong>{s.name}</strong>
-              <span className="pill">{s.type === "unified" ? `${s.parameter} · ${s.mechanism}` : (LEGACY_LABELS[s.type] || s.type)}</span>
-              {s.enabled && <span className="tag soft">enabled</span>}
-              <span className="spacer" />
-              <button type="button" className="btn sm danger" onClick={() => ops.deleteScenario(s.id)}>Delete</button>
-            </div>
-            <div className="erow-b">
-              <div className="fieldrow">
-                <TextField label="Name" value={s.name} onChange={(v) => ops.patchScenario(ti, ["name"], v)} />
-                {s.type !== "unified" && <NumField label="Start week" value={s.startWeek + 1} min={1} onChange={(v) => ops.patchScenario(ti, ["startWeek"], Math.max(0, v - 1))} />}
-                {s.type !== "unified" && (
-                  <SelectField label="Applies to" value={s.queueIds === "all" ? "all" : "some"} onChange={(v) => ops.patchScenario(ti, ["queueIds"], v === "all" ? "all" : [])}
-                    options={[{ value: "all", label: "All queues" }, { value: "some", label: "Specific queues" }]} />
-                )}
-              </div>
-              {s.type === "unified" ? <UnifiedParams s={s} ti={ti} ops={ops} horizon={horizon} config={config} /> : <div className="fieldrow"><LegacyParams s={s} ti={ti} ops={ops} horizon={horizon} /></div>}
-              {s.type !== "unified" && s.queueIds !== "all" && (
-                <div className="rowflex" style={{ flexWrap: "wrap" }}>
-                  {config.queues.map((q) => (
-                    <label key={q.id} className="switch">
-                      <input type="checkbox" checked={(s.queueIds || []).includes(q.id)} onChange={(e) => {
-                        const cur = Array.isArray(s.queueIds) ? s.queueIds : [];
-                        ops.patchScenario(ti, ["queueIds"], e.target.checked ? [...cur, q.id] : cur.filter((id) => id !== q.id));
-                      }} />
-                      <span className="track" aria-hidden="true" /><span>{q.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              {s.type === "unified" && (s.scope && s.scope.kind === "queues") && (
-                <div className="rowflex" style={{ flexWrap: "wrap" }}>
-                  {config.queues.map((q) => (
-                    <label key={q.id} className="switch">
-                      <input type="checkbox" checked={(s.scope.queueIds || []).includes(q.id)} onChange={(e) => {
-                        const cur = s.scope.queueIds || [];
-                        ops.patchScenario(ti, ["scope"], { ...s.scope, queueIds: e.target.checked ? [...cur, q.id] : cur.filter((id) => id !== q.id) });
-                      }} />
-                      <span className="track" aria-hidden="true" /><span>{q.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {config.scenarios.length === 0 && <div className="empty">No scenarios. Add one above.</div>}
+      <div className="rows" data-testid="groups">
+        {(config.groups || []).map((g) => <GroupCard key={g.id} config={config} group={g} ops={ops} horizon={horizon} />)}
       </div>
 
-      <GroupsManager config={config} ops={ops} />
-      <Card title="Parameter timeline" sub="what is in force each week" hint="Which enabled scenarios fire in each 4-weekly checkpoint across the horizon.">
+      <Card title="Parameter timeline" sub="what is in force each week" hint="Which enabled factors fire in each 4-weekly checkpoint across the horizon.">
         <ParameterTimeline config={config} />
       </Card>
     </div>

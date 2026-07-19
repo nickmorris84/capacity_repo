@@ -22,6 +22,11 @@ export function money(cur, n) {
 
 export const moneyFull = (cur, n) => cur + Math.round(n || 0).toLocaleString();
 
+// §24.7 a weekly-engine figure presented per month (×52/12) and per year (×52).
+export const perMonth = (weekly) => (weekly || 0) * (52 / 12);
+export const perYear = (weekly) => (weekly || 0) * 52;
+export const moneyMonthly = (cur, weekly) => money(cur, perMonth(weekly));
+
 export const pct = (v, dp = 0) => (v == null || Number.isNaN(v) ? "–" : (v * 100).toFixed(dp) + "%");
 export const num = (v, dp = 0) => (v == null || Number.isNaN(v) ? "–" : (+v).toFixed(dp));
 export const secs = (v) => (v == null || Number.isNaN(v) ? "–" : Math.round(v) + "s");

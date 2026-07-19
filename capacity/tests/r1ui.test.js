@@ -185,14 +185,15 @@ async function run() {
     setV(document.getElementById("horizon-input"), 52); await settle(200);
   });
 
-  await t("brand manager creates a brand and a queue adopts it (§15)", async () => {
-    await goto("Queues");
-    const before = [...document.querySelectorAll('#panel-queues input[aria-label="Brand name"]')].length;
-    click(document.querySelector('[data-testid="add-brand"]'));
+  await t("brand creation lives in Settings and a queue adopts the new brand (§15/§24)", async () => {
+    await goto("Settings");
+    const before = [...document.querySelectorAll('#panel-settings input[aria-label="Brand name"]')].length;
+    click(document.querySelector('#panel-settings [data-testid="add-brand"]'));
     await settle(200);
-    const after = [...document.querySelectorAll('#panel-queues input[aria-label="Brand name"]')].length;
-    eq(after, before + 1, "a brand was created");
-    // adopt: point the first queue's brand selector (SelectField sets an id) at the new brand
+    const after = [...document.querySelectorAll('#panel-settings input[aria-label="Brand name"]')].length;
+    eq(after, before + 1, "a brand was created in Settings");
+    // adopt: point the first queue's brand selector (in Dependencies & mode) at it
+    await goto("Queues");
     const brandSel = document.querySelector('[id^="queue-brand-"]');
     ok(brandSel, "a queue brand selector is present");
     const newBrandId = [...brandSel.options].map((o) => o.value).find((v) => v !== "b1");
@@ -202,16 +203,20 @@ async function run() {
     ok([...document.querySelectorAll('[id^="queue-brand-"]')].some((s) => s.value === newBrandId), "a queue adopted the new brand");
   });
 
-  await t("pool editor supports cross-brand membership (§17)", async () => {
+  await t("sharing: a queue shares its spare with another (§24.2, pools deleted)", async () => {
     await goto("Queues");
-    click(document.querySelector('[data-testid="add-pool"]'));
-    await settle(200);
-    const members = [...document.querySelectorAll('[data-testid^="pool-"][data-testid*="-member-"]')];
-    ok(members.length >= 2, "pool exposes member toggles for queues, got " + members.length);
-    const before = members[0].checked;
-    click(members[0]);
+    const card = document.querySelector("#panel-queues details.erow"); card.setAttribute("open", "");
+    card.querySelectorAll("details.acc-sec").forEach((d) => d.setAttribute("open", ""));
+    await settle(60);
+    const on = card.querySelector("[data-testid=sharing-on]");
+    ok(on, "sharing toggle present");
+    if (!on.checked) { click(on); await settle(150); }
+    const targets = [...card.querySelectorAll('[data-testid^="shares-"]')];
+    ok(targets.length >= 1, "shares-with options appear, got " + targets.length);
+    const before = targets[0].checked;
+    click(targets[0]);
     await settle(120);
-    ok([...document.querySelectorAll('[data-testid^="pool-"][data-testid*="-member-"]')][0].checked !== before, "a queue joins the pool");
+    ok(card.querySelector('[data-testid^="shares-"]').checked !== before, "a share target toggled");
   });
 
   await t("a queue set to Unmanned shows the badge and disables its HC input (§17)", async () => {
@@ -240,14 +245,21 @@ async function run() {
     click(card.querySelector('[data-testid="override-seasonality"]')); await settle(120); // restore
   });
 
+  // §24.8 group-first: a factor is added inside a scenario group; the last
+  // factor row across all groups is the one just created.
   const lastScenarioRow = () => [...document.querySelectorAll('#panel-scenarios [data-testid="scenario-rows"] > .erow')].pop();
-
-  await t("manual-series grid edits apply (§19)", async () => {
+  const addFactorInNewGroup = async () => {
     await goto("Scenarios");
-    setV(document.querySelector("#panel-scenarios select"), "unified"); await settle(200);
-    const erow = lastScenarioRow(); // the unified scenario is appended last
+    click(document.querySelector('#panel-scenarios [data-testid="add-group"]')); await settle(150);
+    const addFactor = [...document.querySelectorAll('#panel-scenarios [data-testid^="add-factor-"]')].pop();
+    click(addFactor); await settle(150);
+  };
+
+  await t("manual-series grid edits apply (§19/§24.8)", async () => {
+    await addFactorInNewGroup();
+    const erow = lastScenarioRow(); // the factor just created
     const mechSel = selWithOption(erow, "manualSeries");
-    ok(mechSel, "unified scenario has a mechanism selector");
+    ok(mechSel, "factor has a mechanism selector");
     setV(mechSel, "manualSeries"); await settle(200);
     const grid = lastScenarioRow().querySelector('[data-testid="week-grid"]');
     ok(grid, "manual-series grid renders");
@@ -255,11 +267,14 @@ async function run() {
     const before = cell.getAttribute("aria-pressed");
     click(cell); await settle(120);
     ok(lastScenarioRow().querySelector('[data-testid="week-grid"] .wk-cell').getAttribute("aria-pressed") !== before, "grid cell toggles");
+    // Clean up: toggle the week back off so this volume factor leaves no residue
+    // for later base-volume assertions (the factor persists but with no entries).
+    click(lastScenarioRow().querySelector('[data-testid="week-grid"] .wk-cell')); await settle(80);
   });
 
   await t("assumptions view reflects a scenario-driven AHT change (§16)", async () => {
-    // Turn the unified scenario just added into an operation-wide AHT step.
-    await goto("Scenarios");
+    // A factor set to an operation-wide AHT step, enabled → fires under Plan of record.
+    await addFactorInNewGroup();
     const erow = lastScenarioRow();
     setV(selWithOption(erow, "aht"), "aht"); await settle(120);
     setV(selWithOption(lastScenarioRow(), "step"), "step"); await settle(200);

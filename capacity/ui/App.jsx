@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { makeDefaultConfig } from "../engine/engine.js";
+import { makeDefaultConfig, makeBlankConfig } from "../engine/engine.js";
 import { useStrategySims, runMatrix, simHash } from "./sim-set.js";
 import { useConfigOps, migrateConfig } from "./config-ops.js";
 import { INTRADAY_PRESETS, SEASONALITY_PRESETS } from "./presets.js";
@@ -115,6 +115,17 @@ export default function App() {
   const loadSnapshotSettings = useCallback((r) => { setConfig(migrateConfig(r.config)); setViewingSlug(null); setTab("plan"); }, []);
   const importConfig = useCallback((c) => { setConfig(migrateConfig(c)); setViewingSlug(null); }, []);
 
+  // §24.9 simulation lifecycle: duplicate the current config, reset to the
+  // defaults, or start from a truly-blank world (no brands, no queues).
+  const newSimulation = useCallback((kind) => {
+    setViewingSlug(null);
+    if (kind === "duplicate") setConfig((c) => migrateConfig(JSON.parse(JSON.stringify(c))));
+    else if (kind === "blank") setConfig(migrateConfig(makeBlankConfig()));
+    else setConfig(migrateConfig(makeDefaultConfig()));
+    setTab("plan");
+  }, []);
+  const isBlank = effectiveConfig.brands.length === 0 && effectiveConfig.queues.length === 0;
+
   const tabProps = {
     simSet, activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config: effectiveConfig, ops,
     activeStrategy: safeStrategy, activeGroupId: safeGroup, onSetActive: setActiveStrategyId,
@@ -135,6 +146,15 @@ export default function App() {
             <small>call centre planning</small>
           </div>
           <span className="spacer" />
+          <div className="topctrl">
+            <span>New simulation</span>
+            <select value="" onChange={(e) => { if (e.target.value) newSimulation(e.target.value); }} data-testid="new-sim" aria-label="New simulation">
+              <option value="">Choose…</option>
+              <option value="duplicate">Duplicate current</option>
+              <option value="defaults">Start from defaults</option>
+              <option value="blank">Start blank</option>
+            </select>
+          </div>
         </header>
 
         <nav className="tabs" role="tablist" aria-label="Sections">
@@ -157,6 +177,18 @@ export default function App() {
         )}
 
         <main className="main">
+          {isBlank && (
+            <div className="empty-state" data-testid="blank-empty-state">
+              <div className="es-mark">✦</div>
+              <h2>Start from nothing</h2>
+              <p>This simulation has no brands and no queues yet. Build it up from scratch: create a brand in Settings, then add your first queue.</p>
+              <div className="btnbar" style={{ justifyContent: "center" }}>
+                <button type="button" className="btn primary" onClick={() => setTab("settings")} data-testid="es-add-brand">Create a brand (Settings)</button>
+                <button type="button" className="btn" onClick={() => setTab("queues")} data-testid="es-add-queue">Add a queue (Queues)</button>
+                <button type="button" className="btn" onClick={() => newSimulation("defaults")}>Load the demo defaults</button>
+              </div>
+            </div>
+          )}
           <fieldset className="ro-fieldset" disabled={readOnly} style={{ border: 0, margin: 0, padding: 0, minInlineSize: "auto" }}>
             {TABS.map((t) => (
               <div key={t.id} role="tabpanel" id={"panel-" + t.id} aria-labelledby={"tab-" + t.id} hidden={tab !== t.id}>

@@ -1,6 +1,8 @@
-import { NumField, TextField, SelectField, Card, Hint, Toggle } from "../components/primitives.jsx";
+import { useState } from "react";
+import { NumField, TextField, SelectField, Card, Hint } from "../components/primitives.jsx";
 import { ApplyPreset, IntradaySliders } from "./PresetBar.jsx";
-import { supportersOf, channelOf } from "../../engine/engine.js";
+import { DependencyView } from "../components/DependencyView.jsx";
+import { supportersOf, channelOf, generateWeeklySeries } from "../../engine/engine.js";
 import { buildWeeklyRows, assumptionsColumns } from "../reporting.js";
 import { MONTHS } from "../format.js";
 
@@ -39,6 +41,38 @@ function HCField({ value, onChange, disabled }) {
   );
 }
 
+// §24.2 sharing picker — share % of spare + the queues it shares with (any brand).
+function SharingEditor({ config, q, ops }) {
+  const on = !!q.sharing;
+  const sh = q.sharing || { sharePct: 100, sharesWith: [] };
+  const others = config.queues.filter((x) => x.id !== q.id);
+  return (
+    <div>
+      <div className="rowflex" style={{ marginBottom: 8 }}>
+        <label className="switch"><input type="checkbox" checked={on} onChange={(e) => ops.setSharing(q.id, e.target.checked)} data-testid="sharing-on" /><span className="track" aria-hidden="true" /><span>This queue shares its spare</span></label>
+      </div>
+      {on ? (
+        <>
+          <div className="fieldrow" style={{ maxWidth: 260 }}>
+            <NumField label="Share of spare" unit="%" value={sh.sharePct == null ? 100 : sh.sharePct} onChange={(v) => ops.patchSharing(q.id, "sharePct", v)}
+              hint="How much of this queue's spare capacity (above its own requirement) it offers to the queues below, split pro-rata by their shortfall." />
+          </div>
+          <div className="lab" style={{ margin: "10px 0 6px" }}>Shares with</div>
+          <div className="rowflex" style={{ flexWrap: "wrap" }}>
+            {others.map((x) => (
+              <label key={x.id} className="switch">
+                <input type="checkbox" checked={(sh.sharesWith || []).includes(x.id)} onChange={(e) => ops.toggleSharesWith(q.id, x.id, e.target.checked)} data-testid={"shares-" + q.id + "-" + x.id} />
+                <span className="track" aria-hidden="true" /><span>{x.name} <span className="pill">{channelOf(x)}</span></span>
+              </label>
+            ))}
+            {others.length === 0 && <p className="note">No other queues to share with.</p>}
+          </div>
+        </>
+      ) : <p className="note">Not sharing. Turn on to lend this queue's spare to others in deficit.</p>}
+    </div>
+  );
+}
+
 function SupportsEditor({ config, q, ops }) {
   const others = config.queues.filter((x) => x.id !== q.id);
   const inbound = supportersOf(config, q.id);
@@ -66,7 +100,6 @@ function SupportsEditor({ config, q, ops }) {
   );
 }
 
-// Read-only list of scenarios that touch this queue (§16 audit).
 function ScenariosAffecting({ config, q }) {
   const hits = config.scenarios.filter((s) => {
     if (s.type === "unified") {
@@ -80,11 +113,9 @@ function ScenariosAffecting({ config, q }) {
     return s.queueIds === "all" || (Array.isArray(s.queueIds) && s.queueIds.includes(q.id));
   });
   if (!hits.length) return <p className="note">No scenarios currently target this queue.</p>;
-  return <div className="rowflex" style={{ flexWrap: "wrap" }}>{hits.map((s) => <span key={s.id} className={"pill" + (s.enabled ? "" : "")}>{s.name}{s.enabled ? "" : " (off)"}</span>)}</div>;
+  return <div className="rowflex" style={{ flexWrap: "wrap" }}>{hits.map((s) => <span key={s.id} className="pill">{s.name}{s.enabled ? "" : " (off)"}</span>)}</div>;
 }
 
-// Per-queue assumptions-over-time mini table. E4: the sim can lag the live
-// config for a beat after an edit, so render only when it already carries q.
 function AssumptionsMini({ sim, config, q }) {
   if (!sim || !sim.weeks.length || !sim.weeks[0].queues[q.id]) return <p className="note">Recalculating…</p>;
   const cols = assumptionsColumns(q, config.engine.currency);
@@ -98,18 +129,91 @@ function AssumptionsMini({ sim, config, q }) {
   );
 }
 
-function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets, defaultOpen }) {
+// §24.6 volume section — CSV paste | single figure + seasonality wizard | inherit.
+function VolumesSection({ config, q, ops, seasonalityPresets }) {
+  const [wizBase, setWizBase] = useState(q.dailyVolume != null ? q.dailyVolume : 500);
+  const [wizPattern, setWizPattern] = useState("");
+  const [csv, setCsv] = useState("");
+  const mode = Array.isArray(q.weeklyVolumes) ? "series" : (q.dailyVolume == null ? "inherit" : "single");
+  const runWizard = () => {
+    const preset = seasonalityPresets.find((p) => p.id === wizPattern);
+    const months = preset ? preset.months : new Array(12).fill(1);
+    const series = generateWeeklySeries(config, Number(wizBase) || 0, months, config.engine.horizonWeeks);
+    ops.setQueueVolume(q.id, "series", series);
+  };
+  const pasteCsv = () => {
+    const arr = csv.split(/[\s,]+/).map((x) => Number(x)).filter((x) => !Number.isNaN(x));
+    if (arr.length) ops.setQueueVolume(q.id, "series", arr);
+  };
+  return (
+    <div className="acc-b">
+      <div className="fieldrow" style={{ maxWidth: 320, marginBottom: 8 }}>
+        <SelectField label="Volume source" value={mode} data-testid="vol-mode" onChange={(v) => {
+          if (v === "single") ops.setQueueVolume(q.id, "single", q.dailyVolume != null ? q.dailyVolume : 500);
+          else if (v === "inherit") ops.setQueueVolume(q.id, "inherit");
+          else if (v === "series") ops.setQueueVolume(q.id, "series", Array.isArray(q.weeklyVolumes) ? q.weeklyVolumes : generateWeeklySeries(config, q.dailyVolume || 500, new Array(12).fill(1), config.engine.horizonWeeks));
+        }}
+          options={[{ value: "single", label: "Single figure" }, { value: "series", label: "Weekly series (CSV / wizard)" }, { value: "inherit", label: "Inherit from brand" }]} />
+      </div>
+
+      {mode === "single" && (
+        <div className="fieldrow" style={{ maxWidth: 240 }}>
+          <NumField label="Base daily volume" value={q.dailyVolume} onChange={(v) => ops.patchQueue(q.id, ["dailyVolume"], v)} />
+        </div>
+      )}
+
+      {mode === "inherit" && (
+        <div className="fieldrow" style={{ maxWidth: 240 }}>
+          <NumField label="Brand share" value={q.volumeShare == null ? 1 : q.volumeShare} onChange={(v) => ops.patchQueue(q.id, ["volumeShare"], v)} hint="This queue's proportional share of its brand's volume, split across brand queues that inherit." />
+        </div>
+      )}
+
+      {mode === "series" && (
+        <>
+          <div className="rowflex" style={{ marginBottom: 8 }}>
+            <NumField label="Weekly figure" value={wizBase} onChange={setWizBase} />
+            <div style={{ minWidth: 180 }}>
+              <SelectField label="Seasonality pattern" value={wizPattern} onChange={setWizPattern}
+                options={[{ value: "", label: "Flat" }, ...seasonalityPresets.map((p) => ({ value: p.id, label: p.name }))]} />
+            </div>
+            <button type="button" className="btn sm primary" onClick={runWizard} data-testid="vol-wizard-run" style={{ alignSelf: "flex-end" }}>Run seasonality wizard</button>
+          </div>
+          <p className="note" style={{ marginBottom: 8 }} data-testid="vol-wizard-note">
+            The wizard multiplies your weekly figure by the chosen pattern's monthly multipliers, anchored to the Settings week-1 date, to fill every week. Every week stays editable below.
+          </p>
+          <div className="rowflex" style={{ marginBottom: 8 }}>
+            <input type="text" className="inp" style={{ flex: 1, minWidth: 220 }} placeholder="paste a CSV weekly list (52+)" value={csv} onChange={(e) => setCsv(e.target.value)} data-testid="vol-csv" />
+            <button type="button" className="btn sm" onClick={pasteCsv} data-testid="vol-csv-apply">Apply CSV</button>
+          </div>
+          {Array.isArray(q.weeklyVolumes) && (
+            <div className="fieldrow" data-testid="vol-series" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))" }}>
+              {q.weeklyVolumes.slice(0, config.engine.horizonWeeks).map((v, w) => (
+                <div key={w} style={{ width: 74 }}><NumField label={"W" + (w + 1)} value={Math.round(v)} onChange={(nv) => ops.patchWeeklyVolume(q.id, w, nv)} /></div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, defaultOpen }) {
   const eng = config.engine, wf = q.wf, burn = q.burn;
   const res = q.resourcing || "dedicated";
   const unmanned = res === "unmanned";
   const ch = channelOf(q);
   const chLabel = ch.charAt(0).toUpperCase() + ch.slice(1);
   const bdg = badgeFor(res);
+  const isDigital = q.type === "digital";
+  const workflow = isDigital && q.subtype === "workflow";
+  const voiceQueues = config.queues.filter((x) => channelOf(x) === "voice" && x.id !== q.id);
   return (
     <details className="erow" open={defaultOpen}>
       <summary>
         <span className="chev">▶</span>
         <strong>{q.name}</strong>
+        {isDigital && <span className="qtype">{q.subtype === "workflow" ? "workflow" : "customer"}</span>}
         {bdg && <span className={"badge " + bdg}>{res}</span>}
         <span className="spacer" />
         <span className="btnbar" onClick={(e) => e.preventDefault()}>
@@ -118,74 +222,51 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
         </span>
       </summary>
       <div className="erow-b">
-        {/* Resourcing & headcount — always visible so the mode + HC are one glance */}
-        <Card title="Resourcing & headcount">
-          <div className="fieldrow">
-            <SelectField label="Brand" value={q.brandId} onChange={(v) => ops.setQueueBrand(q.id, v)} options={config.brands.map((b) => ({ value: b.id, label: b.name }))} id={"queue-brand-" + q.id} />
-            <SelectField label="Channel" value={ch} onChange={(v) => ops.patchQueue(q.id, ["channel"], v)} options={[{ value: "voice", label: "Voice" }, { value: "digital", label: "Digital" }, { value: "support", label: "Support" }]} />
-            <SelectField label="Resourcing" value={res} onChange={(v) => ops.setResourcing(q.id, v)} options={RES_OPTIONS} />
-            <NumField label="Priority" value={q.priority} min={1} onChange={(v) => ops.patchQueue(q.id, ["priority"], Math.max(1, Math.round(v)))} />
-          </div>
-          <div className="fieldrow">
-            <HCField value={q.fte} disabled={unmanned} onChange={(v) => ops.patchQueue(q.id, ["fte"], v)} />
-            {unmanned && <span className="badge red" style={{ alignSelf: "flex-end", marginBottom: 8 }}>unmanned — served only via recycling / pools</span>}
-            {res === "leveraged" && <span className="badge amber" style={{ alignSelf: "flex-end", marginBottom: 8 }}>leveraged — donates to its targets</span>}
-          </div>
-        </Card>
-
-        {/* Description */}
+        {/* 1 — Description */}
         <details className="acc-sec" open={defaultOpen}>
           <summary><strong>Description</strong></summary>
           <div className="acc-b">
             <div className="fieldrow">
               <TextField label="Name" value={q.name} onChange={(v) => ops.patchQueue(q.id, ["name"], v)} />
-              <NumField label="Base daily volume" value={q.dailyVolume} onChange={(v) => ops.patchQueue(q.id, ["dailyVolume"], v)} />
-              <NumField label="AHT" unit="s" value={q.aht} onChange={(v) => ops.patchQueue(q.id, ["aht"], v)} />
-              <NumField label="Fully loaded cost" unit="/yr" value={q.agentCost} onChange={(v) => ops.patchQueue(q.id, ["agentCost"], v)} />
+              <SelectField label="Channel" value={ch} onChange={(v) => ops.patchQueue(q.id, ["channel"], v)} options={[{ value: "voice", label: "Voice" }, { value: "digital", label: "Digital" }, { value: "support", label: "Support" }]} />
+              {isDigital && (
+                <SelectField label="Digital subtype" value={q.subtype || "customer"} onChange={(v) => ops.setQueueSubtype(q.id, v)} id={"subtype-" + q.id}
+                  options={[{ value: "customer", label: "Customer (live)" }, { value: "workflow", label: "Workflow (backlog)" }]} />
+              )}
+              <NumField label={workflow ? "Handle time / item" : "AHT"} unit="s" value={q.aht} onChange={(v) => ops.patchQueue(q.id, ["aht"], v)} />
             </div>
+            {isDigital && <p className="note">{workflow ? "Workflow: backlog processing — no concurrency; SLA measured in hours." : "Customer: live interaction — concurrency and a minutes SLA."}</p>}
           </div>
         </details>
 
-        {/* SLAs */}
+        {/* 2 — Volumes */}
         <details className="acc-sec">
-          <summary><InheritHeader q={q} section="sla" label="SLAs" ops={ops} source={chLabel + " template"} /></summary>
-          <div className="acc-b">
-            {q.type === "voice" ? (
-              <div className="fieldrow">
-                <NumField label="ASA target" unit="s" value={q.asaTarget} onChange={(v) => ops.patchQueue(q.id, ["asaTarget"], v)} />
-                <NumField label="Max abandon" unit="%" value={+(q.maxAbandon * 100).toFixed(2)} onChange={(v) => ops.patchQueue(q.id, ["maxAbandon"], v / 100)} />
-                <NumField label="Patience" unit="s" value={q.patience} onChange={(v) => ops.patchQueue(q.id, ["patience"], v)} />
-              </div>
-            ) : (
-              <div className="fieldrow">
-                <NumField label="Concurrency" value={q.concurrency} onChange={(v) => ops.patchQueue(q.id, ["concurrency"], v)} />
-                <NumField label="SLA within" unit="min" value={q.digitalSlaMinutes} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v)} />
-                <NumField label="SLA target" unit="%" value={+(q.digitalSlaPct * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100)} />
-                <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
-              </div>
-            )}
-            <NumField label="Shrinkage" unit="%" value={+(q.shrinkage * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["shrinkage"], v / 100)} />
-          </div>
+          <summary><strong>Volumes</strong></summary>
+          <VolumesSection config={config} q={q} ops={ops} seasonalityPresets={seasonalityPresets} />
         </details>
 
-        {/* Arrival pattern */}
+        {/* Arrival pattern (part of demand shaping) */}
         <details className="acc-sec">
           <summary><strong>Arrival pattern</strong></summary>
           <div className="acc-b">
             <div className="rowflex">
               <ApplyPreset presets={intradayPresets} onApply={(p) => ops.patchQueue(q.id, ["profile"], [...p.curve])} label="Apply arrival pattern" />
-              <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Arrival patterns. Hand-tune this queue's curve below.</span>
+              <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Arrival patterns. Hand-tune below.</span>
             </div>
             <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => ops.patchQueue(q.id, ["profile"], next)} />
           </div>
         </details>
 
-        {/* Workforce */}
+        {/* 3 — Workforce (monthly cost; shrinkage lives here) */}
         <details className="acc-sec">
           <summary><InheritHeader q={q} section="workforce" label="Workforce" ops={ops} source={chLabel + " template"} /></summary>
           <div className="acc-b">
             <div className="fieldrow">
+              <NumField label="Agent cost" unit="/mo" value={q.agentCostMonthly != null ? q.agentCostMonthly : (q.agentCost != null ? Math.round(q.agentCost / 12) : 0)} onChange={(v) => { ops.patchQueue(q.id, ["agentCostMonthly"], v); ops.patchQueue(q.id, ["agentCost"], v * 12); }} hint="Fully-loaded monthly cost per agent. The engine works weekly (× 12 ÷ 52)." />
+              <NumField label="Shrinkage" unit="%" value={+(q.shrinkage * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["shrinkage"], v / 100)} hint="Paid time not on contacts — leave, sickness, meetings." />
               <NumField label="Attrition" unit="%/mo" value={+(wf.attrition * 100).toFixed(2)} onChange={(v) => ops.patchQueue(q.id, ["wf", "attrition"], v / 100)} />
+            </div>
+            <div className="fieldrow">
               <NumField label="Req-to-start" unit="wk" value={wf.reqToStart} onChange={(v) => ops.patchQueue(q.id, ["wf", "reqToStart"], v)} />
               <NumField label="Training" unit="wk" value={wf.trainingWeeks} onChange={(v) => ops.patchQueue(q.id, ["wf", "trainingWeeks"], v)} />
               <NumField label="Burnout occ." unit="%" value={+(burn.occThreshold * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["burn", "occThreshold"], v / 100)} />
@@ -210,22 +291,73 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
           </div>
         </details>
 
-        {/* Knock-on */}
+        {/* 4 — SLA (patience helper; shrinkage NOT here) */}
         <details className="acc-sec">
-          <summary><InheritHeader q={q} section="knockOn" label="Knock-on (repeat / spill)" ops={ops} source={chLabel + " template / Settings"} /></summary>
+          <summary><InheritHeader q={q} section="sla" label="SLA" ops={ops} source={chLabel + " template"} /></summary>
           <div className="acc-b">
-            {q.overrides && q.overrides.knockOn ? (
+            {q.type === "voice" ? (
               <div className="fieldrow">
-                <NumField label="Repeat" unit="%" value={q.repeatPct == null ? "" : +(q.repeatPct * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["repeatPct"], v / 100)} />
-                <NumField label="Spill" unit="%" value={q.spillPct == null ? "" : +(q.spillPct * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["spillPct"], v / 100)} />
-                <SelectField label="Spill target" value={q.spillTargetQueue || q.deflectsTo || ""} onChange={(v) => ops.patchQueue(q.id, ["spillTargetQueue"], v || null)}
-                  options={[{ value: "", label: "— none —" }, ...config.queues.filter((x) => x.id !== q.id).map((x) => ({ value: x.id, label: x.name }))]} />
+                <NumField label="ASA target" unit="s" value={q.asaTarget} onChange={(v) => ops.patchQueue(q.id, ["asaTarget"], v)} />
+                <NumField label="Max abandon" unit="%" value={+(q.maxAbandon * 100).toFixed(2)} onChange={(v) => ops.patchQueue(q.id, ["maxAbandon"], v / 100)} />
+                <NumField label="Patience" unit="s" value={q.patience} onChange={(v) => ops.patchQueue(q.id, ["patience"], v)} hint="Average seconds a caller waits before hanging up — drives abandonment; behaviour, not a target." />
               </div>
-            ) : <p className="note">Inheriting the {chLabel} channel / Settings defaults. Turn on Override to set queue-specific repeat and spill.</p>}
+            ) : workflow ? (
+              <div className="fieldrow">
+                <NumField label="SLA within" unit="h" value={q.workflowSlaHours != null ? q.workflowSlaHours : 24} onChange={(v) => ops.patchQueue(q.id, ["workflowSlaHours"], v)} />
+                <NumField label="SLA target" unit="%" value={+((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100)} />
+                <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
+              </div>
+            ) : (
+              <div className="fieldrow">
+                <NumField label="Concurrency" value={q.concurrency} onChange={(v) => ops.patchQueue(q.id, ["concurrency"], v)} />
+                <NumField label="SLA within" unit="min" value={q.digitalSlaMinutes} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v)} />
+                <NumField label="SLA target" unit="%" value={+(q.digitalSlaPct * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100)} />
+                <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
+              </div>
+            )}
+            <div className="fieldrow" style={{ maxWidth: 220 }}>
+              <NumField label="SLA attainment target" unit="%" value={+((q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9) * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["slaAttainmentTarget"], v / 100)} hint="Share of weeks that must hold SLA for the Business box to read green." />
+            </div>
           </div>
         </details>
 
-        {/* Seasonality */}
+        {/* 5 — Knock-on (two figures, §24.1) */}
+        <details className="acc-sec">
+          <summary><strong>Knock-on</strong></summary>
+          <div className="acc-b">
+            <div className="fieldrow">
+              <NumField label="Repeat contacts" unit="%" value={+(((q.knock || {}).repeatPct || 0) * 100).toFixed(0)} onChange={(v) => ops.patchKnock(q.id, "repeatPct", v / 100)} hint="Share of failed contacts that retry THIS queue next day." data-testid="knock-repeat" />
+              <NumField label="Converts to calls" unit="%" value={+(((q.knock || {}).convertPct || 0) * 100).toFixed(0)} onChange={(v) => ops.patchKnock(q.id, "convertPct", v / 100)} hint="Share of failed contacts that turn into a call on the target voice queue." />
+              <SelectField label="Call queue" value={(q.knock || {}).convertTarget || ""} onChange={(v) => ops.patchKnock(q.id, "convertTarget", v || null)}
+                options={[{ value: "", label: "— none —" }, ...voiceQueues.map((x) => ({ value: x.id, label: x.name }))]} />
+            </div>
+          </div>
+        </details>
+
+        {/* 6 — Sharing (§24.2) */}
+        <details className="acc-sec">
+          <summary><strong>Sharing</strong></summary>
+          <div className="acc-b"><SharingEditor config={config} q={q} ops={ops} /></div>
+        </details>
+
+        {/* 7 — Dependencies / mode */}
+        <details className="acc-sec" open={defaultOpen}>
+          <summary><strong>Dependencies &amp; mode</strong></summary>
+          <div className="acc-b">
+            <div className="fieldrow">
+              <SelectField label="Brand" value={q.brandId} onChange={(v) => ops.setQueueBrand(q.id, v)} options={config.brands.map((b) => ({ value: b.id, label: b.name }))} id={"queue-brand-" + q.id} />
+              <SelectField label="Resourcing" value={res} onChange={(v) => ops.setResourcing(q.id, v)} options={RES_OPTIONS} />
+              <NumField label="Priority" value={q.priority} min={1} onChange={(v) => ops.patchQueue(q.id, ["priority"], Math.max(1, Math.round(v)))} />
+              <HCField value={q.fte} disabled={unmanned} onChange={(v) => ops.patchQueue(q.id, ["fte"], v)} />
+            </div>
+            {unmanned && <span className="badge red">unmanned — served only via sharing / leverage</span>}
+            {res === "leveraged" && <span className="badge amber">leveraged — donates to its targets</span>}
+            <hr className="sep" style={{ margin: "12px 0" }} />
+            <SupportsEditor config={config} q={q} ops={ops} />
+          </div>
+        </details>
+
+        {/* Seasonality overlay */}
         <details className="acc-sec">
           <summary><InheritHeader q={q} section="seasonality" label="Seasonality" ops={ops} source="system pattern" /></summary>
           <div className="acc-b">
@@ -234,7 +366,7 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
                 <div className="rowflex" style={{ marginBottom: 8 }}>
                   <button type="button" className="btn sm" onClick={() => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1))}>Initialise overlay</button>
                   <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patchQueue(q.id, ["seasonal"], [...p.months])} label="Apply seasonality pattern" />
-                  <span className="note" style={{ padding: "6px 10px" }}>Queue overlay multiplies on top of the system pattern. Create and edit patterns in Settings → Seasonality patterns.</span>
+                  <span className="note" style={{ padding: "6px 10px" }}>Multiplies on top of the system pattern.</span>
                 </div>
                 {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); }} /></div>)}</div>}
               </>
@@ -242,19 +374,11 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
           </div>
         </details>
 
-        {/* Scenarios affecting */}
+        {/* Scenarios affecting + Assumptions */}
         <details className="acc-sec">
           <summary><strong>Scenarios affecting this queue</strong></summary>
           <div className="acc-b"><ScenariosAffecting config={config} q={q} /></div>
         </details>
-
-        {/* Dependencies */}
-        <details className="acc-sec">
-          <summary><strong>Dependencies</strong></summary>
-          <div className="acc-b"><SupportsEditor config={config} q={q} ops={ops} /></div>
-        </details>
-
-        {/* Assumptions over time */}
         <details className="acc-sec">
           <summary><strong>Assumptions over time</strong></summary>
           <div className="acc-b"><AssumptionsMini sim={sim} config={config} q={q} /></div>
@@ -264,112 +388,12 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
   );
 }
 
-function BrandManager({ config, ops }) {
-  return (
-    <Card title="Brands" hint="A brand groups queues and carries one parameter block: its training profile. Queues adopt a brand in their Resourcing section."
-      right={<button type="button" className="btn sm primary" onClick={() => ops.addBrand()} data-testid="add-brand">+ Add brand</button>}>
-      <div className="rows">
-        {config.brands.map((b) => (
-          <div className="erow" key={b.id}>
-            <div className="erow-h">
-              <input type="text" className="inp" style={{ maxWidth: 220 }} value={b.name} aria-label="Brand name" onChange={(e) => ops.patchBrand(b.id, ["name"], e.target.value)} />
-              <span className="pill">{config.queues.filter((q) => q.brandId === b.id).length} queue(s)</span>
-              <span className="spacer" />
-              {config.brands.length > 1 && <button type="button" className="btn sm danger" onClick={() => ops.deleteBrand(b.id)}>Delete</button>}
-            </div>
-            <div className="erow-b">
-              <div className="rowflex" style={{ marginBottom: 8 }}>
-                <Toggle checked={!!b.training} onChange={(v) => ops.toggleBrandTraining(b.id, v)} label="Brand training profile" />
-                <NumField label="Brand daily volume" value={b.dailyVolume == null ? "" : b.dailyVolume} onChange={(v) => ops.patchBrand(b.id, ["dailyVolume"], v === 0 ? null : v)} hint="Optional — a brand volume split by proportional queue shares (queues with no explicit volume)." />
-              </div>
-              {b.training && (
-                <div className="fieldrow">
-                  <NumField label="Training weeks" value={b.training.trainingWeeks} onChange={(v) => ops.patchBrand(b.id, ["training", "trainingWeeks"], v)} />
-                  <NumField label="Training shrinkage" unit="%" value={+((b.training.trainingShrinkagePct || 0) * 100).toFixed(1)} onChange={(v) => ops.patchBrand(b.id, ["training", "trainingShrinkagePct"], v / 100)} />
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function PoolManager({ config, ops }) {
-  const brandName = (id) => (config.brands.find((b) => b.id === id) || { name: "?" }).name;
-  return (
-    <Card title="Pools" hint="A pool is an explicit cross-brand / cross-channel sharing group. Members contribute spare (× their share) to any member in deficit, pro-rata, across brands."
-      right={<button type="button" className="btn sm primary" onClick={() => ops.addPool()} data-testid="add-pool">+ Add pool</button>}>
-      {(config.pools || []).length === 0 ? <p className="note">No pools. Add one to share spare capacity across brands and channels.</p> : (
-        <div className="rows">
-          {config.pools.map((p) => (
-            <div className="erow" key={p.id}>
-              <div className="erow-h">
-                <input type="text" className="inp" style={{ maxWidth: 220 }} value={p.name} aria-label="Pool name" onChange={(e) => ops.renamePool(p.id, e.target.value)} />
-                <span className="pill">{(p.members || []).length} member(s)</span>
-                <span className="spacer" />
-                <button type="button" className="btn sm danger" onClick={() => ops.deletePool(p.id)}>Delete</button>
-              </div>
-              <div className="erow-b">
-                <div className="lab" style={{ marginBottom: 6 }}>Members (any brand / channel)</div>
-                <div className="rowflex" style={{ flexWrap: "wrap" }}>
-                  {config.queues.map((q) => {
-                    const m = (p.members || []).find((x) => x.queueId === q.id);
-                    return (
-                      <label key={q.id} className="switch" style={{ minWidth: 200 }}>
-                        <input type="checkbox" checked={!!m} onChange={(e) => ops.setPoolMember(p.id, q.id, e.target.checked)} data-testid={"pool-" + p.id + "-member-" + q.id} />
-                        <span className="track" aria-hidden="true" />
-                        <span>{q.name} <span className="pill">{brandName(q.brandId)}</span></span>
-                        {m && <input type="number" className="inp" style={{ width: 60, marginLeft: 6 }} value={m.sharePct} aria-label="Share %" onChange={(e) => ops.patchPoolMember(p.id, q.id, Number(e.target.value))} />}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function ChannelTemplates({ config, ops }) {
-  const chans = config.channels || { voice: {}, digital: {}, support: {} };
-  return (
-    <Card title="Channel templates" hint="Section-level defaults each queue inherits unless it overrides them. Knock-on defaults set here flow to every queue of that channel that hasn't turned on its Knock-on override.">
-      <div className="grid cols-2">
-        {["voice", "digital", "support"].map((ch) => {
-          const kn = (chans[ch] || {}).knockOn || {};
-          return (
-            <div className="erow" key={ch}>
-              <div className="erow-h"><strong style={{ textTransform: "capitalize" }}>{ch}</strong><span className="pill">{config.queues.filter((q) => channelOf(q) === ch).length} queue(s)</span></div>
-              <div className="erow-b">
-                <div className="fieldrow">
-                  <NumField label="Repeat default" unit="%" value={kn.repeatPct == null ? "" : +(kn.repeatPct * 100).toFixed(0)} onChange={(v) => ops.patchChannel(ch, ["knockOn", "repeatPct"], v === 0 ? 0 : v / 100)} />
-                  <NumField label="Spill default" unit="%" value={kn.spillPct == null ? "" : +(kn.spillPct * 100).toFixed(0)} onChange={(v) => ops.patchChannel(ch, ["knockOn", "spillPct"], v === 0 ? 0 : v / 100)} />
-                </div>
-                <p className="note">Blank = inherit Settings / legacy loops.</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-// System seasonality — the multiplier applied to every queue. The pattern
-// library lives in Settings; here it is applied to the system and hand-tuned.
+// System seasonality — the multiplier applied to every queue.
 function SystemSeasonality({ config, ops, seasonalityPresets }) {
   const seas = config.seasonality;
   return (
-    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the start month across the horizon. Each queue can layer its own overlay in its Seasonality section.">
+    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Each queue can layer its own overlay in its Seasonality section.">
       <div className="rowflex" style={{ marginBottom: 12 }}>
-        <div style={{ minWidth: 180, maxWidth: 220 }}>
-          <SelectField label="Start month" value={String(seas.startMonth)} onChange={(v) => ops.patch(["seasonality", "startMonth"], Number(v))} options={MONTHS.map((m, i) => ({ value: String(i), label: m }))} />
-        </div>
         <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patch(["seasonality", "system"], [...p.months])} label="Apply seasonality pattern" />
         <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Seasonality patterns.</span>
       </div>
@@ -385,12 +409,11 @@ function SystemSeasonality({ config, ops, seasonalityPresets }) {
   );
 }
 
-/* Queues editor. Brand manager, pool manager, channel templates and the system
-   seasonality up top; queues grouped Brand → Voice/Digital/Support, each an
-   accordion of Description, SLAs, Arrival, Workforce, Knock-on, Seasonality,
-   Scenarios-affecting, Dependencies and Assumptions, with per-section
-   inheritance indicators and dedicated/leveraged/unmanned resourcing. Patterns
-   are applied here; they are created and edited in the Settings libraries. */
+/* Queues editor (§24 rebuild, top-down). A dependency view (graph | table) at
+   the top, then system seasonality, then queues grouped Brand → Voice / Digital
+   / Support, each a top-to-bottom creation flow: Description → Volumes →
+   Workforce → SLA → Knock-on → Sharing → Dependencies/mode. Brand & channel
+   creation lives in Settings. */
 export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
   let first = true;
   const brandSection = (b) => {
@@ -402,7 +425,7 @@ export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPre
         <div className="rows">
           {list.map((q) => {
             const open = first; first = false;
-            return <QueueCard key={q.id} config={config} q={q} ops={ops} sim={sim} intradayPresets={intradayPresets} setIntradayPresets={setIntradayPresets} seasonalityPresets={seasonalityPresets} setSeasonalityPresets={setSeasonalityPresets} defaultOpen={open} />;
+            return <QueueCard key={q.id} config={config} q={q} ops={ops} sim={sim} intradayPresets={intradayPresets} seasonalityPresets={seasonalityPresets} defaultOpen={open} />;
           })}
         </div>
       </div>
@@ -419,11 +442,9 @@ export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPre
     <div className="grid" style={{ gap: 18 }}>
       <div className="btnbar">
         <button type="button" className="btn primary" onClick={() => ops.addQueue()}>+ Add queue</button>
-        <span className="note" style={{ padding: "6px 10px" }}>{config.queues.length} queue(s). New queues default to Voice / the first brand — change in the card.</span>
+        <span className="note" style={{ padding: "6px 10px" }}>{config.queues.length} queue(s). New queues default to Voice / the first brand — change in the card. Create brands in Settings.</span>
       </div>
-      <BrandManager config={config} ops={ops} />
-      <PoolManager config={config} ops={ops} />
-      <ChannelTemplates config={config} ops={ops} />
+      <DependencyView config={config} sim={sim} />
       <SystemSeasonality config={config} ops={ops} seasonalityPresets={seasonalityPresets} />
       {config.brands.map((b) => brandSection(b))}
     </div>

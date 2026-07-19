@@ -64,6 +64,30 @@ export const viewName = (config, viewId) => {
   return v ? v.name : viewId;
 };
 
+// ---- §24 hierarchy (Brand → Voice/Digital/Support → queue) ----
+// The one shared grouping used by Plan, Summary and Data. Channels appear in a
+// stable order and only when populated; brands in config definition order.
+const CHANNEL_ORDER = [
+  { key: "voice", label: "Voice" },
+  { key: "digital", label: "Digital" },
+  { key: "support", label: "Support" },
+];
+export const channelOfQueue = (q) => q.channel || (q.type === "voice" ? "voice" : "digital");
+export function hierarchy(config) {
+  const brands = (config.brands && config.brands.length) ? config.brands : [{ id: "__none", name: "Unbranded" }];
+  return brands.map((b) => {
+    const qs = config.queues.filter((q) => (q.brandId || "__none") === b.id);
+    const channels = CHANNEL_ORDER
+      .map((c) => ({ ...c, queues: qs.filter((q) => channelOfQueue(q) === c.key) }))
+      .filter((c) => c.queues.length);
+    return { brand: b, queues: qs, channels };
+  }).filter((row) => row.queues.length);
+}
+// A flat, hierarchy-ordered queue list (Brand → channel → queue).
+export function orderedQueues(config) {
+  return hierarchy(config).flatMap((row) => row.channels.flatMap((c) => c.queues));
+}
+
 // ---- §19 scenario groups (replace views everywhere in R2) ----
 export const groupList = (config) => (config && config.groups) || [];
 export const groupName = (config, groupId) => {

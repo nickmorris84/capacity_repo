@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
 import { setPath } from "./format.js";
-import { uid, effectiveSupports, R2_DEFAULTS } from "../engine/engine.js";
+import { uid, effectiveSupports, R2_DEFAULTS, resolveKnockOn, channelOf, primaryVoiceQueue } from "../engine/engine.js";
 
 // Deep clone the physics defaults so the working config carries an editable
 // settings block (every value equals a default, so the engine is unchanged).
@@ -10,10 +10,14 @@ const blankQueue = (n) => ({
   id: "q_" + uid(), name: "New queue " + n, type: "voice",
   dailyVolume: 500, aht: 300, profile: new Array(24).fill(1),
   asaTarget: 30, maxAbandon: 0.05, patience: 90,
-  shrinkage: 0.3, fte: 10, agentCost: 32000,
+  shrinkage: 0.3, fte: 10, agentCost: 32000, agentCostMonthly: 32000 / 12,
   resourcing: "resourced", supports: [], crossSkill: [],
   weeklyVolumes: null, seasonal: null,
   concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 100, deflectsTo: null,
+  // §24.1 knock-on (two figures), §24.2 sharing, §24.5 subtype, §24.10 SLA target.
+  knock: { repeatPct: 0, convertPct: 0, convertTarget: null },
+  sharing: null, subtype: "customer",
+  workflowSlaHours: 24, workflowSlaPct: 0.9, slaAttainmentTarget: 0.9,
   wf: { attrition: 0.04, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [0.6, 0.75, 0.9, 1.0], hires: [] },
   burn: { occThreshold: 0.85, sensitivity: 1.5, recovery: 8, maxAttritionMult: 2, absenceUplift: 0.05 },
 });
@@ -53,8 +57,12 @@ const defaultChannels = () => ({ voice: blankChannel(), digital: blankChannel(),
    donation and receiving). Idempotent. */
 export function migrateConfig(config) {
   const map = effectiveSupports(config);
-  const brands = (config.brands && config.brands.length) ? config.brands : [{ id: "b1", name: "Brand 1", training: null, dailyVolume: null, weeklyVolumes: null }];
-  const brandId = brands[0].id;
+  // §24.9: a truly-blank config (no brands AND no queues) stays blank — no brand
+  // is injected. A legacy config with queues but no brands still gets "Brand 1".
+  const brands = (config.brands && config.brands.length)
+    ? config.brands
+    : ((config.queues && config.queues.length) ? [{ id: "b1", name: "Brand 1", training: null, dailyVolume: null, weeklyVolumes: null }] : []);
+  const brandId = (brands[0] || {}).id;
   const queues = config.queues.map((q, i) => ({
     ...q,
     brandId: q.brandId || brandId,
@@ -87,6 +95,63 @@ export function migrateConfig(config) {
   }
   if (out.engine.globalStartingHC === undefined) out.engine = { ...out.engine, globalStartingHC: null };
   if (out.engine.horizonWeeks == null) out.engine = { ...out.engine, horizonWeeks: 52 };
+  return migrateR3(out);
+}
+
+/* R3 (SPEC §24) working-config migration, layered on the R2 shape above.
+   Every addition is behaviour-preserving on the default config: knock is the
+   resolved legacy repeat/spill; sharing decomposes pools (default: none);
+   monthly cost = annual ÷ 12 (weekly identical); caps carry the legacy global
+   cap as Total (empty segment matrix = the legacy single-cap allocator);
+   subtype "customer" is the legacy digital model. Idempotent. */
+function migrateR3(cfg) {
+  // Decompose pools into per-queue sharing declarations, then empty pools so the
+  // engine's sharing rung — not the legacy pool shim — does the work.
+  const shareOf = {};
+  for (const pool of cfg.pools || []) {
+    for (const m of pool.members || []) {
+      const others = (pool.members || []).filter((x) => x.queueId !== m.queueId).map((x) => x.queueId);
+      const pctv = m.sharePct != null ? m.sharePct : 100;
+      const cur = shareOf[m.queueId];
+      if (!cur) shareOf[m.queueId] = { sharePct: pctv, sharesWith: [...others] };
+      else { cur.sharePct = Math.max(cur.sharePct, pctv); for (const id of others) if (!cur.sharesWith.includes(id)) cur.sharesWith.push(id); }
+    }
+  }
+  const queues = cfg.queues.map((q) => {
+    const kn = q.knock ? null : resolveKnockOn(cfg, q); // resolveKnockOn short-circuits on q.knock
+    const primary = primaryVoiceQueue(cfg, q.brandId);
+    const knock = q.knock || {
+      repeatPct: kn.repeatPct,
+      convertPct: kn.spillPct,
+      convertTarget: kn.spillTargetQueue != null ? kn.spillTargetQueue
+        : kn.spillPct > 0 ? null
+        : primary && primary.id !== q.id ? primary.id : null,
+    };
+    return {
+      ...q,
+      knock,
+      repeatPct: knock.repeatPct, spillPct: knock.convertPct, spillTargetQueue: knock.convertTarget,
+      sharing: q.sharing !== undefined ? q.sharing : (shareOf[q.id] || null),
+      subtype: q.type === "digital" ? (q.subtype || "customer") : q.subtype,
+      workflowSlaHours: q.workflowSlaHours != null ? q.workflowSlaHours : 24,
+      workflowSlaPct: q.workflowSlaPct != null ? q.workflowSlaPct : 0.9,
+      agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : (q.agentCost != null ? q.agentCost / 12 : null),
+      slaAttainmentTarget: q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9,
+    };
+  });
+  const out = { ...cfg, queues, pools: [] };
+  out.strategies = (cfg.strategies || []).map((s) =>
+    s.baseType === "backfill" && s.forwardMonths == null ? { ...s, forwardMonths: 3 } : s);
+  out.hiring = {
+    ...cfg.hiring,
+    caps: cfg.hiring.caps || { segments: {}, brands: {}, total: cfg.hiring.cap != null ? cfg.hiring.cap : null },
+  };
+  out.costs = {
+    ...cfg.costs,
+    managerCostMonthly: cfg.costs.managerCostMonthly != null ? cfg.costs.managerCostMonthly
+      : (cfg.costs.managerCost != null ? cfg.costs.managerCost / 12 : null),
+  };
+  if (!out.settings.calendar) out.settings = { ...out.settings, calendar: { weekOneDate: null } };
   return out;
 }
 
@@ -444,6 +509,105 @@ export function useConfigOps(setConfig) {
     return s.id;
   }, [setConfig]);
 
+  // ---- §24.2 sharing (decentralised; pools deleted) ----
+  const setSharing = useCallback((qid, on) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => (q.id === qid ? { ...q, sharing: on ? (q.sharing || { sharePct: 100, sharesWith: [] }) : null } : q)),
+  })), [setConfig]);
+  const patchSharing = useCallback((qid, key, value) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => (q.id === qid ? { ...q, sharing: { ...(q.sharing || { sharePct: 100, sharesWith: [] }), [key]: value } } : q)),
+  })), [setConfig]);
+  const toggleSharesWith = useCallback((qid, targetId, on) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => {
+      if (q.id !== qid) return q;
+      const sh = q.sharing || { sharePct: 100, sharesWith: [] };
+      const list = sh.sharesWith || [];
+      const has = list.includes(targetId);
+      const next = on && !has ? [...list, targetId] : !on && has ? list.filter((x) => x !== targetId) : list;
+      return { ...q, sharing: { ...sh, sharesWith: next } };
+    }),
+  })), [setConfig]);
+
+  // ---- §24.1 knock-on (two figures) ----
+  const patchKnock = useCallback((qid, key, value) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => {
+      if (q.id !== qid) return q;
+      const knock = { ...(q.knock || { repeatPct: 0, convertPct: 0, convertTarget: null }), [key]: value };
+      return { ...q, knock, repeatPct: knock.repeatPct, spillPct: knock.convertPct, spillTargetQueue: knock.convertTarget };
+    }),
+  })), [setConfig]);
+
+  // ---- §24.3 hiring cap hierarchy ----
+  const patchCapSegment = useCallback((brandId, channel, value) => setConfig((c) => {
+    const caps = c.hiring.caps || { segments: {}, brands: {}, total: c.hiring.cap };
+    const segments = { ...(caps.segments || {}) };
+    const k = brandId + "|" + channel;
+    if (value == null || value === "") delete segments[k]; else segments[k] = value;
+    return { ...c, hiring: { ...c.hiring, caps: { ...caps, segments } } };
+  }), [setConfig]);
+  const patchCapBrand = useCallback((brandId, value) => setConfig((c) => {
+    const caps = c.hiring.caps || { segments: {}, brands: {}, total: c.hiring.cap };
+    const brands = { ...(caps.brands || {}) };
+    if (value == null || value === "") delete brands[brandId]; else brands[brandId] = value;
+    return { ...c, hiring: { ...c.hiring, caps: { ...caps, brands } } };
+  }), [setConfig]);
+  const patchCapTotal = useCallback((value) => setConfig((c) => {
+    const caps = c.hiring.caps || { segments: {}, brands: {}, total: c.hiring.cap };
+    return { ...c, hiring: { ...c.hiring, cap: value != null && value !== "" ? value : c.hiring.cap, caps: { ...caps, total: value === "" ? null : value } } };
+  }), [setConfig]);
+
+  // ---- §24.6 date-anchored weekly volume series + seasonality wizard ----
+  const setWeekOneDate = useCallback((iso) => setConfig((c) => setPath(c, ["settings", "calendar", "weekOneDate"], iso || null)), [setConfig]);
+  const setQueueVolume = useCallback((qid, mode, payload) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => {
+      if (q.id !== qid) return q;
+      if (mode === "single") return { ...q, dailyVolume: payload, weeklyVolumes: null };
+      if (mode === "series") return { ...q, weeklyVolumes: payload, dailyVolume: null };
+      if (mode === "inherit") return { ...q, dailyVolume: null, weeklyVolumes: null, volumeShare: q.volumeShare != null ? q.volumeShare : 1 };
+      return q;
+    }),
+  })), [setConfig]);
+  const patchWeeklyVolume = useCallback((qid, week, value) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => {
+      if (q.id !== qid) return q;
+      const arr = Array.isArray(q.weeklyVolumes) ? q.weeklyVolumes.slice() : [];
+      arr[week] = value;
+      return { ...q, weeklyVolumes: arr, dailyVolume: null };
+    }),
+  })), [setConfig]);
+
+  // ---- §24.8 group scope ----
+  const patchGroupScope = useCallback((gid, scope) => setConfig((c) => ({
+    ...c, groups: (c.groups || []).map((g) => (g.id === gid ? { ...g, scope } : g)),
+  })), [setConfig]);
+  const toggleGroupScopeTarget = useCallback((gid, kind, id, on) => setConfig((c) => ({
+    ...c, groups: (c.groups || []).map((g) => {
+      if (g.id !== gid) return g;
+      const scope = { brandIds: [], channels: [], queueIds: [], ...(g.scope || {}) };
+      const key = kind === "brand" ? "brandIds" : kind === "channel" ? "channels" : "queueIds";
+      const list = scope[key] || [];
+      scope[key] = on ? (list.includes(id) ? list : [...list, id]) : list.filter((x) => x !== id);
+      return { ...g, scope };
+    }),
+  })), [setConfig]);
+
+  // §24.8 group-first: a factor is a scenario created directly inside a group
+  // (added to its scenarioIds membership in one update).
+  const addFactor = useCallback((gid) => {
+    const id = "sc_" + uid();
+    const s = { id, type: "unified", name: "New factor", enabled: true, tag: "custom", parameter: "volume", mechanism: "step", granularity: "week", startWeek: 0, stopWeek: null, scope: "all", queueIds: "all", p: { value: 0.1 } };
+    setConfig((c) => ({
+      ...c,
+      scenarios: [...c.scenarios, s],
+      groups: (c.groups || []).map((g) => (g.id === gid ? { ...g, scenarioIds: [...(Array.isArray(g.scenarioIds) ? g.scenarioIds : []), id] } : g)),
+    }));
+    return id;
+  }, [setConfig]);
+
+  // ---- §24 brand training + subtype live on the queue via patchQueue/patchBrand ----
+  const setQueueSubtype = useCallback((qid, subtype) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => (q.id === qid ? { ...q, subtype } : q)),
+  })), [setConfig]);
+
   return useMemo(() => ({
     patch, patchQueue, addQueue, duplicateQueue, deleteQueue,
     addHire, patchHire, deleteHire,
@@ -457,5 +621,9 @@ export function useConfigOps(setConfig) {
     setResourcing, addSupport, patchSupport, deleteSupport,
     addStrategy, duplicateStrategy, deleteStrategy, patchStrategy,
     addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy,
-  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy]);
+    // R3 (§24)
+    setSharing, patchSharing, toggleSharesWith, patchKnock,
+    patchCapSegment, patchCapBrand, patchCapTotal,
+    setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype,
+  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
 }

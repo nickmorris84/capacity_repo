@@ -1,159 +1,202 @@
 import { useState } from "react";
 import { Card } from "./primitives.jsx";
-import { money, num } from "../format.js";
+import { money, moneyMonthly, num } from "../format.js";
+import { hierarchy, orderedQueues } from "../views.js";
 
-/* Holistic requirement panel (SPEC §3): total required vs paid vs pipeline
-   across the operation, the feasibility verdict, and the week-by-week
-   cap-allocation trace the engine records — surfacing exactly the sentence the
-   SPEC asks for: "Week 6: cap 18, plan wants 26; Billing took 12, WhatsApp 6;
-   Tech goes short — projected £41k churn." */
-export function HolisticPanel({ sim }) {
-  const [showAll, setShowAll] = useState(false);
-  const cfg = sim.config;
-  const cur = cfg.engine.currency;
-  const trace = sim.allocTrace || [];
-  const qName = (id) => (cfg.queues.find((q) => q.id === id) || { name: id }).name;
+/* Holistic requirement panel (SPEC §3 + §24). Summary blocks follow the
+   Brand → Voice/Digital/Support hierarchy and spread evenly across the width;
+   beneath sits an interactive table — every queue active by default, tap a
+   queue chip to toggle it in or out and the capacity-required headline and the
+   totals row recompute live. Caps context (§24.3) is shown inline, and the
+   week-by-week cap-allocation trace is available as a detail below. */
 
-  const last = sim.weeks[sim.weeks.length - 1].totals;
-  const pipeline = cfg.queues.reduce((a, q) => a + (sim.weeks[sim.weeks.length - 1].queues[q.id].pipeline || 0), 0);
-
-  const binding = trace.filter((t) => t.binding);
-  const bindingWeeks = binding.map((t) => t.week + 1);
-  const maxWant = binding.reduce((m, t) => Math.max(m, t.want), 0);
-  const cap = cfg.hiring.cap;
-
-  // Projected churn attributed to a binding week: the churn cost incurred by the
-  // shorted queues over the lead-time window following the shortfall, read from
-  // the (cap-constrained) active simulation.
-  const churnForShort = (t) => {
-    const shortIds = Object.keys(t.denied);
-    if (!shortIds.length) return 0;
-    let total = 0;
-    for (const id of shortIds) {
-      const q = cfg.queues.find((x) => x.id === id);
-      const lead = q ? q.wf.reqToStart + q.wf.trainingWeeks + q.wf.learningCurve.length : 8;
-      for (let w = t.week; w < Math.min(t.week + lead, sim.weeks.length); w++) {
-        total += sim.weeks[w].queues[id].churnCost;
-      }
-    }
-    return total;
+// Per-queue horizon metrics, presented per month where they are costs (§24.7).
+function queueMetrics(sim, q) {
+  const series = sim.weeks.map((w) => w.queues[q.id]);
+  const last = series[series.length - 1];
+  const n = Math.max(1, series.length);
+  const sumOf = (f) => series.reduce((a, s) => a + (f(s) || 0), 0);
+  return {
+    id: q.id, name: q.name,
+    reqFte: last.reqFte,
+    hires: sumOf((s) => s.reqsRaised),
+    active: last.active != null ? last.active : last.trained + last.ramp,
+    attrition: sumOf((s) => s.leavers),
+    agentMonthly: (sumOf((s) => s.cost) / n) * (52 / 12),
+    otMonthly: (sumOf((s) => s.otCost) / n) * (52 / 12),
+    custMonthly: (sumOf((s) => s.churnCost) / n) * (52 / 12),
   };
-
-  const rows = showAll ? trace : (binding.length ? binding : trace.slice(0, 6));
-
-  return (
-    <Card
-      title="Holistic requirement panel"
-      hint="Required vs paid vs pipeline across the whole operation, and how the global hiring cap is rationed each week when demand for requisitions exceeds it."
-      right={<button type="button" className="btn sm" onClick={() => setShowAll((s) => !s)}>{showAll ? "Binding weeks only" : "Show all weeks"}</button>}
-    >
-      <div className="stat-row">
-        <div className="stat"><div className="l">Required FTE (final wk)</div><div className="v">{num(last.reqFte, 0)}</div></div>
-        <div className="stat"><div className="l">Active FTE (final wk)</div><div className="v">{num(last.active != null ? last.active : last.paid, 0)}</div></div>
-        <div className="stat"><div className="l">In pipeline (final wk)</div><div className="v">{num(pipeline, 0)}</div></div>
-        <div className="stat"><div className="l">Global cap</div><div className="v">{cap}<small>/wk</small></div></div>
-        <div className="stat"><div className="l">Cap-bound weeks</div><div className="v">{binding.length}</div></div>
-      </div>
-
-      <p className={"note"} style={{ marginTop: 12 }}>
-        {binding.length
-          ? `Feasibility: the cap allows +${cap}/wk, but this plan needs up to +${Math.round(maxWant)}/wk in week${bindingWeeks.length > 1 ? "s" : ""} ${formatWeekRange(bindingWeeks)} — infeasible. The shortfall lands as churn.`
-          : `Feasibility: the plan fits within the +${cap}/wk cap across the whole horizon.`}
-      </p>
-
-      <QueuePanels sim={sim} />
-
-      <div className="tbl-wrap" style={{ marginTop: 12, maxHeight: 380 }}>
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Week</th>
-              <th>Cap</th>
-              <th>Wanted</th>
-              {cfg.queues.map((q) => <th key={q.id}>{q.name}</th>)}
-              <th>Proj. churn</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => {
-              const proj = t.binding ? churnForShort(t) : 0;
-              return (
-                <tr key={t.week} style={t.binding ? { background: "var(--red-s)" } : undefined}>
-                  <td>{t.week + 1}</td>
-                  <td>{t.cap == null ? "∞" : t.cap}</td>
-                  <td>{num(t.want, 0)}{t.binding ? " ⚠" : ""}</td>
-                  {cfg.queues.map((q) => {
-                    const g = t.grants[q.id] || 0;
-                    const d = t.denied[q.id] || 0;
-                    return (
-                      <td key={q.id} className={d > 0.05 ? "st-red" : undefined}>
-                        {g > 0.05 ? num(g, 0) : "–"}
-                        {d > 0.05 ? ` (−${num(d, 0)})` : ""}
-                      </td>
-                    );
-                  })}
-                  <td>{proj > 0 ? money(cur, proj) : "–"}</td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 && <tr><td colSpan={4 + cfg.queues.length} className="empty">No allocation activity.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <p className="note" style={{ marginTop: 10 }}>
-        When the cap binds, scarce requisitions go to the queue with the greatest marginal churn cost averted per FTE (tie-break: earliest projected breach). A number in brackets is the shortfall that queue was denied that week.
-      </p>
-    </Card>
-  );
 }
 
-// §14.6: queues as coloured panels grouped Voice vs Digital, each showing its
-// Ops cost (salary run cost) and Customer cost (churn) over the horizon.
-function QueuePanels({ sim }) {
+function HierarchyBlocks({ sim }) {
   const cfg = sim.config;
   const cur = cfg.engine.currency;
-  const worst = (q) => {
-    const sts = sim.weeks.map((w) => w.queues[q.id].status);
-    return sts.includes("red") ? "red" : sts.includes("amber") ? "amber" : "green";
+  const rows = hierarchy(cfg);
+  const agg = (queues) => {
+    let req = 0, active = 0, pipe = 0;
+    for (const q of queues) {
+      const last = sim.weeks[sim.weeks.length - 1].queues[q.id];
+      req += last.reqFte; active += last.active != null ? last.active : last.trained + last.ramp; pipe += last.pipeline || 0;
+    }
+    return { req, active, pipe };
   };
-  const panel = (q) => {
-    const series = sim.weeks.map((w) => w.queues[q.id]);
-    const ops = series.reduce((a, s) => a + s.cost, 0);
-    const cust = series.reduce((a, s) => a + s.churnCost, 0);
-    const last = series[series.length - 1];
+  const block = (label, sub, queues, key) => {
+    const a = agg(queues);
     return (
-      <div className={"qcard " + worst(q)} key={q.id} style={{ minWidth: 190 }}>
-        <div className="qn"><span>{q.name}</span><span className="spacer" />{q.resourcing === "supported" && <span className="badge amber">supported</span>}</div>
-        <div className="kpis">
-          <div className="kpi"><div className="l">Ops cost</div><div className="v">{money(cur, ops)}</div></div>
-          <div className="kpi"><div className="l">Customer cost</div><div className="v">{money(cur, cust)}</div></div>
-          <div className="kpi"><div className="l">Active</div><div className="v">{num(last.active != null ? last.active : last.trained + last.ramp, 0)}</div></div>
-          <div className="kpi"><div className="l">Required</div><div className="v">{num(last.reqFte, 0)}</div></div>
+      <div className="holo-block" key={key} data-testid={"holo-block-" + key}>
+        <div className="holo-block-h"><strong>{label}</strong>{sub ? <span className="pill">{sub}</span> : null}</div>
+        <div className="holo-mini">
+          <div><span className="l">Required</span><span className="v">{num(a.req, 0)}</span></div>
+          <div><span className="l">Active</span><span className="v">{num(a.active, 0)}</span></div>
+          <div><span className="l">Pipeline</span><span className="v">{num(a.pipe, 0)}</span></div>
         </div>
       </div>
     );
   };
-  const voice = cfg.queues.filter((q) => q.type === "voice");
-  const digital = cfg.queues.filter((q) => q.type === "digital");
   return (
-    <div style={{ marginTop: 12 }} data-testid="holistic-queue-panels">
-      {voice.length > 0 && <><div className="section-title" style={{ margin: "6px 2px" }}>Voice</div><div className="qcards">{voice.map(panel)}</div></>}
-      {digital.length > 0 && <><div className="section-title" style={{ margin: "12px 2px 6px" }}>Digital</div><div className="qcards">{digital.map(panel)}</div></>}
+    <div className="holo-grid" data-testid="holo-hierarchy">
+      {rows.map((row) => [
+        block(row.brand.name, `${row.queues.length} queue(s)`, row.queues, row.brand.id),
+        ...row.channels.map((c) => block(`${row.brand.name} · ${c.label}`, null, c.queues, row.brand.id + "-" + c.key)),
+      ]).flat()}
     </div>
   );
 }
 
-function formatWeekRange(weeks) {
-  if (!weeks.length) return "";
-  const sorted = [...weeks].sort((a, b) => a - b);
-  // collapse contiguous runs into "a–b"
-  const parts = [];
-  let start = sorted[0], prev = sorted[0];
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] === prev + 1) { prev = sorted[i]; continue; }
-    parts.push(start === prev ? `${start}` : `${start}–${prev}`);
-    start = prev = sorted[i];
-  }
-  parts.push(start === prev ? `${start}` : `${start}–${prev}`);
-  return parts.join(", ");
+function CapsContext({ sim }) {
+  const cfg = sim.config;
+  const caps = cfg.hiring.caps || { total: cfg.hiring.cap, segments: {}, brands: {} };
+  const trace = sim.allocTrace || [];
+  const binding = trace.filter((t) => t.binding);
+  const levels = new Set();
+  for (const t of binding) for (const l of (t.boundBy || [])) levels.add(l);
+  const segEntries = Object.entries(caps.segments || {});
+  return (
+    <p className="note" data-testid="holo-caps" style={{ marginTop: 12 }}>
+      Hiring caps — total {caps.total == null ? "∞" : caps.total + "/wk"}
+      {segEntries.length ? `; ${segEntries.length} segment cap(s) set` : "; no segment caps"}.
+      {binding.length
+        ? ` The cap binds in ${binding.length} week(s); binding level(s): ${[...levels].join(", ") || "Total"}.`
+        : " The plan fits within every cap across the horizon."}
+    </p>
+  );
+}
+
+export function HolisticPanel({ sim }) {
+  const cfg = sim.config;
+  const cur = cfg.engine.currency;
+  const queues = orderedQueues(cfg);
+  const [active, setActive] = useState(() => new Set(queues.map((q) => q.id)));
+  const [showTrace, setShowTrace] = useState(false);
+
+  const metrics = queues.map((q) => queueMetrics(sim, q));
+  const on = (id) => active.has(id);
+  const toggle = (id) => setActive((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const shown = metrics.filter((m) => on(m.id));
+  const totals = shown.reduce((t, m) => ({
+    reqFte: t.reqFte + m.reqFte, hires: t.hires + m.hires, active: t.active + m.active,
+    attrition: t.attrition + m.attrition, agentMonthly: t.agentMonthly + m.agentMonthly,
+    otMonthly: t.otMonthly + m.otMonthly, custMonthly: t.custMonthly + m.custMonthly,
+  }), { reqFte: 0, hires: 0, active: 0, attrition: 0, agentMonthly: 0, otMonthly: 0, custMonthly: 0 });
+
+  return (
+    <Card
+      title="Holistic requirement panel"
+      hint="Required, active and pipeline headcount across the hierarchy, then an interactive per-queue table. Toggle a queue chip to include or exclude it — the capacity required and the totals recompute live."
+      right={<button type="button" className="btn sm" onClick={() => setShowTrace((s) => !s)} data-testid="holo-toggle-trace">{showTrace ? "Hide cap trace" : "Show cap trace"}</button>}
+    >
+      <HierarchyBlocks sim={sim} />
+
+      <div className="stat-row" style={{ marginTop: 14 }}>
+        <div className="stat">
+          <div className="l">Total capacity required (filtered)</div>
+          <div className="v" data-testid="holo-capacity-required">{num(totals.reqFte, 0)}<small> FTE</small></div>
+        </div>
+        <div className="stat"><div className="l">Queues included</div><div className="v" data-testid="holo-active-count">{shown.length}<small>/{metrics.length}</small></div></div>
+      </div>
+
+      <div className="rowflex" style={{ marginTop: 10 }} data-testid="holo-chips">
+        {metrics.map((m) => (
+          <button type="button" key={m.id} className={"chip" + (on(m.id) ? " on" : "")} aria-pressed={on(m.id)}
+            data-testid={"holo-chip-" + m.id} onClick={() => toggle(m.id)}>{m.name}</button>
+        ))}
+      </div>
+
+      <div className="tbl-wrap" style={{ marginTop: 12 }}>
+        <table className="data" data-testid="holo-table">
+          <thead>
+            <tr>
+              <th>Queue</th><th>Capacity req.</th><th>Hires</th><th>Active</th><th>Attrition #</th>
+              <th>Agent £/mo</th><th>OT £/mo</th><th>Customer £/mo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((m) => (
+              <tr key={m.id}>
+                <td style={{ textAlign: "left", fontWeight: 600 }}>{m.name}</td>
+                <td>{num(m.reqFte, 1)}</td>
+                <td>{num(m.hires, 1)}</td>
+                <td>{num(m.active, 1)}</td>
+                <td>{num(m.attrition, 1)}</td>
+                <td>{money(cur, m.agentMonthly)}</td>
+                <td>{money(cur, m.otMonthly)}</td>
+                <td>{money(cur, m.custMonthly)}</td>
+              </tr>
+            ))}
+            {shown.length === 0 && <tr><td colSpan={8} className="empty">No queues selected — tap a chip to include one.</td></tr>}
+            <tr className="grp total">
+              <td style={{ textAlign: "left" }}>Totals ({shown.length})</td>
+              <td data-testid="holo-total-req">{num(totals.reqFte, 1)}</td>
+              <td data-testid="holo-total-hires">{num(totals.hires, 1)}</td>
+              <td data-testid="holo-total-active">{num(totals.active, 1)}</td>
+              <td data-testid="holo-total-attrition">{num(totals.attrition, 1)}</td>
+              <td data-testid="holo-total-agent">{money(cur, totals.agentMonthly)}</td>
+              <td data-testid="holo-total-ot">{money(cur, totals.otMonthly)}</td>
+              <td data-testid="holo-total-cust">{money(cur, totals.custMonthly)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <CapsContext sim={sim} />
+
+      {showTrace && <AllocationTrace sim={sim} />}
+    </Card>
+  );
+}
+
+// The week-by-week cap-allocation trace (SPEC §3), retained as an on-demand
+// detail: what each week wanted, what each queue got, and which level bound.
+function AllocationTrace({ sim }) {
+  const cfg = sim.config;
+  const cur = cfg.engine.currency;
+  const trace = sim.allocTrace || [];
+  const binding = trace.filter((t) => t.binding);
+  const rows = binding.length ? binding : trace.slice(0, 8);
+  const qName = (id) => (cfg.queues.find((q) => q.id === id) || { name: id }).name;
+  return (
+    <div className="tbl-wrap" style={{ marginTop: 12, maxHeight: 340 }}>
+      <table className="data" data-testid="holo-trace">
+        <thead>
+          <tr><th>Week</th><th>Cap</th><th>Wanted</th>{cfg.queues.map((q) => <th key={q.id}>{q.name}</th>)}<th>Bound by</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((t) => (
+            <tr key={t.week} style={t.binding ? { background: "var(--red-s)" } : undefined}>
+              <td>{t.week + 1}</td>
+              <td>{t.cap == null ? "∞" : t.cap}</td>
+              <td>{num(t.want, 0)}{t.binding ? " ⚠" : ""}</td>
+              {cfg.queues.map((q) => {
+                const g = t.grants[q.id] || 0, d = t.denied[q.id] || 0;
+                return <td key={q.id} className={d > 0.05 ? "st-red" : undefined}>{g > 0.05 ? num(g, 0) : "–"}{d > 0.05 ? ` (−${num(d, 0)})` : ""}</td>;
+              })}
+              <td style={{ textAlign: "left" }}>{(t.boundBy || []).join(", ") || (t.binding ? "Total" : "–")}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><td colSpan={4 + cfg.queues.length} className="empty">No allocation activity.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
 }

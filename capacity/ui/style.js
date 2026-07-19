@@ -284,6 +284,25 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
 
+/* §24 holistic hierarchy blocks + filter chips */
+.holo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.holo-block { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; background: var(--panel-2); }
+.holo-block-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.holo-block-h strong { font-size: 12.5px; }
+.holo-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.holo-mini .l { font-size: 10px; color: var(--muted); display: block; }
+.holo-mini .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chip { appearance: none; font: inherit; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); cursor: pointer; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin-right: 10px; }
+
+/* §24.9 blank empty state */
+.empty-state { text-align: center; padding: 40px 20px; border: 1px dashed var(--line-2); border-radius: var(--radius); background: var(--panel); margin-bottom: 16px; }
+.empty-state .es-mark { font-size: 34px; color: var(--accent-2); }
+.empty-state h2 { margin: 8px 0 6px; font-size: 20px; }
+.empty-state p { color: var(--muted); max-width: 520px; margin: 0 auto 16px; }
+
 /* files card rows */
 .files-row { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px 14px; background: var(--panel-2); }
 .files-row-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }

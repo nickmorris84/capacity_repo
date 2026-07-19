@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useMemo } from "react";
-import { simulate } from "../engine/engine.js";
+import { simulate, applyGroupScope } from "../engine/engine.js";
 import { groupScenarioIds, strategyList } from "./views.js";
 
 /* Multi-simulation engine (Revision 2). The dashboard runs the ACTIVE strategy
@@ -39,7 +39,9 @@ export function useStrategySims(config, activeStrategyId, activeGroupId, delay =
   }, [hash, activeStrategyId]);
 
   const runInto = (missing) => {
-    for (const m of missing) cacheRef.current.set(m.k, simulate(config, { strategy: m.sid, viewIds: groupScenarioIds(config, activeGroupId) }));
+    // §24.8: group scope is inherited by the group's scenarios before simulating.
+    const scoped = applyGroupScope(config, activeGroupId);
+    for (const m of missing) cacheRef.current.set(m.k, simulate(scoped, { strategy: m.sid, viewIds: groupScenarioIds(config, activeGroupId) }));
     while (cacheRef.current.size > CACHE_MAX) cacheRef.current.delete(cacheRef.current.keys().next().value);
   };
 
@@ -94,9 +96,10 @@ export function runMatrix(config) {
   const cells = {};
   for (const g of groups) {
     const ids = groupScenarioIds(config, g.id);
+    const scoped = applyGroupScope(config, g.id); // §24.8
     cells[g.id] = {};
     for (const s of strategies) {
-      const sim = simulate(config, { strategy: s.id, viewIds: ids });
+      const sim = simulate(scoped, { strategy: s.id, viewIds: ids });
       let redWeeks = 0;
       for (const w of sim.weeks) if (config.queues.some((q) => w.queues[q.id].status === "red")) redWeeks++;
       const flags = sim.summary.flags;

@@ -767,3 +767,67 @@ presentation, and wiring applyGroupScope into sim-set. Note for R3b: the
 UI's strategy editor binds bufferPct/forwardMonths directly — forwardMonths
 is already ON every backfill strategy (default 3, stamped by migration), so
 the editor is a plain field, no write-on-edit dance.
+
+
+## R3b (SPEC §24 — Revision 3 UI)
+The §24 engine (R3a) wired through the UI, plus the §24 restructure. All seven
+gates green — P1, R1, R2, R3a, P7b (updated for the new structure), R3b, §13
+harness — with the engine untouched this phase (git diff engine/ empty) and a
+real-Chromium responsive pass (no horizontal document scroll at 390 or 1280).
+
+New gate file `tests/r3ui.test.js` (9 tests, R3b GATE): strategy buffer edit
+moves that strategy's numbers; holistic chip toggle recomputes the capacity
+required + totals; dependency graph|table toggle switches views and a node tap
+reveals flows; the creation flow renders Description→Volumes→Workforce→SLA→
+Knock-on→Sharing→Dependencies in order; the seasonality wizard fills an
+editable weekly series; the caps matrix feeds the allocator trace; a blank
+start renders the empty state and still simulates. Containment classes + the
+§-free render stay gated in r1ui across every tab (new tables/charts included).
+
+What shipped (UI):
+* **Shared hierarchy** (`views.hierarchy` / `orderedQueues`): Brand → Voice/
+  Digital/Support → queue — the one grouping used by the Holistic panel and the
+  Business box; Summary/Data keep their voice/digital rollups.
+* **Holistic panel redesign** (Plan): responsive hierarchy summary blocks
+  (Brand, Brand·Voice, Brand·Digital) that spread across the width; an
+  interactive table with a queue-chip filter (all on by default) whose capacity-
+  required headline and totals row recompute live; columns capacity required,
+  hires, active, attrition, agent £/mo, OT £/mo, customer £/mo (monthly per
+  §24.7); the §24.3 caps context inline; the week-by-week cap trace (now naming
+  the binding level) behind a toggle.
+* **Dependencies view** (`DependencyView`, top of Queues): Graph | Table toggle.
+  Graph — SVG nodes coloured by channel, badged D/L/U, edges for shares-with,
+  leverage and converts-to-calls; a week slider; tapping a node reveals its
+  simulated inflows (shared/leveraged/support hours) and converted volume.
+  Table — the same links as a from→to matrix.
+* **Queues rebuilt top-down** into the §24 creation flow: Description (channel +
+  digital subtype picker) → Volumes (single | weekly series via CSV paste or the
+  seasonality wizard with its one-line explainer | inherit) → Workforce (monthly
+  agent cost; shrinkage lives here with the "paid time not on contacts" helper)
+  → SLA (patience helper "average seconds…before hanging up — behaviour, not a
+  target"; workflow queues show an hours SLA) → Knock-on (§24.1 two fields +
+  call-queue target) → Sharing (§24.2 share % + shares-with picker) →
+  Dependencies & mode (brand, resourcing, priority, HC, supports). Duplicate/
+  Delete and the unmanned/leveraged badges are preserved.
+* **Strategies**: editable parameters on EVERY strategy — buffer % (built-in S2
+  included), forward months (backfill), schedule segments; S4 carries the "Manual
+  — simulates exactly your hiring plan, ignores caps" explainer.
+* **Scenarios, group-first**: everything is a scenario GROUP — create a group,
+  target it at brands/channels/queues (§24.8 scope on the group), add factors
+  inside it; no orphan line-item scenarios. `sim-set`/`runMatrix` apply
+  `applyGroupScope` before simulating.
+* **Settings**: Organisation & calendar (brand creation, name only, + week-1
+  date), the brand × channel hiring caps matrix with brand/total ceilings
+  (§24.3), monthly manager cost (§24.7); risk bands and the pattern libraries
+  stay. Digital subtype is chosen per queue (noted).
+* **New simulation menu** (header): Duplicate current | Start from defaults |
+  Start blank, with the build-from-nothing empty state (§24.9).
+* **config-ops.migrateConfig** now layers the §24 fields (knock/sharing/subtype/
+  monthly cost/caps/calendar/forwardMonths/SLA target) behaviour-preservingly
+  and decomposes pools into per-queue sharing; a truly-blank config keeps zero
+  brands. `money`/`perMonth` helpers added for monthly presentation.
+
+Tests: `tests/r3ui.test.js` added; `tests/r1ui.test.js` and `tests/harness.test.js`
+updated where the structure moved (brand creation → Settings; sharing replaces
+the pool editor; scenarios group-first). The engine batteries (engine/r1/r2/r3)
+are byte-identical.

@@ -57,18 +57,23 @@ async function checklist(label, ctx) {
     eq(count(), before + 1, "after delete");
   });
 
-  await t(`[${label}] add a scenario and toggle it`, async () => {
+  await t(`[${label}] add a scenario group and a factor, toggle it`, async () => {
     await goto("Scenarios");
-    const sel = doc.querySelector("#panel-scenarios select");
-    const before = doc.querySelectorAll("#panel-scenarios .rows > .erow").length;
-    setValue(sel, "p1");
-    await settle(60);
-    ok(doc.querySelectorAll("#panel-scenarios .rows > .erow").length >= before, "scenario added");
-    const toggle = doc.querySelector('#panel-scenarios input[type=checkbox]');
+    // §24.8 group-first: create a group, add a factor inside it, toggle the factor.
+    click(doc.querySelector("#panel-scenarios [data-testid=add-group]"));
+    await settle(80);
+    const addFactor = [...doc.querySelectorAll("#panel-scenarios [data-testid^=add-factor-]")].pop();
+    ok(addFactor, "the new group exposes an add-factor action");
+    click(addFactor);
+    await settle(80);
+    const rows = doc.querySelectorAll("#panel-scenarios [data-testid=scenario-rows] > .erow");
+    ok(rows.length >= 1, "a factor was added inside the group");
+    const toggle = doc.querySelector("#panel-scenarios [data-testid=scenario-rows] input[type=checkbox]");
+    ok(toggle, "factor has an enable toggle");
     const checked = toggle.checked;
     click(toggle);
     await settle(60);
-    eq(toggle.checked, !checked, "scenario toggled");
+    eq(toggle.checked, !checked, "factor toggled");
   });
 
   await t(`[${label}] save a snapshot, tick it, per-queue comparison renders`, async () => {

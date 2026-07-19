@@ -2,6 +2,89 @@ import { NumField, TextField, Card, Hint } from "../components/primitives.jsx";
 import { PresetLibrary } from "./PresetLibrary.jsx";
 import { clamp } from "../../engine/engine.js";
 
+const CHANNELS = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
+
+/* §24.10 organisation setup — brand creation (name only; a queue's channel and
+   digital subtype are chosen per queue on the Queues tab) and the week-1
+   calendar date that anchors the volume series and seasonality. */
+function OrgSetup({ config, ops }) {
+  const cal = (config.settings && config.settings.calendar) || {};
+  return (
+    <Card title="Organisation & calendar" hint="Create brands here (name only). A queue's channel — Voice, Digital or Support — and, for digital, its Customer/Workflow subtype are chosen per queue on the Queues tab.">
+      <div className="rowflex" style={{ marginBottom: 10 }}>
+        <label className="field" style={{ maxWidth: 220 }}>
+          <span className="lab">Week-1 date <Hint text="The calendar date week 1 of the horizon starts on. Anchors the seasonality wizard and month-granular scenarios to real months. Blank = start from January." /></span>
+          <input type="date" value={cal.weekOneDate || ""} onChange={(e) => ops.setWeekOneDate(e.target.value || null)} data-testid="week-one-date" />
+        </label>
+        <button type="button" className="btn sm primary" onClick={() => ops.addBrand()} data-testid="add-brand" style={{ alignSelf: "flex-end" }}>+ Add brand</button>
+      </div>
+      <div className="rows">
+        {(config.brands || []).map((b) => (
+          <div className="erow" key={b.id}>
+            <div className="erow-h">
+              <input type="text" className="inp" style={{ maxWidth: 220 }} value={b.name} aria-label="Brand name" onChange={(e) => ops.patchBrand(b.id, ["name"], e.target.value)} />
+              <span className="pill">{(config.queues || []).filter((q) => q.brandId === b.id).length} queue(s)</span>
+              <span className="spacer" />
+              <label className="switch"><input type="checkbox" checked={!!b.training} onChange={(e) => ops.toggleBrandTraining(b.id, e.target.checked)} /><span className="track" aria-hidden="true" /><span style={{ fontSize: 11 }}>Training profile</span></label>
+              {(config.brands || []).length > 1 && <button type="button" className="btn sm danger" onClick={() => ops.deleteBrand(b.id)}>Delete</button>}
+            </div>
+            {b.training && (
+              <div className="erow-b">
+                <div className="fieldrow">
+                  <NumField label="Training weeks" value={b.training.trainingWeeks} onChange={(v) => ops.patchBrand(b.id, ["training", "trainingWeeks"], v)} />
+                  <NumField label="Training shrinkage" unit="%" value={+((b.training.trainingShrinkagePct || 0) * 100).toFixed(1)} onChange={(v) => ops.patchBrand(b.id, ["training", "trainingShrinkagePct"], v / 100)} />
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/* §24.3 hiring cap hierarchy — a required cap per brand × channel, optional
+   per-brand ceilings and an optional total ceiling. The effective limit is the
+   tightest applicable; the allocator trims from the lowest marginal-churn grant
+   and names the binding level in the Plan's holistic trace. */
+function CapsMatrix({ config, ops }) {
+  const caps = config.hiring.caps || { segments: {}, brands: {}, total: config.hiring.cap };
+  const brands = config.brands || [];
+  const segVal = (bid, ch) => { const v = (caps.segments || {})[bid + "|" + ch]; return v == null ? "" : v; };
+  return (
+    <Card title="Hiring caps" sub="brand × channel" hint="Requisitions per week allowed in each brand × channel segment (blank = unlimited), plus optional per-brand and total ceilings. When a ceiling binds, scarce hires are trimmed from the lowest marginal-churn grant first.">
+      <div className="tbl-wrap">
+        <table className="data" data-testid="caps-matrix">
+          <thead><tr><th>Brand</th>{CHANNELS.map((c) => <th key={c.key}>{c.label}</th>)}<th>Brand ceiling</th></tr></thead>
+          <tbody>
+            {brands.map((b) => (
+              <tr key={b.id}>
+                <td style={{ textAlign: "left", fontWeight: 600 }}>{b.name}</td>
+                {CHANNELS.map((c) => (
+                  <td key={c.key}>
+                    <input type="number" className="inp" style={{ width: 72 }} value={segVal(b.id, c.key)} placeholder="∞"
+                      data-testid={"cap-" + b.id + "-" + c.key}
+                      onChange={(e) => ops.patchCapSegment(b.id, c.key, e.target.value === "" ? null : Number(e.target.value))} aria-label={b.name + " " + c.label + " cap"} />
+                  </td>
+                ))}
+                <td>
+                  <input type="number" className="inp" style={{ width: 72 }} value={(caps.brands || {})[b.id] == null ? "" : (caps.brands || {})[b.id]} placeholder="∞"
+                    data-testid={"cap-brand-" + b.id}
+                    onChange={(e) => ops.patchCapBrand(b.id, e.target.value === "" ? null : Number(e.target.value))} aria-label={b.name + " ceiling"} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="rowflex" style={{ marginTop: 10 }}>
+        <NumField label="Total ceiling" unit="/wk" id="cap-total" value={caps.total == null ? "" : caps.total} onChange={(v) => ops.patchCapTotal(v)} hint="The operation-wide weekly cap across all segments. Blank = no total ceiling." />
+        <span className="note" style={{ padding: "6px 10px" }}>Effective limit for a segment = the tightest of its segment cap, its brand ceiling and the total ceiling.</span>
+      </div>
+    </Card>
+  );
+}
+
 /* Settings — where the globals and pattern libraries live: engine window, OT
    rules, training + debt constants, knock-on channel defaults, hiring cap, costs,
    CX, the editable risk-threshold bands (which re-score the register without
@@ -25,6 +108,8 @@ export function SettingsEditor({ config, ops, intradayPresets, setIntradayPreset
 
   return (
     <div className="grid" style={{ gap: 16 }}>
+      <OrgSetup config={config} ops={ops} />
+      <CapsMatrix config={config} ops={ops} />
       <div className="grid cols-2" style={{ alignItems: "start" }}>
         <Card title="Engine & simulation window">
           <div className="fieldrow">
@@ -85,9 +170,8 @@ export function SettingsEditor({ config, ops, intradayPresets, setIntradayPreset
 
         <Card title="Hiring, costs & CX">
           <div className="fieldrow">
-            <NumField label="Global cap" unit="/wk" value={hir.cap} onChange={(v) => P(["hiring", "cap"], v)} />
-            <NumField label="Default buffer" unit="%" value={+(hir.buffer * 100).toFixed(0)} onChange={(v) => P(["hiring", "buffer"], v / 100)} />
-            <NumField label="Manager cost" unit="/yr" value={costs.managerCost} onChange={(v) => P(["costs", "managerCost"], v)} />
+            <NumField label="Default buffer" unit="%" value={+(hir.buffer * 100).toFixed(0)} onChange={(v) => P(["hiring", "buffer"], v / 100)} hint="Fallback buffer for buffer strategies that don't set their own. Hiring caps live in the Hiring caps card below." />
+            <NumField label="Manager cost" unit="/mo" value={costs.managerCostMonthly != null ? costs.managerCostMonthly : (costs.managerCost != null ? costs.managerCost / 12 : 0)} onChange={(v) => { P(["costs", "managerCostMonthly"], v); P(["costs", "managerCost"], v * 12); }} hint="Monthly manager cost. The engine works weekly (× 12 ÷ 52); outputs report monthly and annual." />
             <NumField label="Manager ratio" unit="1:n" value={costs.managerRatio} onChange={(v) => P(["costs", "managerRatio"], v)} />
           </div>
           <div className="fieldrow">

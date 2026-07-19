@@ -155,17 +155,28 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
             <Stat l="Peak training debt" v={num(Math.max(0, ...config.queues.map((q) => Math.max(0, ...sim.weeks.map((w) => w.queues[q.id].trainingDebt || 0)))), 0) + "/100"} />
           </div>
         </Card>
-        <Card title="Business" hint="SLA attainment and incident readiness.">
-          <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
-            <Stat l="Cap infeasible" v={bz.capInfeasible ? "yes" : "no"} />
-            <div>
-              <div className="l" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>SLA attainment by queue</div>
-              {bz.perQueueSla.map((s) => (
-                <div key={s.name} className="rowflex" style={{ justifyContent: "space-between", fontSize: 12 }}>
-                  <span>{s.name}</span><strong>{pct(s.attainment)}</strong>
-                </div>
-              ))}
-            </div>
+        <Card title="Business" hint="Per-queue SLA target vs simulated attainment, RAG'd (§24.10), plus incident readiness.">
+          <Stat l="Cap infeasible" v={bz.capInfeasible ? "yes" : "no"} />
+          <div className="tbl-wrap" style={{ marginTop: 10 }}>
+            <table className="data" data-testid="business-box">
+              <thead><tr><th>Queue</th><th>SLA target</th><th>Attainment</th><th>RAG</th></tr></thead>
+              <tbody>
+                {config.queues.map((q) => {
+                  const pq = (sim.summary.perQueue || {})[q.id] || {};
+                  const target = pq.slaTarget != null ? pq.slaTarget : (q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9);
+                  const att = pq.slaAttainment != null ? pq.slaAttainment : null;
+                  const rag = pq.slaRag || (att == null ? null : att >= target ? "green" : att >= target * 0.9 ? "amber" : "red");
+                  return (
+                    <tr key={q.id}>
+                      <td style={{ textAlign: "left", fontWeight: 600 }}>{q.name}</td>
+                      <td>{pct(target)}</td>
+                      <td>{att == null ? "–" : pct(att)}</td>
+                      <td><span className={"badge " + (rag || "amber")} data-testid={"biz-rag-" + q.id}>{rag || "–"}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </Card>
         <Card title="CX" hint="Customer experience economics.">
