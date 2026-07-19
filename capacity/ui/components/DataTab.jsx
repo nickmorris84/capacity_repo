@@ -4,11 +4,12 @@ import { columnsFor, buildWeeklyRows, assumptionsColumns, COLUMN_GROUPS } from "
 import { groupList } from "../views.js";
 import { queueCSV, downloadText } from "../exports.js";
 
-/* Data tab (§6/§16). Two views of the per-queue weekly record: Outputs (every
-   result with column-group tints and a per-group show/hide picker) and
-   Assumptions-over-time (the §16 audit contract — the resolved volume, blended
-   AHT, SLA, attrition, training shrinkage, OT used and active scenarios that
-   were in force each week). Scenario group and queue chosen here; read-only. */
+/* Data tab. Two views of the per-queue weekly record: Outputs (every result with
+   column-group tints and a per-group show/hide picker) and Assumptions-over-time
+   (the inputs in force — the resolved volume, blended AHT, SLA, attrition,
+   training shrinkage and active scenarios that were in force each week; OT used
+   is an outcome and lives in the Outputs view, not here). Scenario group and
+   queue chosen here; read-only. */
 export function DataTab({ sim, config, activeGroupId, onSelectGroup }) {
   const [qid, setQid] = useState(config.queues[0] ? config.queues[0].id : "");
   const [hidden, setHidden] = useState(() => new Set());
@@ -68,7 +69,7 @@ export function DataTab({ sim, config, activeGroupId, onSelectGroup }) {
           </div>
         </Card>
       ) : (
-        <Card title={`${queue.name} — assumptions in effect`} sub="§16 audit contract" hint="The resolved parameters the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage, OT used and the active scenario tags.">
+        <Card title={`${queue.name} — assumptions in effect`} sub="inputs in force" hint="The resolved inputs the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage and the active scenario tags.">
           <div className="tbl-wrap" style={{ maxHeight: 560 }}>
             <table className="data" data-testid="assumptions-table">
               <thead><tr>{asmCols.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>

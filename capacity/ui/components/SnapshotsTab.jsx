@@ -12,8 +12,8 @@ const dt = (iso) => { try { return iso.replace("T", " ").slice(0, 16); } catch (
 /* Snapshots tab (§14.7). Snapshots are FROZEN results captured for before/after
    comparison and sharing; scenario VIEWS (the context-bar selector) are live
    lenses on the current model. The compare tick set lives in App, above the
-   tabs, so switching tabs never clears it. The full Excel package is reachable
-   here and in Settings (§14.8). */
+   tabs, so switching tabs never clears it. All import/export lives in the Files
+   card at the foot of this tab — the single home for it (removed from Settings). */
 export function SnapshotsTab({ snapshots, storageMode, storageNotice, compareSel, setCompareSel, onSave, onLoadSettings, onDelete, onRefresh, config, sim, sims, activeStrategy, activeViewId, onImportConfig }) {
   const [name, setName] = useState("");
   const cur = config.engine.currency;
@@ -81,7 +81,7 @@ export function SnapshotsTab({ snapshots, storageMode, storageNotice, compareSel
         </Card>
       )}
 
-      <FilesCard sim={sim} strategySims={sims} config={config} activeStrategy={activeStrategy} activeViewId={activeViewId} onImportConfig={onImportConfig} title="Excel package & files" />
+      <FilesCard sim={sim} strategySims={sims} config={config} activeStrategy={activeStrategy} activeViewId={activeViewId} onImportConfig={onImportConfig} title="Files" />
     </div>
   );
 }

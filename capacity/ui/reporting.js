@@ -64,9 +64,9 @@ export function buildWeeklyRows(sim, queue, config) {
   });
 }
 
-// §16 audit contract — the resolved assumptions in effect, per week.
+// Inputs-in-force contract — the resolved assumptions in effect, per week.
+// OT used is an outcome, not an input in force; it stays in the Outputs columns.
 export function assumptionsColumns(queue, cur = "£") {
-  const N1 = (v) => num(v, 1);
   return [
     { key: "week", label: "Week", fmt: (v) => String(v) },
     { key: "volume", label: "Volume", fmt: (v) => num(v, 0) },
@@ -74,7 +74,6 @@ export function assumptionsColumns(queue, cur = "£") {
     { key: "slaInEffect", label: "SLA in effect", fmt: (v) => num(v, queue.type === "voice" ? 0 : 1) },
     { key: "attrInEffect", label: "Attrition %", fmt: (v) => pct(v, 1) },
     { key: "trainShrink", label: "Train shrink %", fmt: (v) => pct(v, 1) },
-    { key: "otHours", label: "OT used (h)", fmt: N1 },
     { key: "trainingDebt", label: "Training debt", fmt: (v) => num(v, 0) },
     { key: "scenarioTags", label: "Active scenarios", fmt: (v) => v || "—" },
   ];

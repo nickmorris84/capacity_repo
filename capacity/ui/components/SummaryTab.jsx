@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Card } from "./primitives.jsx";
-import { PrintButton } from "../print.jsx";
 import { buildVerdict, buildAudienceBlocks, buildRiskRegister, buildQueueSummary } from "../reporting.js";
 import { strategyList, groupList, resolveStrategyName, groupName } from "../views.js";
 import { money, moneyFull, pct, num } from "../format.js";
@@ -117,8 +116,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
   return (
     <div className="grid summary-print" style={{ gap: 16 }} data-testid="summary-panel">
       <div className="btnbar">
-        <PrintButton label="Print / PDF Summary" testid="summary-print" className="btn primary" />
-        <span className="note" style={{ padding: "6px 10px" }}>Leadership one-pager — {resolveStrategyName(config, activeStrategy)} · group {groupName(config, activeGroupId)}.</span>
+        <span className="note" style={{ padding: "6px 10px" }}>Leadership one-pager — {resolveStrategyName(config, activeStrategy)} · group {groupName(config, activeGroupId)}. Print or save to PDF from the context bar above.</span>
       </div>
 
       <DecisionMatrix config={config} matrix={matrix} matrixStale={matrixStale} onRunMatrix={onRunMatrix} onSelectCell={onSelectCell} activeGroupId={activeGroupId} activeStrategy={activeStrategy} />

@@ -640,3 +640,34 @@ edits never trigger a recompute.
 - `npm run build:html` — regenerate dist/ deliverables from source.
 - Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
   into a React artifact host.
+
+## SWEEP (Revision 3 — defect sweep, no engine changes)
+Fixes only; zero engine diffs (`git diff engine/` empty) and every gate green.
+
+1. **Responsive containment (Rule 9).** Every table lives in a width-capped
+   `.tbl-wrap` / `.ribbon-wrap` and every chart in a `.chart`; `.main` clips
+   horizontal overflow (sticky chrome are its siblings, so stickiness is intact)
+   and `.card`/`.grid` children carry `min-width:0`, so intrinsically-wide
+   content scrolls internally and the document never scrolls horizontally.
+   `tests/r1ui.test.js` asserts the containment classes on every table/chart per
+   tab; a real-Chromium pass confirmed docScroll == clientWidth at 390px and
+   1280px across all nine tabs.
+2. **Label sweep.** Removed every rendered spec reference (§…) from titles, subs,
+   hints and option labels; `tests/r1ui.test.js` asserts no "§" survives in any
+   rendered string.
+3. **Plan.** Deleted the bottom weekly data table (a duplicate of the Data tab).
+4. **Summary.** Print / PDF now lives only in the context bar; the on-page button
+   is gone (the caption points to the context bar).
+5. **Data — assumptions view.** Shows inputs in force only; "OT used" (an outcome)
+   was removed from `assumptionsColumns` and remains in the Outputs columns.
+6. **Files.** The Snapshots export/import area is one clean **Files** card (Excel
+   package, Config JSON, Run files) and export/import was removed from Settings.
+7. **Settings libraries.** Seasonality and the new Arrival patterns are LISTS only
+   — create / rename / edit / delete named patterns (`PresetLibrary`). Application
+   moved to Queues: a **System seasonality** card applies a pattern to the system,
+   and per-queue Arrival / Seasonality sections apply patterns via an apply-only
+   selector. `SeasonalityEditor` (the old in-Settings application editor) was
+   deleted.
+
+Test moves: the Excel/params-CSV export/import checks in `harness.test.js` and
+`r1ui.test.js` now target the Files card on the Snapshots tab.

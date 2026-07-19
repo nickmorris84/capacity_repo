@@ -6,3 +6,4 @@
 5. Libraries: react, react-dom, recharts, xlsx (SheetJS), esbuild, jsdom only.
 6. End every session: update PROGRESS.md with what passed, commit `P<n>: <summary>`.
 7. Ask at most 3 clarifying questions, only if the answer changes architecture.
+8. No unconstrained widths — every table/chart lives in a width-capped container; the page never scrolls horizontally.

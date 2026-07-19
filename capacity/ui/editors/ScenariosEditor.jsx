@@ -118,7 +118,7 @@ function GroupsManager({ config, ops }) {
   const [name, setName] = useState("");
   const enabledIds = config.scenarios.filter((s) => s.enabled).map((s) => s.id);
   return (
-    <Card title="Scenario groups (§19)" hint="A group bundles scenarios; it becomes a row of the decision matrix and a choice in the context bar. Built-ins: Plan of record (tracks the enabled set) and No scenarios."
+    <Card title="Scenario groups" hint="A group bundles scenarios; it becomes a row of the decision matrix and a choice in the context bar. Built-ins: Plan of record (tracks the enabled set) and No scenarios."
       right={<div className="rowflex"><input type="text" className="inp" style={{ width: 160 }} placeholder="new group name" value={name} onChange={(e) => setName(e.target.value)} data-testid="group-name" /><button type="button" className="btn sm primary" disabled={!name.trim()} onClick={() => { ops.addGroup(name.trim(), enabledIds); setName(""); }} data-testid="add-group">Save enabled as group</button></div>}>
       <div className="rows">
         {(config.groups || []).map((g) => {
@@ -191,7 +191,7 @@ export function ScenariosEditor({ config, ops }) {
     <div className="grid" style={{ gap: 14 }}>
       <div className="btnbar">
         <SelectField label="Add scenario" value="" onChange={(v) => v && (v === "unified" ? ops.addUnifiedScenario() : ops.addScenario(v))}
-          options={[{ value: "", label: "Choose a type…" }, { value: "unified", label: "Unified (§19 shape)" }, ...Object.entries(LEGACY_LABELS).map(([value, label]) => ({ value, label }))]} />
+          options={[{ value: "", label: "Choose a type…" }, { value: "unified", label: "Unified" }, ...Object.entries(LEGACY_LABELS).map(([value, label]) => ({ value, label }))]} />
         <span className="note" style={{ padding: "6px 10px", alignSelf: "flex-end" }}>{config.scenarios.filter((s) => s.enabled).length} enabled of {config.scenarios.length}.</span>
       </div>
 

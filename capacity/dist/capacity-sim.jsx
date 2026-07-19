@@ -1606,7 +1606,7 @@ import { createRoot } from "react-dom/client";
 
 // ui/App.jsx
 var import_engine10 = __toESM(require_engine());
-import { useState as useState14, useMemo as useMemo3, useEffect as useEffect4, useRef as useRef4, useCallback as useCallback4 } from "react";
+import { useState as useState15, useMemo as useMemo3, useEffect as useEffect4, useRef as useRef4, useCallback as useCallback4 } from "react";
 
 // ui/sim-set.js
 var import_engine = __toESM(require_engine());
@@ -2776,7 +2776,6 @@ function buildWeeklyRows(sim, queue, config) {
   });
 }
 function assumptionsColumns(queue, cur = "\xA3") {
-  const N1 = (v) => num(v, 1);
   return [
     { key: "week", label: "Week", fmt: (v) => String(v) },
     { key: "volume", label: "Volume", fmt: (v) => num(v, 0) },
@@ -2784,7 +2783,6 @@ function assumptionsColumns(queue, cur = "\xA3") {
     { key: "slaInEffect", label: "SLA in effect", fmt: (v) => num(v, queue.type === "voice" ? 0 : 1) },
     { key: "attrInEffect", label: "Attrition %", fmt: (v) => pct(v, 1) },
     { key: "trainShrink", label: "Train shrink %", fmt: (v) => pct(v, 1) },
-    { key: "otHours", label: "OT used (h)", fmt: N1 },
     { key: "trainingDebt", label: "Training debt", fmt: (v) => num(v, 0) },
     { key: "scenarioTags", label: "Active scenarios", fmt: (v) => v || "\u2014" }
   ];
@@ -3221,16 +3219,13 @@ function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId
   const setSortKey = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : key === "risk" ? 1 : -1 }));
   const arrow = (key) => sort.key === key ? sort.dir < 0 ? " \u2193" : " \u2191" : "";
   return /* @__PURE__ */ jsxs3("div", { className: "grid summary-print", style: { gap: 16 }, "data-testid": "summary-panel", children: [
-    /* @__PURE__ */ jsxs3("div", { className: "btnbar", children: [
-      /* @__PURE__ */ jsx4(PrintButton, { label: "Print / PDF Summary", testid: "summary-print", className: "btn primary" }),
-      /* @__PURE__ */ jsxs3("span", { className: "note", style: { padding: "6px 10px" }, children: [
-        "Leadership one-pager \u2014 ",
-        resolveStrategyName(config, activeStrategy),
-        " \xB7 group ",
-        groupName(config, activeGroupId),
-        "."
-      ] })
-    ] }),
+    /* @__PURE__ */ jsx4("div", { className: "btnbar", children: /* @__PURE__ */ jsxs3("span", { className: "note", style: { padding: "6px 10px" }, children: [
+      "Leadership one-pager \u2014 ",
+      resolveStrategyName(config, activeStrategy),
+      " \xB7 group ",
+      groupName(config, activeGroupId),
+      ". Print or save to PDF from the context bar above."
+    ] }) }),
     /* @__PURE__ */ jsx4(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }),
     /* @__PURE__ */ jsxs3(Card, { title: "Verdict & key findings", children: [
       /* @__PURE__ */ jsx4("p", { style: { margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }, children: verdict.paragraph }),
@@ -4002,20 +3997,6 @@ function HiringSummary({ sim, cur }) {
     ] })
   ] }) }) });
 }
-function PlanDataTable({ sim, cfg }) {
-  const [qid, setQid] = useState7(cfg.queues[0] ? cfg.queues[0].id : "");
-  const queue = cfg.queues.find((q) => q.id === qid) || cfg.queues[0];
-  if (!queue) return null;
-  const cols = columnsFor(queue, cfg.engine.currency);
-  const rows = buildWeeklyRows(sim, queue, cfg);
-  return /* @__PURE__ */ jsxs8(Card, { title: "Weekly data table", sub: "the numbers behind the plan", hint: "The full per-queue weekly record \u2014 the same data the Data tab exposes, inline here for the plan of record.", children: [
-    /* @__PURE__ */ jsx9("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 10 }, children: /* @__PURE__ */ jsx9(SelectField, { label: "Queue", value: queue.id, onChange: setQid, options: cfg.queues.map((q) => ({ value: q.id, label: q.name })) }) }),
-    /* @__PURE__ */ jsx9("div", { className: "tbl-wrap", style: { maxHeight: 420 }, children: /* @__PURE__ */ jsxs8("table", { className: "data grouped", "data-testid": "plan-data-table", children: [
-      /* @__PURE__ */ jsx9("thead", { children: /* @__PURE__ */ jsx9("tr", { children: cols.map((c) => /* @__PURE__ */ jsx9("th", { className: "grp-" + c.group.toLowerCase(), children: c.label }, c.key)) }) }),
-      /* @__PURE__ */ jsx9("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx9("tr", { children: cols.map((c) => /* @__PURE__ */ jsx9("td", { className: "grp-" + c.group.toLowerCase() + (c.key === "status" ? " st-" + row.status : ""), children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
-    ] }) })
-  ] });
-}
 function PlanTab({ sim, viewLabel }) {
   const cfg = sim.config;
   const [selectedWeek, setSelectedWeek] = useState7(0);
@@ -4081,8 +4062,7 @@ function PlanTab({ sim, viewLabel }) {
           /* @__PURE__ */ jsx9(IdleChurnChart, { sim, selectedWeek: wk }),
           /* @__PURE__ */ jsx9(BurnoutChart, { sim, selectedWeek: wk })
         ] }),
-        /* @__PURE__ */ jsx9(HolisticPanel, { sim }),
-        /* @__PURE__ */ jsx9(PlanDataTable, { sim, cfg })
+        /* @__PURE__ */ jsx9(HolisticPanel, { sim })
       ]
     }
   );
@@ -4434,7 +4414,7 @@ function DataTab({ sim, config, activeGroupId, onSelectGroup }) {
     mode === "outputs" ? /* @__PURE__ */ jsx10(Card, { title: `${queue.name} \u2014 weekly`, sub: `${rows.length} weeks \xB7 ${outCols.length} columns`, children: /* @__PURE__ */ jsx10("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs9("table", { className: "data grouped", "data-testid": "data-table", children: [
       /* @__PURE__ */ jsx10("thead", { children: /* @__PURE__ */ jsx10("tr", { children: outCols.map((c) => /* @__PURE__ */ jsx10("th", { className: "grp-" + c.group.toLowerCase(), children: c.label }, c.key)) }) }),
       /* @__PURE__ */ jsx10("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx10("tr", { children: outCols.map((c) => /* @__PURE__ */ jsx10("td", { className: "grp-" + c.group.toLowerCase() + (c.key === "status" ? " st-" + row.status : ""), children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
-    ] }) }) }) : /* @__PURE__ */ jsx10(Card, { title: `${queue.name} \u2014 assumptions in effect`, sub: "\xA716 audit contract", hint: "The resolved parameters the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage, OT used and the active scenario tags.", children: /* @__PURE__ */ jsx10("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs9("table", { className: "data", "data-testid": "assumptions-table", children: [
+    ] }) }) }) : /* @__PURE__ */ jsx10(Card, { title: `${queue.name} \u2014 assumptions in effect`, sub: "inputs in force", hint: "The resolved inputs the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage and the active scenario tags.", children: /* @__PURE__ */ jsx10("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs9("table", { className: "data", "data-testid": "assumptions-table", children: [
       /* @__PURE__ */ jsx10("thead", { children: /* @__PURE__ */ jsx10("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx10("th", { children: c.label }, c.key)) }) }),
       /* @__PURE__ */ jsx10("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx10("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx10("td", { style: c.key === "scenarioTags" ? { textAlign: "left" } : void 0, children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
     ] }) }) })
@@ -4567,7 +4547,7 @@ var readText = (file) => new Promise((res, rej) => {
   r.onerror = rej;
   r.readAsText(file);
 });
-function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, onImportConfig, title = "Files \u2014 export & import" }) {
+function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, onImportConfig, title = "Files" }) {
   const [msg, setMsg] = useState10(null);
   const wbInput = useRef3(null), cfgInput = useRef3(null), runInput = useRef3(null), csvInput = useRef3(null);
   const say = (text, tone = "ok") => setMsg({ text, tone });
@@ -4610,29 +4590,36 @@ function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, on
       say("Parameters CSV import failed: " + e.message, "err");
     }
   };
+  const Section = ({ label, hint, children }) => /* @__PURE__ */ jsxs11("div", { className: "files-row", children: [
+    /* @__PURE__ */ jsxs11("div", { className: "files-row-h", children: [
+      /* @__PURE__ */ jsx12("strong", { children: label }),
+      hint ? /* @__PURE__ */ jsx12("span", { className: "note", style: { background: "none", border: 0, padding: 0 }, children: hint }) : null
+    ] }),
+    /* @__PURE__ */ jsx12("div", { className: "btnbar", children })
+  ] });
   return /* @__PURE__ */ jsxs11(Card, { title, hint: "One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.", children: [
-    /* @__PURE__ */ jsxs11("div", { className: "btnbar", children: [
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn primary", "data-testid": "export-workbook", onClick: onWorkbook, children: "Export Excel workbook" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-config", onClick: () => downloadText("capacity-config.json", configJSON(config), "application/json"), children: "Export config JSON" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-run", onClick: () => downloadText("capacity-run.json", runJSON(sim, config), "application/json"), children: "Export saved run" })
-    ] }),
-    /* @__PURE__ */ jsxs11("div", { className: "btnbar", style: { marginTop: 8 }, children: [
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-params-csv", onClick: () => downloadText("parameters.csv", parametersCSV(config), "text/csv"), children: "Parameters CSV" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-volumes-csv", onClick: () => downloadText("volumes.csv", volumesCSV(config), "text/csv"), children: "Volumes CSV" })
-    ] }),
-    /* @__PURE__ */ jsx12("hr", { className: "sep", style: { margin: "14px 0" } }),
-    /* @__PURE__ */ jsxs11("div", { className: "btnbar", children: [
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => wbInput.current && wbInput.current.click(), children: "Import Excel (Parameters + Volumes)" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => cfgInput.current && cfgInput.current.click(), children: "Import config JSON" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => runInput.current && runInput.current.click(), children: "Import saved run" }),
-      /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => csvInput.current && csvInput.current.click(), children: "Import parameters CSV" }),
+    /* @__PURE__ */ jsxs11("div", { className: "grid", style: { gap: 14 }, children: [
+      /* @__PURE__ */ jsxs11(Section, { label: "Excel package", hint: "One workbook carries every sheet; re-import reads only Parameters and Volumes.", children: [
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn primary", "data-testid": "export-workbook", onClick: onWorkbook, children: "Export workbook" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => wbInput.current && wbInput.current.click(), children: "Import workbook" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-params-csv", onClick: () => downloadText("parameters.csv", parametersCSV(config), "text/csv"), children: "Parameters CSV" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-volumes-csv", onClick: () => downloadText("volumes.csv", volumesCSV(config), "text/csv"), children: "Volumes CSV" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => csvInput.current && csvInput.current.click(), children: "Import parameters CSV" })
+      ] }),
+      /* @__PURE__ */ jsxs11(Section, { label: "Config JSON", hint: "The whole plan as JSON \u2014 export to share, import to replace.", children: [
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-config", onClick: () => downloadText("capacity-config.json", configJSON(config), "application/json"), children: "Export config" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => cfgInput.current && cfgInput.current.click(), children: "Import config" })
+      ] }),
+      /* @__PURE__ */ jsxs11(Section, { label: "Run files", hint: "A saved run bundles the config with its results; importing one makes that config active.", children: [
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-run", onClick: () => downloadText("capacity-run.json", runJSON(sim, config), "application/json"), children: "Export run" }),
+        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => runInput.current && runInput.current.click(), children: "Import run" })
+      ] }),
       /* @__PURE__ */ jsx12("input", { ref: wbInput, type: "file", accept: ".xlsx", "data-testid": "import-workbook", style: { display: "none" }, onChange: (e) => e.target.files[0] && importWorkbook(e.target.files[0]) }),
       /* @__PURE__ */ jsx12("input", { ref: cfgInput, type: "file", accept: ".json", "data-testid": "import-config", style: { display: "none" }, onChange: (e) => e.target.files[0] && importConfig(e.target.files[0]) }),
       /* @__PURE__ */ jsx12("input", { ref: runInput, type: "file", accept: ".json", "data-testid": "import-run", style: { display: "none" }, onChange: (e) => e.target.files[0] && importRun(e.target.files[0]) }),
       /* @__PURE__ */ jsx12("input", { ref: csvInput, type: "file", accept: ".csv", "data-testid": "import-params-csv", style: { display: "none" }, onChange: (e) => e.target.files[0] && importParamsCSV(e.target.files[0]) })
     ] }),
-    msg && /* @__PURE__ */ jsx12("p", { className: "note", style: { marginTop: 12, color: msg.tone === "err" ? "var(--red)" : void 0 }, children: msg.text }),
-    /* @__PURE__ */ jsx12("p", { className: "note", style: { marginTop: 10 }, children: "Importing a workbook reads only the Parameters and Volumes sheets (output sheets are ignored) and patches your config by path. Config and saved-run JSON replace the whole plan." })
+    msg && /* @__PURE__ */ jsx12("p", { className: "note", style: { marginTop: 12, color: msg.tone === "err" ? "var(--red)" : void 0 }, children: msg.text })
   ] });
 }
 
@@ -4712,7 +4699,7 @@ function SnapshotsTab({ snapshots, storageMode, storageNotice, compareSel, setCo
       /* @__PURE__ */ jsx13("h4", { style: { margin: "18px 0 6px", fontSize: 13 }, children: "Per-queue comparison (matched by name)" }),
       /* @__PURE__ */ jsx13(PerQueue, { runs: selected, cur })
     ] }),
-    /* @__PURE__ */ jsx13(FilesCard, { sim, strategySims: sims, config, activeStrategy, activeViewId, onImportConfig, title: "Excel package & files" })
+    /* @__PURE__ */ jsx13(FilesCard, { sim, strategySims: sims, config, activeStrategy, activeViewId, onImportConfig, title: "Files" })
   ] });
 }
 function TotalsDelta({ runs, cur }) {
@@ -4779,42 +4766,21 @@ function PerQueue({ runs, cur }) {
 // ui/editors/PresetBar.jsx
 import { useState as useState12 } from "react";
 import { jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
-function PresetBar({ presets, onApply, onSaveAs, applyLabel = "Preset" }) {
+function ApplyPreset({ presets, onApply, label = "Apply pattern" }) {
   const [pick, setPick] = useState12("");
-  const [name, setName] = useState12("");
-  return /* @__PURE__ */ jsxs13("div", { className: "rowflex", children: [
-    /* @__PURE__ */ jsx14("div", { style: { minWidth: 200 }, children: /* @__PURE__ */ jsx14(
-      SelectField,
-      {
-        label: applyLabel,
-        value: pick,
-        onChange: (v) => {
-          setPick(v);
-          const p = presets.find((x) => x.id === v);
-          if (p) onApply(p);
-        },
-        options: [{ value: "", label: "Apply a preset\u2026" }, ...presets.map((p) => ({ value: p.id, label: p.name + (p.builtin ? "" : " \u2605") }))]
-      }
-    ) }),
-    /* @__PURE__ */ jsx14("span", { className: "spacer" }),
-    /* @__PURE__ */ jsxs13("label", { className: "field", style: { minWidth: 160 }, children: [
-      /* @__PURE__ */ jsx14("span", { className: "lab", children: "Save current as" }),
-      /* @__PURE__ */ jsx14("input", { type: "text", value: name, placeholder: "my preset", onChange: (e) => setName(e.target.value) })
-    ] }),
-    /* @__PURE__ */ jsx14(
-      "button",
-      {
-        type: "button",
-        className: "btn sm",
-        disabled: !name.trim(),
-        onClick: () => {
-          onSaveAs(name.trim());
-          setName("");
-        },
-        children: "Save as new"
-      }
-    )
-  ] });
+  return /* @__PURE__ */ jsx14("div", { style: { minWidth: 200, maxWidth: 260 }, children: /* @__PURE__ */ jsx14(
+    SelectField,
+    {
+      label,
+      value: pick,
+      onChange: (v) => {
+        const p = presets.find((x) => x.id === v);
+        if (p) onApply(p);
+        setPick("");
+      },
+      options: [{ value: "", label: "Apply a pattern\u2026" }, ...presets.map((p) => ({ value: p.id, label: p.name + (p.builtin ? "" : " \u2605") }))]
+    }
+  ) });
 }
 function IntradaySliders({ curve, onChange, eng }) {
   const stepMin = eng.intervalMin;
@@ -5004,15 +4970,10 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, setIntradayPresets, 
       /* @__PURE__ */ jsxs14("details", { className: "acc-sec", children: [
         /* @__PURE__ */ jsx15("summary", { children: /* @__PURE__ */ jsx15("strong", { children: "Arrival pattern" }) }),
         /* @__PURE__ */ jsxs14("div", { className: "acc-b", children: [
-          /* @__PURE__ */ jsx15(
-            PresetBar,
-            {
-              presets: intradayPresets,
-              applyLabel: "Intraday preset",
-              onApply: (p) => ops.patchQueue(q.id, ["profile"], [...p.curve]),
-              onSaveAs: (name) => setIntradayPresets((lib) => [...lib, makeIntradayPreset(name, q.profile)])
-            }
-          ),
+          /* @__PURE__ */ jsxs14("div", { className: "rowflex", children: [
+            /* @__PURE__ */ jsx15(ApplyPreset, { presets: intradayPresets, onApply: (p) => ops.patchQueue(q.id, ["profile"], [...p.curve]), label: "Apply arrival pattern" }),
+            /* @__PURE__ */ jsx15("span", { className: "note", style: { padding: "6px 10px" }, children: "Create and edit patterns in Settings \u2192 Arrival patterns. Hand-tune this queue's curve below." })
+          ] }),
           /* @__PURE__ */ jsx15(IntradaySliders, { curve: q.profile, eng, onChange: (next) => ops.patchQueue(q.id, ["profile"], next) })
         ] })
       ] }),
@@ -5064,7 +5025,8 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, setIntradayPresets, 
         /* @__PURE__ */ jsx15("div", { className: "acc-b", children: q.overrides && q.overrides.seasonality ? /* @__PURE__ */ jsxs14(Fragment6, { children: [
           /* @__PURE__ */ jsxs14("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
             /* @__PURE__ */ jsx15("button", { type: "button", className: "btn sm", onClick: () => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1)), children: "Initialise overlay" }),
-            /* @__PURE__ */ jsx15("span", { className: "note", style: { padding: "6px 10px" }, children: "Queue overlay multiplies on top of the system pattern (Settings)." })
+            /* @__PURE__ */ jsx15(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => ops.patchQueue(q.id, ["seasonal"], [...p.months]), label: "Apply seasonality pattern" }),
+            /* @__PURE__ */ jsx15("span", { className: "note", style: { padding: "6px 10px" }, children: "Queue overlay multiplies on top of the system pattern. Create and edit patterns in Settings \u2192 Seasonality patterns." })
           ] }),
           Array.isArray(q.seasonal) && /* @__PURE__ */ jsx15("div", { className: "fieldrow", children: q.seasonal.map((v, i) => /* @__PURE__ */ jsx15("div", { style: { width: 72 }, children: /* @__PURE__ */ jsx15(NumField, { label: "M" + (i + 1), unit: "%", value: +(v * 100).toFixed(0), onChange: (nv) => {
             const n = q.seasonal.slice();
@@ -5092,7 +5054,7 @@ function BrandManager({ config, ops }) {
   return /* @__PURE__ */ jsx15(
     Card,
     {
-      title: "Brands (\xA715)",
+      title: "Brands",
       hint: "A brand groups queues and carries one parameter block: its training profile. Queues adopt a brand in their Resourcing section.",
       right: /* @__PURE__ */ jsx15("button", { type: "button", className: "btn sm primary", onClick: () => ops.addBrand(), "data-testid": "add-brand", children: "+ Add brand" }),
       children: /* @__PURE__ */ jsx15("div", { className: "rows", children: config.brands.map((b) => /* @__PURE__ */ jsxs14("div", { className: "erow", children: [
@@ -5124,7 +5086,7 @@ function PoolManager({ config, ops }) {
   return /* @__PURE__ */ jsx15(
     Card,
     {
-      title: "Pools (\xA717)",
+      title: "Pools",
       hint: "A pool is an explicit cross-brand / cross-channel sharing group. Members contribute spare (\xD7 their share) to any member in deficit, pro-rata, across brands.",
       right: /* @__PURE__ */ jsx15("button", { type: "button", className: "btn sm primary", onClick: () => ops.addPool(), "data-testid": "add-pool", children: "+ Add pool" }),
       children: (config.pools || []).length === 0 ? /* @__PURE__ */ jsx15("p", { className: "note", children: "No pools. Add one to share spare capacity across brands and channels." }) : /* @__PURE__ */ jsx15("div", { className: "rows", children: config.pools.map((p) => /* @__PURE__ */ jsxs14("div", { className: "erow", children: [
@@ -5159,7 +5121,7 @@ function PoolManager({ config, ops }) {
 }
 function ChannelTemplates({ config, ops }) {
   const chans = config.channels || { voice: {}, digital: {}, support: {} };
-  return /* @__PURE__ */ jsx15(Card, { title: "Channel templates (\xA716)", hint: "Section-level defaults each queue inherits unless it overrides them. Knock-on defaults set here flow to every queue of that channel that hasn't turned on its Knock-on override.", children: /* @__PURE__ */ jsx15("div", { className: "grid cols-2", children: ["voice", "digital", "support"].map((ch) => {
+  return /* @__PURE__ */ jsx15(Card, { title: "Channel templates", hint: "Section-level defaults each queue inherits unless it overrides them. Knock-on defaults set here flow to every queue of that channel that hasn't turned on its Knock-on override.", children: /* @__PURE__ */ jsx15("div", { className: "grid cols-2", children: ["voice", "digital", "support"].map((ch) => {
     const kn = (chans[ch] || {}).knockOn || {};
     return /* @__PURE__ */ jsxs14("div", { className: "erow", children: [
       /* @__PURE__ */ jsxs14("div", { className: "erow-h", children: [
@@ -5178,6 +5140,29 @@ function ChannelTemplates({ config, ops }) {
       ] })
     ] }, ch);
   }) }) });
+}
+function SystemSeasonality({ config, ops, seasonalityPresets }) {
+  const seas = config.seasonality;
+  return /* @__PURE__ */ jsxs14(Card, { title: "System seasonality", hint: "One multiplier per calendar month, applied to every queue from the start month across the horizon. Each queue can layer its own overlay in its Seasonality section.", children: [
+    /* @__PURE__ */ jsxs14("div", { className: "rowflex", style: { marginBottom: 12 }, children: [
+      /* @__PURE__ */ jsx15("div", { style: { minWidth: 180, maxWidth: 220 }, children: /* @__PURE__ */ jsx15(SelectField, { label: "Start month", value: String(seas.startMonth), onChange: (v) => ops.patch(["seasonality", "startMonth"], Number(v)), options: MONTHS.map((m, i) => ({ value: String(i), label: m })) }) }),
+      /* @__PURE__ */ jsx15(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => ops.patch(["seasonality", "system"], [...p.months]), label: "Apply seasonality pattern" }),
+      /* @__PURE__ */ jsx15("span", { className: "note", style: { padding: "6px 10px" }, children: "Create and edit patterns in Settings \u2192 Seasonality patterns." })
+    ] }),
+    /* @__PURE__ */ jsx15("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx15("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx15(
+      NumField,
+      {
+        label: m,
+        unit: "%",
+        value: +((seas.system[i] || 0) * 100).toFixed(0),
+        onChange: (v) => {
+          const n = seas.system.slice();
+          n[i] = v / 100;
+          ops.patch(["seasonality", "system"], n);
+        }
+      }
+    ) }, m)) })
+  ] });
 }
 function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
   let first = true;
@@ -5221,6 +5206,7 @@ function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, s
     /* @__PURE__ */ jsx15(BrandManager, { config, ops }),
     /* @__PURE__ */ jsx15(PoolManager, { config, ops }),
     /* @__PURE__ */ jsx15(ChannelTemplates, { config, ops }),
+    /* @__PURE__ */ jsx15(SystemSeasonality, { config, ops, seasonalityPresets }),
     config.brands.map((b) => brandSection(b))
   ] });
 }
@@ -5417,7 +5403,7 @@ function GroupsManager({ config, ops }) {
   return /* @__PURE__ */ jsx16(
     Card,
     {
-      title: "Scenario groups (\xA719)",
+      title: "Scenario groups",
       hint: "A group bundles scenarios; it becomes a row of the decision matrix and a choice in the context bar. Built-ins: Plan of record (tracks the enabled set) and No scenarios.",
       right: /* @__PURE__ */ jsxs15("div", { className: "rowflex", children: [
         /* @__PURE__ */ jsx16("input", { type: "text", className: "inp", style: { width: 160 }, placeholder: "new group name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "group-name" }),
@@ -5489,7 +5475,7 @@ function ScenariosEditor({ config, ops }) {
           label: "Add scenario",
           value: "",
           onChange: (v) => v && (v === "unified" ? ops.addUnifiedScenario() : ops.addScenario(v)),
-          options: [{ value: "", label: "Choose a type\u2026" }, { value: "unified", label: "Unified (\xA719 shape)" }, ...Object.entries(LEGACY_LABELS).map(([value, label]) => ({ value, label }))]
+          options: [{ value: "", label: "Choose a type\u2026" }, { value: "unified", label: "Unified" }, ...Object.entries(LEGACY_LABELS).map(([value, label]) => ({ value, label }))]
         }
       ),
       /* @__PURE__ */ jsxs15("span", { className: "note", style: { padding: "6px 10px", alignSelf: "flex-end" }, children: [
@@ -5549,83 +5535,72 @@ function ScenariosEditor({ config, ops }) {
   ] });
 }
 
-// ui/editors/SeasonalityEditor.jsx
-import { Fragment as Fragment8, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
-function MonthSliders({ months, onChange }) {
-  return /* @__PURE__ */ jsx17("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx17("div", { style: { width: 88 }, children: /* @__PURE__ */ jsx17(NumField, { label: m, value: +(months[i] * 100).toFixed(0), unit: "%", onChange: (v) => {
-    const next = months.slice();
-    next[i] = v / 100;
-    onChange(next);
-  } }) }, m)) });
+// ui/editors/PresetLibrary.jsx
+import { useState as useState14 } from "react";
+import { jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
+function MonthEditor({ months, onChange }) {
+  return /* @__PURE__ */ jsx17("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx17("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx17(
+    NumField,
+    {
+      label: m,
+      unit: "%",
+      value: +(months[i] * 100).toFixed(0),
+      onChange: (v) => {
+        const n = months.slice();
+        n[i] = v / 100;
+        onChange(n);
+      }
+    }
+  ) }, m)) });
 }
-function SeasonalityEditor({ config, ops, seasonalityPresets, setSeasonalityPresets }) {
-  const seas = config.seasonality;
-  return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 14 }, children: [
-    /* @__PURE__ */ jsxs16(Card, { title: "System-level seasonality", sub: "applies to every queue", hint: "Multiplier by calendar month, applied from the editable start month across the horizon.", children: [
-      /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 12 }, children: /* @__PURE__ */ jsx17(
-        SelectField,
-        {
-          label: "Start month",
-          value: String(seas.startMonth),
-          onChange: (v) => ops.patch(["seasonality", "startMonth"], Number(v)),
-          options: MONTHS.map((m, i) => ({ value: String(i), label: m }))
-        }
-      ) }),
+function PresetLibrary({ kind, presets, setPresets, eng }) {
+  const [newName, setNewName] = useState14("");
+  const isSeason = kind === "seasonality";
+  const make = isSeason ? (name) => makeSeasonalityPreset(name, new Array(12).fill(1)) : (name) => makeIntradayPreset(name, new Array(24).fill(1));
+  const valuesOf = (p) => isSeason ? p.months : p.curve;
+  const update = (id, patch) => setPresets((lib) => lib.map((p) => p.id === id ? { ...p, ...patch } : p));
+  const remove = (id) => setPresets((lib) => lib.filter((p) => p.id !== id));
+  const add = () => {
+    const name = newName.trim() || (isSeason ? "New seasonality" : "New arrival");
+    setPresets((lib) => [...lib, make(name)]);
+    setNewName("");
+  };
+  return /* @__PURE__ */ jsxs16("div", { className: "preset-lib", children: [
+    /* @__PURE__ */ jsxs16("div", { className: "rowflex", children: [
       /* @__PURE__ */ jsx17(
-        PresetBar,
+        "input",
         {
-          presets: seasonalityPresets,
-          applyLabel: "Seasonality preset",
-          onApply: (p) => ops.patch(["seasonality", "system"], [...p.months]),
-          onSaveAs: (name) => setSeasonalityPresets((lib) => [...lib, makeSeasonalityPreset(name, seas.system)])
+          type: "text",
+          className: "inp",
+          style: { maxWidth: 220 },
+          placeholder: "new pattern name",
+          value: newName,
+          onChange: (e) => setNewName(e.target.value),
+          "data-testid": "preset-new-" + kind
         }
       ),
-      /* @__PURE__ */ jsx17("hr", { className: "sep", style: { margin: "12px 0" } }),
-      /* @__PURE__ */ jsx17(MonthSliders, { months: seas.system, onChange: (next) => ops.patch(["seasonality", "system"], next) })
+      /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm primary", onClick: add, "data-testid": "preset-add-" + kind, children: "+ Add pattern" }),
+      /* @__PURE__ */ jsxs16("span", { className: "note", style: { padding: "6px 10px" }, children: [
+        presets.length,
+        " pattern(s). Built-ins are read-only. Apply patterns to the system or a queue on the Queues tab."
+      ] })
     ] }),
-    /* @__PURE__ */ jsx17("div", { className: "rows", children: config.queues.map((q) => {
-      const hasOwn = Array.isArray(q.seasonal);
-      return /* @__PURE__ */ jsxs16("details", { className: "erow", children: [
-        /* @__PURE__ */ jsxs16("summary", { children: [
-          /* @__PURE__ */ jsx17("span", { className: "chev", children: "\u25B6" }),
-          /* @__PURE__ */ jsx17("strong", { children: q.name }),
-          /* @__PURE__ */ jsx17("span", { className: "pill", children: hasOwn ? "queue overlay active" : "flat (system only)" })
-        ] }),
-        /* @__PURE__ */ jsxs16("div", { className: "erow-b", children: [
-          /* @__PURE__ */ jsxs16("div", { className: "rowflex", children: [
-            /* @__PURE__ */ jsx17(
-              "button",
-              {
-                type: "button",
-                className: "btn sm",
-                onClick: () => ops.patchQueue(q.id, ["seasonal"], hasOwn ? null : new Array(12).fill(1)),
-                children: hasOwn ? "Remove queue overlay" : "Add queue overlay"
-              }
-            ),
-            /* @__PURE__ */ jsx17("span", { className: "note", style: { padding: "6px 10px" }, children: "Queue overlay multiplies on top of the system pattern above." })
-          ] }),
-          hasOwn && /* @__PURE__ */ jsxs16(Fragment8, { children: [
-            /* @__PURE__ */ jsx17(
-              PresetBar,
-              {
-                presets: seasonalityPresets,
-                applyLabel: "Apply preset to overlay",
-                onApply: (p) => ops.patchQueue(q.id, ["seasonal"], [...p.months]),
-                onSaveAs: (name) => setSeasonalityPresets((lib) => [...lib, makeSeasonalityPreset(name, q.seasonal)])
-              }
-            ),
-            /* @__PURE__ */ jsx17(MonthSliders, { months: q.seasonal, onChange: (next) => ops.patchQueue(q.id, ["seasonal"], next) })
-          ] })
-        ] })
-      ] }, q.id);
-    }) })
+    presets.map((p) => /* @__PURE__ */ jsxs16("div", { className: "preset-item", children: [
+      /* @__PURE__ */ jsxs16("div", { className: "preset-item-h", children: [
+        p.builtin ? /* @__PURE__ */ jsx17("strong", { children: p.name }) : /* @__PURE__ */ jsx17("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: p.name, "aria-label": "Pattern name", onChange: (e) => update(p.id, { name: e.target.value }) }),
+        /* @__PURE__ */ jsx17("span", { className: "pill", children: p.builtin ? "built-in" : "custom" }),
+        /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+        !p.builtin && /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", onClick: () => remove(p.id), "data-testid": "preset-del-" + p.id, children: "Delete" })
+      ] }),
+      !p.builtin && (isSeason ? /* @__PURE__ */ jsx17(MonthEditor, { months: valuesOf(p), onChange: (next) => update(p.id, { months: next }) }) : /* @__PURE__ */ jsx17(IntradaySliders, { curve: valuesOf(p), eng, onChange: (next) => update(p.id, { curve: next }) }))
+    ] }, p.id))
   ] });
 }
 
 // ui/editors/SettingsEditor.jsx
 var import_engine9 = __toESM(require_engine());
 import { jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
-function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, onImportConfig, seasonalityPresets, setSeasonalityPresets }) {
+function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
   const eng = config.engine, hir = config.hiring, costs = config.costs, cx = config.cx, loops = config.loops;
   const set = config.settings || {};
   const ot = set.ot || {}, tr = set.training || {}, debt = set.trainingDebt || {}, kn = set.knockOn || {}, risk = set.risk || {};
@@ -5638,7 +5613,7 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
   ] });
   return /* @__PURE__ */ jsxs17("div", { className: "grid", style: { gap: 16 }, children: [
     /* @__PURE__ */ jsxs17("div", { className: "grid cols-2", style: { alignItems: "start" }, children: [
-      /* @__PURE__ */ jsxs17(Card, { title: "Engine & simulation window (\xA716)", children: [
+      /* @__PURE__ */ jsxs17(Card, { title: "Engine & simulation window", children: [
         /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
           /* @__PURE__ */ jsx18(
             NumField,
@@ -5663,7 +5638,7 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
           /* @__PURE__ */ jsx18(NumField, { label: "Support prof.", unit: "%", value: +(eng.crossSkillProficiency * 100).toFixed(0), onChange: (v) => P(["engine", "crossSkillProficiency"], v / 100) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx18(Card, { title: "Global starting HC (\xA716)", hint: "Queues left blank share this pool, weighted by workload (volume \xD7 AHT \xF7 concurrency). Explicit per-queue HC wins; unmanned queues are excluded.", children: /* @__PURE__ */ jsxs17("label", { className: "field", style: { maxWidth: 240 }, children: [
+      /* @__PURE__ */ jsx18(Card, { title: "Global starting HC", hint: "Queues left blank share this pool, weighted by workload (volume \xD7 AHT \xF7 concurrency). Explicit per-queue HC wins; unmanned queues are excluded.", children: /* @__PURE__ */ jsxs17("label", { className: "field", style: { maxWidth: 240 }, children: [
         /* @__PURE__ */ jsx18("span", { className: "lab", children: "Global starting HC" }),
         /* @__PURE__ */ jsx18(
           "input",
@@ -5676,13 +5651,13 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
           }
         )
       ] }) }),
-      /* @__PURE__ */ jsx18(Card, { title: "Overtime rules (\xA717)", hint: "Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.", children: /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
+      /* @__PURE__ */ jsx18(Card, { title: "Overtime rules", hint: "Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.", children: /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
         /* @__PURE__ */ jsx18(NumField, { label: "Max / agent / day", unit: "h", value: ot.maxDailyHours, step: "0.5", onChange: (v) => S(["ot", "maxDailyHours"], v) }),
         /* @__PURE__ */ jsx18(NumField, { label: "Weekly ceiling", unit: "h", value: ot.weeklyCeiling, onChange: (v) => S(["ot", "weeklyCeiling"], v) }),
         /* @__PURE__ */ jsx18(NumField, { label: "Premium", unit: "\xD7", value: ot.premium, step: "0.1", onChange: (v) => S(["ot", "premium"], v) }),
         /* @__PURE__ */ jsx18(NumField, { label: "Burnout load", value: ot.burnoutLoad, onChange: (v) => S(["ot", "burnoutLoad"], v) })
       ] }) }),
-      /* @__PURE__ */ jsxs17(Card, { title: "Training & debt (\xA716/\xA717)", hint: "Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.", children: [
+      /* @__PURE__ */ jsxs17(Card, { title: "Training & debt", hint: "Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.", children: [
         /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
           /* @__PURE__ */ jsx18(NumField, { label: "Default training", unit: "wk", value: tr.weeks, onChange: (v) => S(["training", "weeks"], v) }),
           /* @__PURE__ */ jsx18(NumField, { label: "Training shrinkage", unit: "%", value: +((tr.shrinkagePct || 0) * 100).toFixed(1), onChange: (v) => S(["training", "shrinkagePct"], v / 100) })
@@ -5694,7 +5669,7 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
           /* @__PURE__ */ jsx18(NumField, { label: "Max attrition", unit: "\xD7", value: debt.maxAttritionMult, step: "0.1", onChange: (v) => S(["trainingDebt", "maxAttritionMult"], v) })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs17(Card, { title: "Knock-on channel defaults (\xA718)", hint: "Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.", children: [
+      /* @__PURE__ */ jsxs17(Card, { title: "Knock-on channel defaults", hint: "Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.", children: [
         ["voice", "digital", "support"].map((ch) => /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
           /* @__PURE__ */ jsx18("div", { style: { minWidth: 70, alignSelf: "flex-end", fontSize: 12, fontWeight: 600, paddingBottom: 8, textTransform: "capitalize" }, children: ch }),
           /* @__PURE__ */ jsx18(NumField, { label: "Repeat", unit: "%", value: (kn[ch] || {}).repeatPct == null ? "" : +((kn[ch] || {}).repeatPct * 100).toFixed(0), onChange: (v) => S(["knockOn", ch, "repeatPct"], v === 0 ? 0 : v / 100) }),
@@ -5723,7 +5698,7 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs17(Card, { title: "Risk parameters (\xA720a)", hint: "Amber and red bands per risk family. The Summary risk register re-scores from these instantly \u2014 changing a band does not re-run the simulation.", children: [
+    /* @__PURE__ */ jsxs17(Card, { title: "Risk parameters", hint: "Amber and red bands per risk family. The Summary risk register re-scores from these instantly \u2014 changing a band does not re-run the simulation.", children: [
       /* @__PURE__ */ jsxs17("div", { className: "grid cols-2", style: { gap: 10 }, children: [
         band("slaBreachRun", "SLA breach run (wk)", "risk-slabreach"),
         band("burnout", "Burnout peak (/100)", "risk-burnout"),
@@ -5746,8 +5721,8 @@ function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, 
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx18(Card, { title: "Seasonality", sub: "dissolved in from its own tab", hint: "System-level pattern applies to every queue; each queue can layer its own overlay (multiplicative).", children: /* @__PURE__ */ jsx18(SeasonalityEditor, { config, ops, seasonalityPresets, setSeasonalityPresets }) }),
-    /* @__PURE__ */ jsx18(FilesCard, { sim, strategySims: sims, config, activeStrategy, activeViewId, onImportConfig, title: "Excel package & files (\xA720)" })
+    /* @__PURE__ */ jsx18(Card, { title: "Seasonality patterns", sub: "library", hint: "Named monthly-multiplier patterns. Create, edit and delete them here; apply a pattern to the system or a queue on the Queues tab.", children: /* @__PURE__ */ jsx18(PresetLibrary, { kind: "seasonality", presets: seasonalityPresets, setPresets: setSeasonalityPresets, eng: config.engine }) }),
+    /* @__PURE__ */ jsx18(Card, { title: "Arrival patterns", sub: "library", hint: "Named intraday arrival curves. Create, edit and delete them here; apply a pattern to a queue on the Queues tab.", children: /* @__PURE__ */ jsx18(PresetLibrary, { kind: "arrival", presets: intradayPresets, setPresets: setIntradayPresets, eng: config.engine }) })
   ] });
 }
 
@@ -5765,21 +5740,21 @@ var TABS = [
   { id: "settings", label: "Settings" }
 ];
 function App() {
-  const [config, setConfig] = useState14(() => migrateConfig((0, import_engine10.makeDefaultConfig)()));
-  const [tab, setTab] = useState14("summary");
-  const [intradayPresets, setIntradayPresets] = useState14(INTRADAY_PRESETS);
-  const [seasonalityPresets, setSeasonalityPresets] = useState14(SEASONALITY_PRESETS);
+  const [config, setConfig] = useState15(() => migrateConfig((0, import_engine10.makeDefaultConfig)()));
+  const [tab, setTab] = useState15("summary");
+  const [intradayPresets, setIntradayPresets] = useState15(INTRADAY_PRESETS);
+  const [seasonalityPresets, setSeasonalityPresets] = useState15(SEASONALITY_PRESETS);
   const ops = useConfigOps(setConfig);
-  const [activeStrategyId, setActiveStrategyId] = useState14("S1");
-  const [activeGroupId, setActiveGroupId] = useState14("g_por");
+  const [activeStrategyId, setActiveStrategyId] = useState15("S1");
+  const [activeGroupId, setActiveGroupId] = useState15("g_por");
   const stratIdsAll = strategyList(config).map((s) => s.id);
   const safeStrategy = stratIdsAll.includes(activeStrategyId) ? activeStrategyId : stratIdsAll[0] || "S1";
   const groupIds = groupList(config).map((g) => g.id);
   const safeGroup = groupIds.includes(activeGroupId) ? activeGroupId : groupIds[0] || "g_por";
   const storage = useMemo3(() => makeStorageAdapter(), []);
-  const [snapshots, setSnapshots] = useState14([]);
-  const [compareSel, setCompareSel] = useState14([]);
-  const [viewingSlug, setViewingSlug] = useState14(null);
+  const [snapshots, setSnapshots] = useState15([]);
+  const [compareSel, setCompareSel] = useState15([]);
+  const [viewingSlug, setViewingSlug] = useState15(null);
   const hydrated = useRef4(false);
   const loadSnapshots = useCallback4(async () => {
     const index = await storage.get(KEYS.index) || [];
@@ -5815,7 +5790,7 @@ function App() {
   const readOnly = !!viewing;
   const simSet = useStrategySims(effectiveConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
-  const [matrix, setMatrix] = useState14(null);
+  const [matrix, setMatrix] = useState15(null);
   const liveHash = useMemo3(() => simHash(effectiveConfig), [effectiveConfig]);
   const matrixStale = !matrix || matrix.hash !== liveHash;
   const onRunMatrix = useCallback4(() => setMatrix(runMatrix(effectiveConfig)), [effectiveConfig]);
@@ -5950,7 +5925,7 @@ function TabBody(props) {
         }
       );
     case "settings":
-      return /* @__PURE__ */ jsx19(SettingsEditor, { config, ops, sim: activeSim, sims: simSet.sims, activeStrategy: props.activeStrategy, activeViewId: props.activeGroupId, onImportConfig: props.onImportConfig, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
+      return /* @__PURE__ */ jsx19(SettingsEditor, { config, ops, intradayPresets: props.intradayPresets, setIntradayPresets: props.setIntradayPresets, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
     default:
       return null;
   }
@@ -6017,14 +5992,19 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .tab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px; }
 
 /* ---- layout ---- */
-.main { flex: 1; padding: 18px; max-width: 1360px; width: 100%; margin: 0 auto; }
-.grid { display: grid; gap: 16px; }
+/* Rule 9: the document itself never scrolls horizontally. Sticky chrome (topbar,
+   tabs, context bar) are siblings of .main, so clipping overflow here is safe and
+   never disables their stickiness. Intrinsically-wide content still scrolls
+   internally inside its own width-capped .tbl-wrap / .ribbon-wrap / .chart. */
+.main { flex: 1; padding: 18px; max-width: 1360px; width: 100%; margin: 0 auto; overflow-x: clip; }
+.grid { display: grid; gap: 16px; min-width: 0; }
+.grid > * { min-width: 0; }
 .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 900px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
 
 /* ---- card ---- */
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 100%; min-width: 0; }
 .card > .card-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .card > .card-h h3, .card > .card-h h4 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .2px; }
 .card > .card-h .sub { color: var(--muted); font-size: 12px; font-weight: 500; }
@@ -6041,7 +6021,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .finding.red .pip { background: var(--red); } .finding.amber .pip { background: var(--amber); } .finding.green .pip { background: var(--green); }
 
 /* ---- RAG ribbon ---- */
-.ribbon-wrap { overflow-x: auto; scrollbar-width: thin; }
+.ribbon-wrap { overflow-x: auto; scrollbar-width: thin; max-width: 100%; }
 .ribbon { border-collapse: separate; border-spacing: 3px; }
 .ribbon th { font-size: 11px; font-weight: 600; color: var(--muted); text-align: right; padding: 2px 6px; white-space: nowrap; position: sticky; left: 0; background: var(--panel); z-index: 2; }
 .ribbon thead th { text-align: center; position: static; }
@@ -6079,7 +6059,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .badge.green { background: var(--green-s); color: #10673a; } .badge.amber { background: var(--amber-s); color: #8a5a06; } .badge.red { background: var(--red-s); color: #952727; }
 
 /* ---- charts ---- */
-.chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; max-width: 100%; min-width: 0; }
 .chart-h { display: flex; align-items: center; gap: 8px; padding: 11px 14px 6px; }
 .chart-h h4 { margin: 0; font-size: 13px; font-weight: 700; }
 .chart-b { padding: 4px 8px 10px; overflow-x: auto; }
@@ -6087,7 +6067,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .recharts-cartesian-axis-tick-value { font-size: 11px; }
 
 /* ---- tables ---- */
-.tbl-wrap { overflow-x: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: var(--radius-s); }
+.tbl-wrap { overflow-x: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: var(--radius-s); max-width: 100%; }
 table.data { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
 table.data th, table.data td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
 table.data th:first-child, table.data td:first-child { text-align: left; }
@@ -6232,6 +6212,17 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-all { font-weight: 700; font-size: 13px; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+
+/* files card rows */
+.files-row { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px 14px; background: var(--panel-2); }
+.files-row-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.files-row-h strong { font-size: 12.5px; }
+.files-row-h .note { font-size: 11.5px; }
+
+/* preset library (Settings) rows */
+.preset-lib { display: flex; flex-direction: column; gap: 10px; }
+.preset-item { border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--panel); padding: 10px 12px; }
+.preset-item .preset-item-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 
 /* inheritance indicator (\xA716) */
 .inherit-ind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }

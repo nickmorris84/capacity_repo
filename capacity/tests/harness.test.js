@@ -93,12 +93,12 @@ async function checklist(label, ctx) {
     ok(tick && tick.checked, "tick still set after switching tabs and back");
   });
 
-  await t(`[${label}] fire every export (Settings)`, async () => {
-    await goto("Settings");
+  await t(`[${label}] fire every export (Files, on Snapshots)`, async () => {
+    await goto("Snapshots");
     const ids = ["export-workbook", "export-config", "export-run", "export-params-csv", "export-volumes-csv"];
     const before = downloads.length;
     for (const id of ids) {
-      const btn = doc.querySelector(`#panel-settings [data-testid=${id}]`);
+      const btn = doc.querySelector(`#panel-snapshots [data-testid=${id}]`);
       ok(btn, id + " button exists");
       click(btn);
       await settle(20);
@@ -113,8 +113,8 @@ async function checklist(label, ctx) {
     const baseCell = () => doc.querySelector("#panel-data [data-testid=data-table] tbody tr td:nth-child(2)");
     const before = Number(digits(baseCell()));
     ok(before > 0, "baseline base vol read");
-    await goto("Settings");
-    const input = doc.querySelector("#panel-settings [data-testid=import-params-csv]");
+    await goto("Snapshots");
+    const input = doc.querySelector("#panel-snapshots [data-testid=import-params-csv]");
     ok(input, "params-CSV input exists");
     await fileInput(input, PARAMS_CSV, "params.csv", "text/csv");
     await settle(350);

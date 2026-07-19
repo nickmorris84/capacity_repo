@@ -77,6 +77,31 @@ async function run() {
     ok(!labels.includes("Seasonality") && !labels.includes("Workforce") && !labels.includes("Report"), "removed tabs absent");
   });
 
+  // Rule 9 — every table sits in a width-capped wrapper and every chart in a
+  // .chart container, so intrinsically-wide content scrolls internally and the
+  // document never scrolls horizontally.
+  await t("every table has a width-capped wrapper; every chart a .chart (Rule 9)", async () => {
+    for (const label of EXPECTED_TABS) {
+      await goto(label);
+      const panel = document.getElementById("panel-" + label.toLowerCase());
+      ok(panel, "panel for " + label);
+      for (const tbl of panel.querySelectorAll("table")) {
+        ok(tbl.closest(".tbl-wrap, .ribbon-wrap"), `a table on ${label} lacks a width-capped wrapper`);
+      }
+      for (const cb of panel.querySelectorAll(".chart-b")) {
+        ok(cb.closest(".chart"), `a chart on ${label} lacks a .chart container`);
+      }
+    }
+  });
+
+  // Label sweep — no spec references (§…) survive in any rendered string.
+  await t("no “§” appears in any rendered text (label sweep)", async () => {
+    for (const label of EXPECTED_TABS) {
+      await goto(label);
+      ok(!document.body.textContent.includes("§"), `“§” found in rendered text on ${label}`);
+    }
+  });
+
   await t("context bar shows Strategy · Scenario-group · Snapshot + print on every tab; print fires from 3", async () => {
     let printed = 0;
     for (const label of EXPECTED_TABS) {
@@ -273,10 +298,10 @@ async function run() {
   });
 
   await t("Excel package includes the four §20 sheets and re-imports a parameter", async () => {
-    // DOM export fires…
-    await goto("Settings");
+    // DOM export fires from the Files card on Snapshots…
+    await goto("Snapshots");
     const before = downloads.length;
-    click(document.querySelector("#panel-settings [data-testid=export-workbook]"));
+    click(document.querySelector("#panel-snapshots [data-testid=export-workbook]"));
     await settle(60);
     ok(downloads.length > before && downloads.some((d) => d.name === "capacity-plan.xlsx"), "workbook download fired");
     // …and the workbook itself carries Brands / Pools / Profiles / Groups + round-trips Parameters.
@@ -294,8 +319,8 @@ async function run() {
   });
 
   await t("import a params CSV flows into the Data table", async () => {
-    await goto("Settings");
-    const input = document.querySelector("#panel-settings [data-testid=import-params-csv]");
+    await goto("Snapshots");
+    const input = document.querySelector("#panel-snapshots [data-testid=import-params-csv]");
     const file = new window.File(["Path,Setting,Value\nqueues.q_bill.dailyVolume,v,7000\n"], "p.csv", { type: "text/csv" });
     Object.defineProperty(input, "files", { value: [file], configurable: true });
     await act(async () => { input.dispatchEvent(new window.Event("change", { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); });

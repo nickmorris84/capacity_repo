@@ -1,33 +1,19 @@
 import { useState } from "react";
 import { SelectField } from "../components/primitives.jsx";
 
-/* Shared apply / save-as mechanic for the intraday and seasonality preset
-   libraries. Choosing a preset applies its curve; "Save as new" captures the
-   current (hand-edited) curve into the library under a user name. */
-export function PresetBar({ presets, onApply, onSaveAs, applyLabel = "Preset" }) {
+/* Apply-only preset selector. Patterns are created and edited in Settings; on the
+   Queues tab you only apply them. Choosing a pattern applies its values and then
+   resets, so the same pattern can be re-applied. */
+export function ApplyPreset({ presets, onApply, label = "Apply pattern" }) {
   const [pick, setPick] = useState("");
-  const [name, setName] = useState("");
   return (
-    <div className="rowflex">
-      <div style={{ minWidth: 200 }}>
-        <SelectField
-          label={applyLabel}
-          value={pick}
-          onChange={(v) => { setPick(v); const p = presets.find((x) => x.id === v); if (p) onApply(p); }}
-          options={[{ value: "", label: "Apply a preset…" }, ...presets.map((p) => ({ value: p.id, label: p.name + (p.builtin ? "" : " ★") }))]}
-        />
-      </div>
-      <span className="spacer" />
-      <label className="field" style={{ minWidth: 160 }}>
-        <span className="lab">Save current as</span>
-        <input type="text" value={name} placeholder="my preset" onChange={(e) => setName(e.target.value)} />
-      </label>
-      <button
-        type="button"
-        className="btn sm"
-        disabled={!name.trim()}
-        onClick={() => { onSaveAs(name.trim()); setName(""); }}
-      >Save as new</button>
+    <div style={{ minWidth: 200, maxWidth: 260 }}>
+      <SelectField
+        label={label}
+        value={pick}
+        onChange={(v) => { const p = presets.find((x) => x.id === v); if (p) onApply(p); setPick(""); }}
+        options={[{ value: "", label: "Apply a pattern…" }, ...presets.map((p) => ({ value: p.id, label: p.name + (p.builtin ? "" : " ★") }))]}
+      />
     </div>
   );
 }

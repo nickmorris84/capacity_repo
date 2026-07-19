@@ -1,14 +1,15 @@
 import { NumField, TextField, Card, Hint } from "../components/primitives.jsx";
-import { FilesCard } from "../components/FilesCard.jsx";
-import { SeasonalityEditor } from "./SeasonalityEditor.jsx";
+import { PresetLibrary } from "./PresetLibrary.jsx";
 import { clamp } from "../../engine/engine.js";
 
-/* Settings (§16 physics + §20a risk parameters + libraries). Everything that is
-   "where the globals live": engine window, OT rules, training + debt constants,
-   knock-on channel defaults, hiring cap, costs, CX, the editable risk-threshold
-   bands (which re-score the register without re-simulating), seasonality
-   (dissolved in from its own tab) and the Excel package. */
-export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeViewId, onImportConfig, seasonalityPresets, setSeasonalityPresets }) {
+/* Settings — where the globals and pattern libraries live: engine window, OT
+   rules, training + debt constants, knock-on channel defaults, hiring cap, costs,
+   CX, the editable risk-threshold bands (which re-score the register without
+   re-simulating), and the Seasonality and Arrival pattern libraries. The
+   libraries are LISTS only — create/edit/delete named patterns here; applying a
+   pattern to the system or a queue happens on the Queues tab. Import/export lives
+   in the Files card on the Snapshots tab. */
+export function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
   const eng = config.engine, hir = config.hiring, costs = config.costs, cx = config.cx, loops = config.loops;
   const set = config.settings || {};
   const ot = set.ot || {}, tr = set.training || {}, debt = set.trainingDebt || {}, kn = set.knockOn || {}, risk = set.risk || {};
@@ -25,7 +26,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
   return (
     <div className="grid" style={{ gap: 16 }}>
       <div className="grid cols-2" style={{ alignItems: "start" }}>
-        <Card title="Engine & simulation window (§16)">
+        <Card title="Engine & simulation window">
           <div className="fieldrow">
             <NumField id="horizon-input" label="Simulation window" unit="wk" value={eng.horizonWeeks} min={24} max={78}
               onChange={(v) => P(["engine", "horizonWeeks"], clamp(Math.round(v || 52), 24, 78))}
@@ -41,7 +42,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
           </div>
         </Card>
 
-        <Card title="Global starting HC (§16)" hint="Queues left blank share this pool, weighted by workload (volume × AHT ÷ concurrency). Explicit per-queue HC wins; unmanned queues are excluded.">
+        <Card title="Global starting HC" hint="Queues left blank share this pool, weighted by workload (volume × AHT ÷ concurrency). Explicit per-queue HC wins; unmanned queues are excluded.">
           <label className="field" style={{ maxWidth: 240 }}>
             <span className="lab">Global starting HC</span>
             <input type="number" value={eng.globalStartingHC == null ? "" : eng.globalStartingHC} placeholder="(none — blanks resolve to 0)"
@@ -49,7 +50,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
           </label>
         </Card>
 
-        <Card title="Overtime rules (§17)" hint="Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.">
+        <Card title="Overtime rules" hint="Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.">
           <div className="fieldrow">
             <NumField label="Max / agent / day" unit="h" value={ot.maxDailyHours} step="0.5" onChange={(v) => S(["ot", "maxDailyHours"], v)} />
             <NumField label="Weekly ceiling" unit="h" value={ot.weeklyCeiling} onChange={(v) => S(["ot", "weeklyCeiling"], v)} />
@@ -58,7 +59,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
           </div>
         </Card>
 
-        <Card title="Training & debt (§16/§17)" hint="Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.">
+        <Card title="Training & debt" hint="Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.">
           <div className="fieldrow">
             <NumField label="Default training" unit="wk" value={tr.weeks} onChange={(v) => S(["training", "weeks"], v)} />
             <NumField label="Training shrinkage" unit="%" value={+((tr.shrinkagePct || 0) * 100).toFixed(1)} onChange={(v) => S(["training", "shrinkagePct"], v / 100)} />
@@ -71,7 +72,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
           </div>
         </Card>
 
-        <Card title="Knock-on channel defaults (§18)" hint="Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.">
+        <Card title="Knock-on channel defaults" hint="Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.">
           {["voice", "digital", "support"].map((ch) => (
             <div className="fieldrow" key={ch}>
               <div style={{ minWidth: 70, alignSelf: "flex-end", fontSize: 12, fontWeight: 600, paddingBottom: 8, textTransform: "capitalize" }}>{ch}</div>
@@ -98,7 +99,7 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
         </Card>
       </div>
 
-      <Card title="Risk parameters (§20a)" hint="Amber and red bands per risk family. The Summary risk register re-scores from these instantly — changing a band does not re-run the simulation.">
+      <Card title="Risk parameters" hint="Amber and red bands per risk family. The Summary risk register re-scores from these instantly — changing a band does not re-run the simulation.">
         <div className="grid cols-2" style={{ gap: 10 }}>
           {band("slaBreachRun", "SLA breach run (wk)", "risk-slabreach")}
           {band("burnout", "Burnout peak (/100)", "risk-burnout")}
@@ -122,11 +123,13 @@ export function SettingsEditor({ config, ops, sim, sims, activeStrategy, activeV
         </div>
       </Card>
 
-      <Card title="Seasonality" sub="dissolved in from its own tab" hint="System-level pattern applies to every queue; each queue can layer its own overlay (multiplicative).">
-        <SeasonalityEditor config={config} ops={ops} seasonalityPresets={seasonalityPresets} setSeasonalityPresets={setSeasonalityPresets} />
+      <Card title="Seasonality patterns" sub="library" hint="Named monthly-multiplier patterns. Create, edit and delete them here; apply a pattern to the system or a queue on the Queues tab.">
+        <PresetLibrary kind="seasonality" presets={seasonalityPresets} setPresets={setSeasonalityPresets} eng={config.engine} />
       </Card>
 
-      <FilesCard sim={sim} strategySims={sims} config={config} activeStrategy={activeStrategy} activeViewId={activeViewId} onImportConfig={onImportConfig} title="Excel package & files (§20)" />
+      <Card title="Arrival patterns" sub="library" hint="Named intraday arrival curves. Create, edit and delete them here; apply a pattern to a queue on the Queues tab.">
+        <PresetLibrary kind="arrival" presets={intradayPresets} setPresets={setIntradayPresets} eng={config.engine} />
+      </Card>
     </div>
   );
 }

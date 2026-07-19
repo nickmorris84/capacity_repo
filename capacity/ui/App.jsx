@@ -188,7 +188,7 @@ function TabBody(props) {
         onSave={props.onSaveSnapshot} onDelete={props.onDeleteSnapshot} onLoadSettings={props.onLoadSnapshotSettings} onRefresh={props.onRefreshSnapshots}
       />
     );
-    case "settings": return <SettingsEditor config={config} ops={ops} sim={activeSim} sims={simSet.sims} activeStrategy={props.activeStrategy} activeViewId={props.activeGroupId} onImportConfig={props.onImportConfig} seasonalityPresets={props.seasonalityPresets} setSeasonalityPresets={props.setSeasonalityPresets} />;
+    case "settings": return <SettingsEditor config={config} ops={ops} intradayPresets={props.intradayPresets} setIntradayPresets={props.setIntradayPresets} seasonalityPresets={props.seasonalityPresets} setSeasonalityPresets={props.setSeasonalityPresets} />;
     default: return null;
   }
 }

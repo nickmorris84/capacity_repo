@@ -63,14 +63,19 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .tab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; border-radius: 4px; }
 
 /* ---- layout ---- */
-.main { flex: 1; padding: 18px; max-width: 1360px; width: 100%; margin: 0 auto; }
-.grid { display: grid; gap: 16px; }
+/* Rule 9: the document itself never scrolls horizontally. Sticky chrome (topbar,
+   tabs, context bar) are siblings of .main, so clipping overflow here is safe and
+   never disables their stickiness. Intrinsically-wide content still scrolls
+   internally inside its own width-capped .tbl-wrap / .ribbon-wrap / .chart. */
+.main { flex: 1; padding: 18px; max-width: 1360px; width: 100%; margin: 0 auto; overflow-x: clip; }
+.grid { display: grid; gap: 16px; min-width: 0; }
+.grid > * { min-width: 0; }
 .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 900px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
 
 /* ---- card ---- */
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 100%; min-width: 0; }
 .card > .card-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .card > .card-h h3, .card > .card-h h4 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .2px; }
 .card > .card-h .sub { color: var(--muted); font-size: 12px; font-weight: 500; }
@@ -87,7 +92,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .finding.red .pip { background: var(--red); } .finding.amber .pip { background: var(--amber); } .finding.green .pip { background: var(--green); }
 
 /* ---- RAG ribbon ---- */
-.ribbon-wrap { overflow-x: auto; scrollbar-width: thin; }
+.ribbon-wrap { overflow-x: auto; scrollbar-width: thin; max-width: 100%; }
 .ribbon { border-collapse: separate; border-spacing: 3px; }
 .ribbon th { font-size: 11px; font-weight: 600; color: var(--muted); text-align: right; padding: 2px 6px; white-space: nowrap; position: sticky; left: 0; background: var(--panel); z-index: 2; }
 .ribbon thead th { text-align: center; position: static; }
@@ -125,7 +130,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .badge.green { background: var(--green-s); color: #10673a; } .badge.amber { background: var(--amber-s); color: #8a5a06; } .badge.red { background: var(--red-s); color: #952727; }
 
 /* ---- charts ---- */
-.chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; max-width: 100%; min-width: 0; }
 .chart-h { display: flex; align-items: center; gap: 8px; padding: 11px 14px 6px; }
 .chart-h h4 { margin: 0; font-size: 13px; font-weight: 700; }
 .chart-b { padding: 4px 8px 10px; overflow-x: auto; }
@@ -133,7 +138,7 @@ body { font-family: var(--sans); color: var(--text); background: var(--panel-2);
 .recharts-cartesian-axis-tick-value { font-size: 11px; }
 
 /* ---- tables ---- */
-.tbl-wrap { overflow-x: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: var(--radius-s); }
+.tbl-wrap { overflow-x: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: var(--radius-s); max-width: 100%; }
 table.data { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
 table.data th, table.data td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
 table.data th:first-child, table.data td:first-child { text-align: left; }
@@ -278,6 +283,17 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-all { font-weight: 700; font-size: 13px; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+
+/* files card rows */
+.files-row { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 12px 14px; background: var(--panel-2); }
+.files-row-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.files-row-h strong { font-size: 12.5px; }
+.files-row-h .note { font-size: 11.5px; }
+
+/* preset library (Settings) rows */
+.preset-lib { display: flex; flex-direction: column; gap: 10px; }
+.preset-item { border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--panel); padding: 10px 12px; }
+.preset-item .preset-item-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 
 /* inheritance indicator (§16) */
 .inherit-ind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }

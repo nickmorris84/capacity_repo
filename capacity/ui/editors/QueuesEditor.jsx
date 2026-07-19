@@ -1,8 +1,8 @@
 import { NumField, TextField, SelectField, Card, Hint, Toggle } from "../components/primitives.jsx";
-import { PresetBar, IntradaySliders } from "./PresetBar.jsx";
-import { makeIntradayPreset } from "../presets.js";
+import { ApplyPreset, IntradaySliders } from "./PresetBar.jsx";
 import { supportersOf, channelOf } from "../../engine/engine.js";
 import { buildWeeklyRows, assumptionsColumns } from "../reporting.js";
+import { MONTHS } from "../format.js";
 
 const RES_OPTIONS = [
   { value: "dedicated", label: "Dedicated" },
@@ -172,9 +172,10 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
         <details className="acc-sec">
           <summary><strong>Arrival pattern</strong></summary>
           <div className="acc-b">
-            <PresetBar presets={intradayPresets} applyLabel="Intraday preset"
-              onApply={(p) => ops.patchQueue(q.id, ["profile"], [...p.curve])}
-              onSaveAs={(name) => setIntradayPresets((lib) => [...lib, makeIntradayPreset(name, q.profile)])} />
+            <div className="rowflex">
+              <ApplyPreset presets={intradayPresets} onApply={(p) => ops.patchQueue(q.id, ["profile"], [...p.curve])} label="Apply arrival pattern" />
+              <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Arrival patterns. Hand-tune this queue's curve below.</span>
+            </div>
             <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => ops.patchQueue(q.id, ["profile"], next)} />
           </div>
         </details>
@@ -232,7 +233,8 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
               <>
                 <div className="rowflex" style={{ marginBottom: 8 }}>
                   <button type="button" className="btn sm" onClick={() => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1))}>Initialise overlay</button>
-                  <span className="note" style={{ padding: "6px 10px" }}>Queue overlay multiplies on top of the system pattern (Settings).</span>
+                  <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patchQueue(q.id, ["seasonal"], [...p.months])} label="Apply seasonality pattern" />
+                  <span className="note" style={{ padding: "6px 10px" }}>Queue overlay multiplies on top of the system pattern. Create and edit patterns in Settings → Seasonality patterns.</span>
                 </div>
                 {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); }} /></div>)}</div>}
               </>
@@ -264,7 +266,7 @@ function QueueCard({ config, q, ops, sim, intradayPresets, setIntradayPresets, s
 
 function BrandManager({ config, ops }) {
   return (
-    <Card title="Brands (§15)" hint="A brand groups queues and carries one parameter block: its training profile. Queues adopt a brand in their Resourcing section."
+    <Card title="Brands" hint="A brand groups queues and carries one parameter block: its training profile. Queues adopt a brand in their Resourcing section."
       right={<button type="button" className="btn sm primary" onClick={() => ops.addBrand()} data-testid="add-brand">+ Add brand</button>}>
       <div className="rows">
         {config.brands.map((b) => (
@@ -297,7 +299,7 @@ function BrandManager({ config, ops }) {
 function PoolManager({ config, ops }) {
   const brandName = (id) => (config.brands.find((b) => b.id === id) || { name: "?" }).name;
   return (
-    <Card title="Pools (§17)" hint="A pool is an explicit cross-brand / cross-channel sharing group. Members contribute spare (× their share) to any member in deficit, pro-rata, across brands."
+    <Card title="Pools" hint="A pool is an explicit cross-brand / cross-channel sharing group. Members contribute spare (× their share) to any member in deficit, pro-rata, across brands."
       right={<button type="button" className="btn sm primary" onClick={() => ops.addPool()} data-testid="add-pool">+ Add pool</button>}>
       {(config.pools || []).length === 0 ? <p className="note">No pools. Add one to share spare capacity across brands and channels.</p> : (
         <div className="rows">
@@ -336,7 +338,7 @@ function PoolManager({ config, ops }) {
 function ChannelTemplates({ config, ops }) {
   const chans = config.channels || { voice: {}, digital: {}, support: {} };
   return (
-    <Card title="Channel templates (§16)" hint="Section-level defaults each queue inherits unless it overrides them. Knock-on defaults set here flow to every queue of that channel that hasn't turned on its Knock-on override.">
+    <Card title="Channel templates" hint="Section-level defaults each queue inherits unless it overrides them. Knock-on defaults set here flow to every queue of that channel that hasn't turned on its Knock-on override.">
       <div className="grid cols-2">
         {["voice", "digital", "support"].map((ch) => {
           const kn = (chans[ch] || {}).knockOn || {};
@@ -358,11 +360,37 @@ function ChannelTemplates({ config, ops }) {
   );
 }
 
-/* Queues editor (§15–§18 restructure). Brand manager, pool manager and channel
-   templates up top; queues grouped Brand → Voice/Digital/Support, each an
+// System seasonality — the multiplier applied to every queue. The pattern
+// library lives in Settings; here it is applied to the system and hand-tuned.
+function SystemSeasonality({ config, ops, seasonalityPresets }) {
+  const seas = config.seasonality;
+  return (
+    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the start month across the horizon. Each queue can layer its own overlay in its Seasonality section.">
+      <div className="rowflex" style={{ marginBottom: 12 }}>
+        <div style={{ minWidth: 180, maxWidth: 220 }}>
+          <SelectField label="Start month" value={String(seas.startMonth)} onChange={(v) => ops.patch(["seasonality", "startMonth"], Number(v))} options={MONTHS.map((m, i) => ({ value: String(i), label: m }))} />
+        </div>
+        <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patch(["seasonality", "system"], [...p.months])} label="Apply seasonality pattern" />
+        <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Seasonality patterns.</span>
+      </div>
+      <div className="fieldrow">
+        {MONTHS.map((m, i) => (
+          <div key={m} style={{ width: 82 }}>
+            <NumField label={m} unit="%" value={+((seas.system[i] || 0) * 100).toFixed(0)}
+              onChange={(v) => { const n = seas.system.slice(); n[i] = v / 100; ops.patch(["seasonality", "system"], n); }} />
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/* Queues editor. Brand manager, pool manager, channel templates and the system
+   seasonality up top; queues grouped Brand → Voice/Digital/Support, each an
    accordion of Description, SLAs, Arrival, Workforce, Knock-on, Seasonality,
    Scenarios-affecting, Dependencies and Assumptions, with per-section
-   inheritance indicators and dedicated/leveraged/unmanned resourcing. */
+   inheritance indicators and dedicated/leveraged/unmanned resourcing. Patterns
+   are applied here; they are created and edited in the Settings libraries. */
 export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
   let first = true;
   const brandSection = (b) => {
@@ -396,6 +424,7 @@ export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPre
       <BrandManager config={config} ops={ops} />
       <PoolManager config={config} ops={ops} />
       <ChannelTemplates config={config} ops={ops} />
+      <SystemSeasonality config={config} ops={ops} seasonalityPresets={seasonalityPresets} />
       {config.brands.map((b) => brandSection(b))}
     </div>
   );
