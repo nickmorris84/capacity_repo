@@ -433,8 +433,131 @@ runs the §13 checklist (now save-a-snapshot, exports from Settings, per-tab con
 print) against both the source and the rebuilt dist/capacity-sim.html. The old
 ui/strategies/documents gates were superseded by r1ui + the updated harness and removed.
 
+## P7a — Revision 2 engine: ✅ COMPLETE (P1 + R1 batteries unchanged; 26 new R2 tests green)
+
+Scope: SPEC §15–§19 + §21 in `engine/` only, gated by the §22 battery
+(tests/r2.test.js). NO UI work — the P6b UI runs untouched on the new engine
+(both UI gates re-verified green at the new 52-week default horizon).
+
+### What was built
+- **Settings layer (§16)** — `R2_DEFAULTS` + `settingsOf(cfg)` deep-merge:
+  OT rules (2 h/day/agent, 10 h weekly ceiling, ×1.5 premium, burnout load),
+  training defaults + training-debt constants (accum 20, recovery 10, max AHT
+  +8%, max attrition ×1.5), per-channel knock-on defaults (null = legacy loops
+  fallthrough), §20a risk-threshold bands, horizon bounds. Resolution chains:
+  `resolveTraining` (queue → brand training profile → Settings) and
+  `resolveKnockOn` (queue → channel template → Settings → legacy loops).
+- **Horizon (§16)** — `resolveHorizon` clamps to [24, 78]; blank = 52; default
+  config now simulates 52 weeks. Forward simulation is prefix-invariant, so
+  legacy tests reading early weeks are unaffected by the longer default.
+- **Supply ladder (§17)** — strictly ordered rungs in the day loop:
+  own hours → own OT (daily 2 h/agent AND weekly ceiling; premium cost; feeds
+  burnout) → training reclaim (≤ trainingShrinkagePct; accrues debt 0–100 with
+  AHT ×(1+debt%·8%) and attrition ×(1+debt%·50%); decays on restore; §19
+  `people.trainingShrinkage` forces it) → explicit supports waterfall (R1,
+  unchanged) → automatic intra-brand recycling (leveraged donors only; spare
+  → same-brand support/unmanned queues by receiver priority, pro-rata within
+  a tier) → pools (members' spare × sharePct, training-feed top-up capped at
+  remaining reclaim, pro-rata by deficit, no priorities, cross-brand) →
+  leveraged pull (sacrifice below own requirement up to the weekly cap,
+  honest RAG). Unmanned queues: 0 HC, never hired for, served by rungs 4–5.
+- **Volumes & profiles (§18)** — brand volume split (`brandShareVolume`,
+  shares normalise, explicit per-queue volumes win); volume profiles with
+  `blendedAht` (Σ share×aht, ≤6 segments, auto-normalise) feeding the Erlang
+  engine unchanged; generalised knock-on {repeatPct, spillPct,
+  spillTargetQueue} per queue with exact legacy redial/deflection reproduction
+  through the fallthrough chain.
+- **Unified scenarios (§19)** — one shape {tag, parameter: volume|aht|sla|
+  profileShares|people(kind), mechanism: step|growthRate|manualSeries,
+  granularity: day|week|month, startWeek, stopWeek, scope}; legacy types
+  still evaluated natively (regression), groups (`groupScenarioIds`) resolve
+  exactly as views did.
+- **Migration shims (§21)** — `migrateScenarioToUnified` (9 legacy types),
+  `migrateServiceTeamsToLeveraged` (size→HC, cap = size×maxHoursPerWeek,
+  targets = coversQueues, premium kept as a cost note), `migrateConfigR2`
+  (brand adoption, resourced→dedicated / supported→unmanned, crossSkill→
+  supports, views→groups, knock-on materialisation; idempotent).
+- **Risk/audit fields (§16/§20a)** — weekly per-queue record gains otHours,
+  otCost, otStreakWeeks, reclaimedHours, trainingDebt, recycledIn, poolIn,
+  leveragedIn, borrowedSharePct, ahtInEffect, slaInEffect, attrInEffect,
+  trainShrinkInEffect, scenarioTags, channel, brandId; totals gain
+  otHours/otCost and totalCost includes OT.
+
+### Hand-computed §22 anchors (all asserted exactly in tests/r2.test.js)
+Rigs use the r1 exact-arithmetic scaffold (digital, AHT 3600 s, ceiling 1,
+8 h heads, daysWorked = daysPerWeek = 7 ⇒ req h/day = dailyVolume):
+- **OT**: HC 5, deficit 20 h/day → weekly OT = min(2×7, 10)×5 = **50 h**
+  (10/day, days 0–4); otCost = 50 × (30000/52/56) × 1.5 = **£772.66**;
+  burnout = load 10 × (50/50) = **10**; streak 1, 2, 3…
+- **Rung order**: own 28 h/day (shrinkage .3), deficit 14, reclaim cap
+  0.2×5×8 = 8 h/day → days 0–4: OT 10 + reclaim 4; days 5–6: reclaim 8 ⇒
+  OT **50**, reclaimed **36** (proves OT-first); debt = 20×(36/56) = **90/7 ≈
+  12.857**; wk1 AHT = 3600×(1+(90/7)/100×0.08) = **3637.03**.
+- **Forced reclaim + decay**: scenario value 0.5, weeks 0–1 ⇒ debt walks
+  **[10, 20, 10, 0]**; attrition in effect wk1 = 0.04×1.05 = **0.042**, wk2 =
+  0.04×1.10 = **0.044**.
+- **Brand training**: reqToStart 1, 10 heads hired wk0 — brand A (2 wk)
+  lands **wk 2**, brand B (5 wk) lands **wk 5**.
+- **Recycling before pools**: unmanned queue takes **140 h/wk** recycledIn
+  from same-brand leveraged spare, poolIn **0**, donor stays ≥ requirement.
+- **Pool 2:1**: deficits 6:3 vs spare 6/day → **4 and 2 h/day** (priority
+  numbers ignored); training feed rig: feed capped at **42 h/wk** (full
+  0.25 cap), donor debt **20**, recipients split 12/day pro-rata 20:3 →
+  **73.04 / 10.96 h/wk**.
+- **Leveraged sacrifice**: cap 105 h/wk, target deficit 20/day → target
+  receives exactly **105 h**; donor drops to cover **175/245 ≈ 0.714** and
+  RAGs red honestly; target borrowedSharePct = **0.25**.
+- **Profiles**: 60/40 of 3600/7200 → blended **5040 s**; shares shifted to
+  20/80 → **6480 s**, requirement moves by exactly **9/7**.
+- **Brand split**: 1200/day at shares 2:1 → **800/400**; explicit queue keeps
+  its **100** and stays out of the split.
+- **borrowedSharePct**: own 28 vs req 40 h/day with the 12 h gap pool-fed →
+  **0.30** exactly.
+- **Horizon**: 5→**24**, 100→**78**, blank→**52**, 60 stays.
+- **Perf** (§22 budgets): 5×5 group×strategy matrix at 52 weeks ≈ **1.7–1.9 s**
+  (< 8 s); single 52-week sim ≈ **44 ms** (< 400 ms). P1's own budget test
+  (8 sims < 1 s) passes at ≈ 0.5 s despite the 26→52-week default.
+
+### Performance work (needed to keep the UNMODIFIED P1 perf test green at 52 weeks)
+Doubling the default horizon initially pushed P1 test 14 to ~1.7 s. Fixes, all
+behaviour-preserving (key-representation / memoisation only):
+- Erlang caches switched to numeric composite keys (no string alloc on the hot
+  path) with a memoised parameter-cluster sub-map; `requiredAgentsInterval`'s
+  whole scan is memoised at the same quantisation voiceRaw already used.
+- `reqCurveVoice/Digital` cache made persistent across simulate() calls, keyed
+  by profile identity (WeakMap — profile arrays are replaced on edit, the same
+  invariant `_normCache` already relied on) + every numeric parameter.
+- Day-memos reuse a day's voice/digital results within a week when the exact
+  inputs repeat; `lite` day runs skip per-interval detail except on the
+  captured intraday day; `exogenousVolume` accepts the day loop's already-
+  computed scenario resolution instead of re-deriving it.
+
+### Decisions / deviations flagged
+- **reducedTraining migration**: §19 sketches "people.trainingShrinkage + aht
+  step"; that pair cannot reproduce the legacy cohort-timing effects (curve
+  stretch, cut weeks) within the §22 1% gate, so the unified scenario carries
+  the full legacy programme under `people.trainingProgramme` (same envelope,
+  numerically exact). Flagged here per the working agreement.
+- **resourced→dedicated**: `migrateConfigR2` maps legacy "resourced" to
+  "dedicated" (§17's never-donates default); the legacy string keeps working
+  unmigrated, and dedicated queues still honour EXPLICIT supports routes —
+  only automatic recycling is donor-restricted to leveraged queues.
+- **Donation ordering**: explicit supports (R1 waterfall) run before automatic
+  recycling; both run before pools, pools before leveraged pull — the §17
+  order, with R1's explicit routes slotted at rung 4 ("explicit routes are
+  always honoured").
+- The default config keeps its legacy `crossSkill` field (the shim converts at
+  simulate time) so pre-R2 saves and the R1 battery read identically.
+
+Gate: tests/r2.test.js — 26 tests, all green; P1 (20), R1 (19), r1ui (13) and
+harness (20) all green unmodified. The persistent-cache rework was additionally
+spot-checked for staleness at commit time: repeated sims are bit-identical, and
+edits to aht / profile (replaced array) / occupancyCeiling / asaTarget /
+patience / maxAbandon / concurrency each change results and restore the
+original numbers exactly on revert, including with two configs interleaved.
+
 ## Build & run
-- `npm test` — all gates (engine, r1, r1ui, harness).
+- `npm test` — all gates (engine, r1, r2, r1ui, harness).
 - `npm run build:html` — regenerate dist/ deliverables from source.
 - Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
   into a React artifact host.
