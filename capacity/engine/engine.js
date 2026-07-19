@@ -393,7 +393,8 @@ const SEASONAL_PRESETS = {
 const BUILTIN_STRATEGIES = [
   { id: "S1", name: "Meet requirement", baseType: "meet", builtin: true },
   { id: "S2", name: "Buffer above", baseType: "buffer", builtin: true },
-  { id: "S3", name: "Forward backfill", baseType: "backfill", builtin: true },
+  // §24.4: the default lives ON the strategy object (user-editable, 1–6).
+  { id: "S3", name: "Forward backfill", baseType: "backfill", builtin: true, forwardMonths: 3 },
   { id: "S4", name: "Manual plan", baseType: "manual", builtin: true },
 ];
 function strategyById(cfg, id) {
@@ -814,7 +815,10 @@ function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
       want = (q.wf.hires || []).filter((h) => h.week === w).reduce((a, b) => a + b.heads, 0);
     } else if (sObj.baseType === "backfill") {
       // §24.4 forwardMonths (1–6): how far forward the leaver projection looks.
-      // Absent = legacy behaviour exactly (the landing week: reqToStart + training).
+      // The default (3) lives ON the strategy object — built-in S3 ships it and
+      // migration stamps it onto backfill strategies, so it is user-editable
+      // config, not engine magic. A hand-built object WITHOUT the field keeps
+      // the legacy landing-week projection (reqToStart + training).
       const fm = sObj.forwardMonths;
       if (fm != null) {
         const ahead = Math.max(1, Math.round(clamp(fm, 1, 6) * (52 / 12)));
@@ -1962,6 +1966,10 @@ function migrateConfigR3(cfg) {
       };
     }),
     pools: [],
+    // §24.4: backfill strategies carry their forwardMonths default explicitly
+    // (built-ins already ship 3; older saves gain it here). User-editable.
+    strategies: (r2.strategies || []).map((s) =>
+      s.baseType === "backfill" && s.forwardMonths == null ? { ...s, forwardMonths: 3 } : s),
     hiring: {
       ...r2.hiring,
       caps: r2.hiring.caps || { segments: {}, brands: {}, total: r2.hiring.cap != null ? r2.hiring.cap : null },

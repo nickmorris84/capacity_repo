@@ -713,10 +713,15 @@ What shipped (engine only; UI lands in R3b):
   caps.total when present.
 * **§24.4 strategy params.** S2 `bufferPct` was already per-strategy; S3 gains
   `forwardMonths` (clamped 1–6, weeks = round(m × 52/12)) — the projection
-  distance for the leaver estimate. ABSENT = legacy landing-week projection,
-  byte-identical (gate asserts built-in S3 unchanged and want monotone in m:
-  m=1 > default(lead) > m=6 under attrition, i.e. the backfill is sized to
-  the pool at the projection point).
+  distance for the leaver estimate. USER DECISION (post-R3a review): the
+  default lives ON the strategy object — built-in S3 ships `forwardMonths: 3`
+  and `migrateConfigR3` stamps 3 onto any backfill strategy lacking it, so it
+  is ordinary user-editable config. Consequence, accepted explicitly: S3
+  numbers shift from the legacy landing-week projection (10 wk on default
+  queues) to 13 wk everywhere — the validated battery's S3 assertions are
+  one-sided orderings and stay green unmodified. A hand-built strategy object
+  WITHOUT the field keeps the legacy landing-week projection (gate asserts
+  both semantics plus want monotone in m: m=1 > S3(3mo) > m=6).
 * **§24.5 digital subtypes.** `q.subtype: "customer" | "workflow"` (absent =
   customer = legacy digital, bit-identical). Workflow: `reqCurveWorkflow`
   (hours = items × handle time ÷ occupancy ceiling; no concurrency, no
@@ -759,5 +764,6 @@ Deferred to R3b (UI): caps-matrix editor, knock/sharing editors, subtype
 picker, week-1 date + wizard UI, monthly cost fields, group-scope editor,
 lifecycle actions (duplicate/defaults/blank + empty state), Business-box RAG
 presentation, and wiring applyGroupScope into sim-set. Note for R3b: the
-UI's strategy editor should surface bufferPct/forwardMonths (forwardMonths
-UI default 3 — write it only on explicit edit; unset keeps legacy S3).
+UI's strategy editor binds bufferPct/forwardMonths directly — forwardMonths
+is already ON every backfill strategy (default 3, stamped by migration), so
+the editor is a plain field, no write-on-edit dance.

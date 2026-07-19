@@ -422,7 +422,8 @@ var require_engine = __commonJS({
     var BUILTIN_STRATEGIES = [
       { id: "S1", name: "Meet requirement", baseType: "meet", builtin: true },
       { id: "S2", name: "Buffer above", baseType: "buffer", builtin: true },
-      { id: "S3", name: "Forward backfill", baseType: "backfill", builtin: true },
+      // §24.4: the default lives ON the strategy object (user-editable, 1–6).
+      { id: "S3", name: "Forward backfill", baseType: "backfill", builtin: true, forwardMonths: 3 },
       { id: "S4", name: "Manual plan", baseType: "manual", builtin: true }
     ];
     function strategyById(cfg, id) {
@@ -1846,6 +1847,9 @@ var require_engine = __commonJS({
           };
         }),
         pools: [],
+        // §24.4: backfill strategies carry their forwardMonths default explicitly
+        // (built-ins already ship 3; older saves gain it here). User-editable.
+        strategies: (r2.strategies || []).map((s) => s.baseType === "backfill" && s.forwardMonths == null ? { ...s, forwardMonths: 3 } : s),
         hiring: {
           ...r2.hiring,
           caps: r2.hiring.caps || { segments: {}, brands: {}, total: r2.hiring.cap != null ? r2.hiring.cap : null }

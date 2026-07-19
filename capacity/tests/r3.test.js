@@ -222,7 +222,7 @@ t("custom buffer 30% wants req × 1.3; built-in S2 keeps the Settings default 10
 
 /* ---------------- 7. §24.4 S3 forwardMonths — projection distance moves the backfill ---------------- */
 console.log("\n[7] Strategy params — S3 forwardMonths 1 vs 6 changes req timing in the right direction");
-t("want tracks the projected pool at +m months: m1 > default(lead 10wk) > m6; unset ≡ legacy exactly", () => {
+t("want tracks the projected pool at +m months: m1 > built-in S3 (3mo) > m6; default lives on the strategy", () => {
   const mk = () => {
     const cfg = rigCfg();
     dq(cfg, "qf", 20, { fte: 20, wf: { attrition: 0.4345, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [1], hires: [] } });
@@ -236,11 +236,32 @@ t("want tracks the projected pool at +m months: m1 > default(lead 10wk) > m6; un
   const w1 = runFm(1), w6 = runFm(6);
   eq(w1, wantAt(Math.round(52 / 12)), 1e-9, "m=1 projects 4 weeks out");
   eq(w6, wantAt(26), 1e-9, "m=6 projects 26 weeks out");
-  const wDefault = E.simulate(mk(), { strategy: { id: "SD", name: "D", baseType: "backfill" } }).allocTrace[0].want;
-  const wLegacy = E.simulate(mk(), { strategy: "S3" }).allocTrace[0].want;
-  eq(wDefault, wantAt(10), 1e-9, "unset = legacy landing week (reqToStart 6 + training 4)");
-  eq(wLegacy, wDefault, 1e-12, "built-in S3 unchanged (hard regression)");
-  ok(w1 > wDefault && wDefault > w6 && w6 > 0, `monotone in the projection distance: ${w1.toFixed(4)} > ${wDefault.toFixed(4)} > ${w6.toFixed(4)}`);
+  // Built-in S3 carries the default ON the strategy object (user-editable):
+  // 3 months = 13 weeks. A hand-built object WITHOUT the field keeps the
+  // legacy landing-week projection (reqToStart 6 + training 4 = 10 weeks).
+  const wS3 = E.simulate(mk(), { strategy: "S3" }).allocTrace[0].want;
+  eq(wS3, wantAt(13), 1e-9, "built-in S3 projects 3 months (13 weeks) out");
+  const wBare = E.simulate(mk(), { strategy: { id: "SD", name: "D", baseType: "backfill" } }).allocTrace[0].want;
+  eq(wBare, wantAt(10), 1e-9, "field absent = legacy landing-week projection");
+  ok(w1 > wS3 && wS3 > w6 && w6 > 0, `monotone in the projection distance: ${w1.toFixed(4)} > ${wS3.toFixed(4)} > ${w6.toFixed(4)}`);
+});
+t("the default is config, not engine magic: shipped on built-ins, stamped by migration, user-editable", () => {
+  ok(E.BUILTIN_STRATEGIES.find((s) => s.id === "S3").forwardMonths === 3, "BUILTIN S3 ships forwardMonths 3");
+  ok(E.makeDefaultConfig().strategies.find((s) => s.id === "S3").forwardMonths === 3, "default config carries it");
+  ok(E.makeBlankConfig().strategies.find((s) => s.id === "S3").forwardMonths === 3, "blank config carries it");
+  const old = E.makeDefaultConfig();
+  old.strategies = old.strategies.map((s) => { const { forwardMonths, ...rest } = s; return rest; }); // pre-§24 save
+  old.strategies.push({ id: "SC", name: "Custom backfill", baseType: "backfill" });
+  const m = E.migrateConfigR3(old);
+  ok(m.strategies.find((s) => s.id === "S3").forwardMonths === 3, "migration stamps built-in S3");
+  ok(m.strategies.find((s) => s.id === "SC").forwardMonths === 3, "migration stamps custom backfill strategies too");
+  ok(m.strategies.find((s) => s.id === "S1").forwardMonths == null, "non-backfill strategies untouched");
+  // …and the user can change it: an edited value drives the projection.
+  const cfg = rigCfg();
+  dq(cfg, "qf", 20, { fte: 20, wf: { attrition: 0.4345, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [1], hires: [] } });
+  cfg.strategies = cfg.strategies.map((s) => (s.id === "S3" ? { ...s, forwardMonths: 1 } : s));
+  const wkAttr = 0.4345 / 4.345;
+  eq(E.simulate(cfg, { strategy: "S3" }).allocTrace[0].want, 20 * Math.pow(1 - wkAttr, 1 + 4) * wkAttr, 1e-9, "edited S3 (1 month) projects 4 weeks out");
 });
 
 /* ---------------- 8. §24.5 workflow subtype — 24h SLA maths (hand) ---------------- */
