@@ -9,15 +9,66 @@ const TYPE_LABELS = {
   attritionShock: "Attrition shock",
   hiringFreeze: "Hiring freeze",
   reducedTraining: "Reduced training",
+  growthManual: "Manual weekly growth",
+  freezeManual: "Manual freeze",
 };
 
+// Sparse-grid editor: click weeks to add/remove entries, then set values.
+function WeekGrid({ horizon, value, onToggle, render }) {
+  return (
+    <div className="rowflex" style={{ gap: 4 }} data-testid="week-grid">
+      {Array.from({ length: horizon }, (_, w) => {
+        const on = value(w);
+        return (
+          <div key={w} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <button type="button" className={"wk-cell" + (on ? " sel" : "")} data-st={on ? "green" : undefined}
+              style={on ? undefined : { background: "var(--panel-2)", color: "var(--muted)" }}
+              onClick={() => onToggle(w)} aria-pressed={on} aria-label={"Week " + (w + 1)}>{w + 1}</button>
+            {on && render ? render(w) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Type-specific parameter fields.
-function ScenarioParams({ s, ti, ops }) {
+function ScenarioParams({ s, ti, ops, horizon }) {
   const set = (k, v) => ops.patchScenario(ti, ["p", k], v);
   const p = s.p || {};
   switch (s.type) {
     case "growth":
-      return <NumField label="Rate" unit="%/mo" value={+(p.rate * 100).toFixed(1)} onChange={(v) => set("rate", v / 100)} />;
+      return (
+        <>
+          <NumField label="Rate" unit="%/mo" value={+(p.rate * 100).toFixed(1)} onChange={(v) => set("rate", v / 100)} />
+          <NumField label="Stop week" value={p.stopWeek == null ? "" : p.stopWeek + 1} onChange={(v) => set("stopWeek", v ? v - 1 : null)} hint="Optional — growth holds flat from this week onward. Blank means it compounds to the horizon." />
+        </>
+      );
+    case "growthManual": {
+      const wp = p.weeklyPct || {};
+      return (
+        <div style={{ gridColumn: "1 / -1", width: "100%" }}>
+          <div className="lab" style={{ marginBottom: 6 }}>Weekly % overrides — click a week to override that week's growth, then set its %</div>
+          <WeekGrid horizon={horizon} value={(w) => wp[w] != null} onToggle={(w) => {
+            const next = { ...wp };
+            if (next[w] != null) delete next[w]; else next[w] = 0.1;
+            set("weeklyPct", next);
+          }} render={(w) => (
+            <input type="number" className="inp" style={{ width: 48, fontSize: 11, padding: "2px 4px" }} value={+(wp[w] * 100).toFixed(0)}
+              onChange={(e) => set("weeklyPct", { ...wp, [w]: Number(e.target.value) / 100 })} aria-label={"Week " + (w + 1) + " %"} />
+          )} />
+        </div>
+      );
+    }
+    case "freezeManual": {
+      const weeks = p.weeks || [];
+      return (
+        <div style={{ gridColumn: "1 / -1", width: "100%" }}>
+          <div className="lab" style={{ marginBottom: 6 }}>Tick the weeks with no hiring</div>
+          <WeekGrid horizon={horizon} value={(w) => weeks.includes(w)} onToggle={(w) => set("weeks", weeks.includes(w) ? weeks.filter((x) => x !== w) : [...weeks, w].sort((a, b) => a - b))} />
+        </div>
+      );
+    }
     case "launch":
       return (
         <>
@@ -92,7 +143,7 @@ export function ScenariosEditor({ config, ops }) {
                   options={[{ value: "all", label: "All queues (global)" }, { value: "some", label: "Specific queues" }]}
                   hint="Freeze, attrition shock and reduced training are operation-wide regardless of this setting."
                 />
-                <ScenarioParams s={s} ti={ti} ops={ops} />
+                <ScenarioParams s={s} ti={ti} ops={ops} horizon={config.engine.horizonWeeks} />
               </div>
               {s.queueIds !== "all" && (
                 <div className="rowflex">

@@ -27,20 +27,32 @@ export function IntradayTab({ sim }) {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <Card title="Intraday view" sub="first day of the selected week">
-        <div className="fieldrow" style={{ maxWidth: 520 }}>
+      <Card title="Intraday view" sub="first day of the selected week" hint="Pick a queue, then click any week in the strip — coloured by that queue's SLA verdict — to load its first-day intraday profile.">
+        <div className="fieldrow" style={{ maxWidth: 320, marginBottom: 12 }}>
           <SelectField
             label="Queue"
             value={q.id}
             onChange={setQid}
             options={cfg.queues.map((x) => ({ value: x.id, label: x.name }))}
           />
-          <SelectField
-            label="Week"
-            value={String(Math.min(wk, sim.weeks.length - 1))}
-            onChange={(v) => setWk(Number(v))}
-            options={sim.weeks.map((w) => ({ value: String(w.week), label: "Week " + (w.week + 1) }))}
-          />
+        </div>
+        <div className="lab" style={{ marginBottom: 6 }}>Weeks — {q.name} (click to load)</div>
+        <div className="week-strip" data-testid="week-strip">
+          {sim.weeks.map((w) => {
+            const st = w.queues[q.id].status;
+            const sel = w.week === Math.min(wk, sim.weeks.length - 1);
+            return (
+              <button
+                key={w.week}
+                type="button"
+                className={"wk-cell" + (sel ? " sel" : "")}
+                data-st={st}
+                aria-pressed={sel}
+                aria-label={`Week ${w.week + 1}: ${st}`}
+                onClick={() => setWk(w.week)}
+              >{w.week + 1}</button>
+            );
+          })}
         </div>
       </Card>
 

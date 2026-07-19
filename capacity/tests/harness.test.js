@@ -58,7 +58,7 @@ async function checklist(label, ctx) {
   });
 
   await t(`[${label}] add a scenario and toggle it`, async () => {
-    await goto("Scenarios & views");
+    await goto("Scenarios");
     const sel = doc.querySelector("#panel-scenarios select");
     const before = doc.querySelectorAll("#panel-scenarios .rows > .erow").length;
     setValue(sel, "p1");
@@ -71,14 +71,14 @@ async function checklist(label, ctx) {
     eq(toggle.checked, !checked, "scenario toggled");
   });
 
-  await t(`[${label}] save a run, tick it, per-queue comparison renders`, async () => {
-    await goto("Runs");
-    setValue(doc.querySelector("[data-testid=run-name]"), "Baseline " + label);
-    click(doc.querySelector("[data-testid=save-run]"));
+  await t(`[${label}] save a snapshot, tick it, per-queue comparison renders`, async () => {
+    await goto("Snapshots");
+    setValue(doc.querySelector("[data-testid=snapshot-name]"), "Baseline " + label);
+    click(doc.querySelector("[data-testid=save-snapshot]"));
     await settle(200);
-    const rows = doc.querySelectorAll("#panel-runs [data-testid=runs-table] tbody tr");
-    ok(rows.length >= 1 && !rows[0].querySelector(".empty"), "saved run appears in the library");
-    const tick = doc.querySelector("#panel-runs [data-testid=runs-table] tbody input[type=checkbox]");
+    const rows = doc.querySelectorAll("#panel-snapshots [data-testid=snapshots-table] tbody tr");
+    ok(rows.length >= 1 && !rows[0].querySelector(".empty"), "saved snapshot appears");
+    const tick = doc.querySelector("#panel-snapshots [data-testid=snapshots-table] tbody input[type=checkbox]");
     ok(tick, "compare tick exists");
     click(tick);
     await settle(150);
@@ -88,17 +88,17 @@ async function checklist(label, ctx) {
 
   await t(`[${label}] compare selection survives a tab switch`, async () => {
     await goto("Plan");
-    await goto("Runs");
-    const tick = doc.querySelector("#panel-runs [data-testid=runs-table] tbody input[type=checkbox]");
+    await goto("Snapshots");
+    const tick = doc.querySelector("#panel-snapshots [data-testid=snapshots-table] tbody input[type=checkbox]");
     ok(tick && tick.checked, "tick still set after switching tabs and back");
   });
 
-  await t(`[${label}] fire every export`, async () => {
-    await goto("Report");
+  await t(`[${label}] fire every export (Settings)`, async () => {
+    await goto("Settings");
     const ids = ["export-workbook", "export-config", "export-run", "export-params-csv", "export-volumes-csv"];
     const before = downloads.length;
     for (const id of ids) {
-      const btn = doc.querySelector(`[data-testid=${id}]`);
+      const btn = doc.querySelector(`#panel-settings [data-testid=${id}]`);
       ok(btn, id + " button exists");
       click(btn);
       await settle(20);
@@ -113,8 +113,8 @@ async function checklist(label, ctx) {
     const baseCell = () => doc.querySelector("#panel-data [data-testid=data-table] tbody tr td:nth-child(2)");
     const before = Number(digits(baseCell()));
     ok(before > 0, "baseline base vol read");
-    await goto("Report");
-    const input = doc.querySelector("[data-testid=import-params-csv]");
+    await goto("Settings");
+    const input = doc.querySelector("#panel-settings [data-testid=import-params-csv]");
     ok(input, "params-CSV input exists");
     await fileInput(input, PARAMS_CSV, "params.csv", "text/csv");
     await settle(350);
@@ -124,13 +124,15 @@ async function checklist(label, ctx) {
     ok(Math.abs(after / before - 2.5) < 0.02, `daily volume 2000→5000 scales base vol 2.5× (was ${before}, now ${after})`);
   });
 
-  await t(`[${label}] print view renders and print fires`, async () => {
-    await goto("Report");
-    ok(doc.querySelectorAll("#panel-report .report-section").length >= 3, "report sections render");
-    ok(doc.querySelectorAll('#panel-report .report-chart .recharts-wrapper > svg[width="640"]').length >= 3, "report charts at fixed 640px");
-    const before = getPrinted();
-    click([...doc.querySelectorAll("#panel-report button")].find((b) => /Print/.test(b.textContent)));
-    ok(getPrinted() === before + 1, "window.print invoked");
+  await t(`[${label}] the context-bar print action fires from every tab`, async () => {
+    for (const lbl of ["Summary", "Plan", "Data", "Settings"]) {
+      await goto(lbl);
+      const pb = doc.querySelector('.ctxbar [data-testid="print-page"]');
+      ok(pb, "print action present on " + lbl);
+      const before = getPrinted();
+      click(pb);
+      ok(getPrinted() === before + 1, "window.print invoked from " + lbl);
+    }
   });
 }
 
@@ -236,7 +238,7 @@ async function runHtmlTarget(html) {
 
   await t("[html] standalone HTML mounts clean in JSDOM", () => {
     ok(doc.getElementById("root").children.length > 0, "rendered");
-    ok(doc.querySelectorAll('[role="tab"]').length === 13, "all tabs present");
+    ok(doc.querySelectorAll('[role="tab"]').length === 10, "all tabs present");
     eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
   });
 

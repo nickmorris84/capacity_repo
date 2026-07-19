@@ -23,7 +23,7 @@ export function CoverageChart({ sim, selectedWeek }) {
     return row;
   });
   return (
-    <Chart title="Coverage vs 100%" hint="Available productive hours ÷ required hours, laid along the requirement curve. 100% means SLA is met in every interval; below is a uniform shortfall.">
+    <Chart title="Coverage" hint="Available productive hours ÷ required hours, laid along the requirement curve. 100% means SLA is met in every interval; below is a uniform shortfall.">
       {(w, h) => (
         <LineChart width={w} height={h} data={data} {...common}>
           <CartesianGrid strokeDasharray="3 3" stroke="#eef2f5" />

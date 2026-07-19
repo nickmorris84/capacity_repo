@@ -3,12 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/r1.test.js && node tests/ui.test.js && node tests/strategies.test.js && node tests/documents.test.js && node tests/harness.test.js",
+    "test": "node tests/engine.test.js && node tests/r1.test.js && node tests/r1ui.test.js && node tests/harness.test.js",
     "test:engine": "node tests/engine.test.js",
     "test:r1": "node tests/r1.test.js",
-    "test:ui": "node tests/ui.test.js",
-    "test:strategies": "node tests/strategies.test.js",
-    "test:documents": "node tests/documents.test.js",
+    "test:r1ui": "node tests/r1ui.test.js",
     "test:harness": "node tests/harness.test.js",
     "build:html": "node scripts/build.js",
     "build": "node scripts/build.js"

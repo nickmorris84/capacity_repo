@@ -39,6 +39,8 @@ export function buildWeeklyRows(sim, queue, config) {
       training: s.training,
       ramping: s.ramp,
       trained: s.trained,
+      active: s.active != null ? s.active : s.trained + s.ramp,
+      startingHC: s.startingHC != null ? s.startingHC : 0,
       paid: s.paid,
       reqFte: s.reqFte,
       cost: s.cost,
@@ -47,6 +49,31 @@ export function buildWeeklyRows(sim, queue, config) {
       status: s.status,
     };
   });
+}
+
+// Per-queue summary for the Summary tab (§14.6): one row per queue plus Voice /
+// Digital / Total subtotals, all under the active strategy's simulation.
+export function buildQueueSummary(sim, config) {
+  const rows = [];
+  const mk = () => ({ volume: 0, required: 0, active: 0, coverNum: 0, coverDen: 0, weeksRed: 0, churn: 0 });
+  const voice = mk(), digital = mk(), total = mk();
+  for (const q of config.queues) {
+    const series = sim.weeks.map((w) => w.queues[q.id]);
+    const last = series[series.length - 1];
+    const volume = series.reduce((a, s) => a + s.volume, 0);
+    const required = last.reqFte;
+    const active = last.active != null ? last.active : last.trained + last.ramp;
+    const cover = series.reduce((a, s) => a + s.cover, 0) / Math.max(1, series.length);
+    const weeksRed = series.filter((s) => s.status === "red").length;
+    const churn = series.reduce((a, s) => a + s.churnCost, 0);
+    rows.push({ id: q.id, name: q.name, type: q.type, resourcing: q.resourcing || "resourced", volume, required, active, cover, weeksRed, churn });
+    for (const g of [q.type === "voice" ? voice : digital, total]) {
+      g.volume += volume; g.required += required; g.active += active;
+      g.coverNum += cover; g.coverDen += 1; g.weeksRed += weeksRed; g.churn += churn;
+    }
+  }
+  const fin = (g, name) => ({ id: name, name, subtotal: true, volume: g.volume, required: g.required, active: g.active, cover: g.coverDen ? g.coverNum / g.coverDen : 0, weeksRed: g.weeksRed, churn: g.churn });
+  return { rows, voice: fin(voice, "Voice subtotal"), digital: fin(digital, "Digital subtotal"), total: fin(total, "Total") };
 }
 
 // Column model with groups + a formatter. columnsFor tailors the Service group
@@ -80,15 +107,16 @@ export function columnsFor(queue, cur = "£") {
     { key: "redial", label: "Redial", group: "Demand", fmt: N0 },
     { key: "volume", label: "Total vol", group: "Demand", fmt: N0 },
     ...service,
+    { key: "startingHC", label: "Starting HC", group: "People", fmt: N1 },
     { key: "burnout", label: "Burnout", group: "People", fmt: N0 },
-    { key: "leavers", label: "Leavers", group: "People", fmt: N1 },
-    { key: "attrInEffect", label: "Attrition", group: "People", fmt: P1 },
+    { key: "leavers", label: "Attrition #", group: "People", fmt: N1 },
+    { key: "attrInEffect", label: "Attrition %", group: "People", fmt: P1 },
     { key: "reqsRaised", label: "Reqs raised", group: "People", fmt: N1 },
     { key: "hiresLanding", label: "Hires start", group: "People", fmt: N1 },
     { key: "training", label: "In training", group: "People", fmt: N1 },
     { key: "ramping", label: "Ramping", group: "People", fmt: N1 },
     { key: "trained", label: "Trained", group: "People", fmt: N1 },
-    { key: "paid", label: "Paid FTE", group: "People", fmt: N1 },
+    { key: "active", label: "Active FTE", group: "People", fmt: N1 },
     { key: "reqFte", label: "Req FTE", group: "People", fmt: N1 },
     { key: "cost", label: "Run cost", group: "Money", fmt: M },
     { key: "churnCost", label: "Churn cost", group: "Money", fmt: M },

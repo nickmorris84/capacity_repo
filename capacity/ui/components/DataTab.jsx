@@ -52,17 +52,17 @@ export function DataTab({ sim, config, activeViewId, views, onSelectView }) {
 
       <Card title={`${queue.name} — weekly`} sub={`${rows.length} weeks · ${cols.length} columns`}>
         <div className="tbl-wrap" style={{ maxHeight: 560 }}>
-          <table className="data" data-testid="data-table">
+          <table className="data grouped" data-testid="data-table">
             <thead>
               <tr>
-                {cols.map((c) => <th key={c.key}>{c.label}</th>)}
+                {cols.map((c) => <th key={c.key} className={"grp-" + c.group.toLowerCase()}>{c.label}</th>)}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.week}>
                   {cols.map((c) => (
-                    <td key={c.key} className={c.key === "status" ? "st-" + row.status : undefined}>
+                    <td key={c.key} className={"grp-" + c.group.toLowerCase() + (c.key === "status" ? " st-" + row.status : "")}>
                       {c.fmt(row[c.key])}
                     </td>
                   ))}

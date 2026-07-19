@@ -1,21 +1,86 @@
 import { useState } from "react";
 import { Card } from "./primitives.jsx";
-import { buildVerdict, buildAudienceBlocks, buildRiskRegister } from "../reporting.js";
-import { strategyName, viewName } from "../views.js";
+import { PrintButton } from "../print.jsx";
+import { buildVerdict, buildAudienceBlocks, buildRiskRegister, buildQueueSummary } from "../reporting.js";
+import { strategyList, strategyStats, resolveStrategyName, viewName } from "../views.js";
 import { money, moneyFull, pct, num } from "../format.js";
 
 const Stat = ({ l, v, sub }) => (
   <div className="stat"><div className="l">{l}</div><div className="v">{v}{sub ? <small> {sub}</small> : null}</div></div>
 );
 
-/* Summary tab (SPEC §7): auto-written verdict, Finance / HR / Business blocks,
-   and a sortable risk register. Reads the active simulation + all strategy sims. */
-export function SummaryTab({ sim, strategySims, config, activeStrategy, activeViewId }) {
+const endCoverage = (sim) => {
+  if (!sim) return 0;
+  const last = sim.weeks[sim.weeks.length - 1];
+  const qs = sim.config.queues;
+  return qs.length ? qs.reduce((a, q) => a + last.queues[q.id].cover, 0) / qs.length : 0;
+};
+
+// §14: strategy overview cards — name, all-in, weeks red, end coverage, Set active.
+function StrategyCards({ sims, stratIds, config, activeStrategyId, onSetActive }) {
   const cur = config.engine.currency;
-  const verdict = buildVerdict(strategySims, activeStrategy, activeViewId, config);
+  return (
+    <div className="qcards" data-testid="strategy-cards">
+      {stratIds.map((id) => {
+        const sim = sims[id];
+        const st = strategyStats(sim);
+        const active = id === activeStrategyId;
+        return (
+          <div key={id} className={"qcard " + (st ? (st.redWeeks ? "red" : "green") : "")}>
+            <div className="qn"><span>{resolveStrategyName(config, id)}</span><span className="spacer" />{active && <span className="tag">active</span>}</div>
+            <div className="kpis">
+              <div className="kpi"><div className="l">All-in</div><div className="v">{st ? money(cur, st.allIn) : "…"}</div></div>
+              <div className="kpi"><div className="l">Weeks red</div><div className="v">{st ? st.redWeeks : "…"}</div></div>
+              <div className="kpi"><div className="l">End coverage</div><div className="v">{pct(endCoverage(sim))}</div></div>
+              <div className="kpi"><div className="l">Feasible</div><div className="v">{st ? (st.feasible ? "yes" : "no") : "…"}</div></div>
+            </div>
+            <button type="button" className={"btn sm" + (active ? " primary" : "")} style={{ marginTop: 10, width: "100%" }} disabled={active} onClick={() => onSetActive(id)} data-testid={"set-active-" + id}>
+              {active ? "Active" : "Set active"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function QueueSummaryTable({ sim, config }) {
+  const cur = config.engine.currency;
+  const qs = buildQueueSummary(sim, config);
+  const row = (r, cls) => (
+    <tr key={r.id} className={cls}>
+      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{r.name}{r.resourcing === "supported" ? " (supported)" : ""}</td>
+      <td>{num(r.volume, 0)}</td>
+      <td>{num(r.required, 1)}</td>
+      <td>{num(r.active, 1)}</td>
+      <td>{pct(r.cover)}</td>
+      <td className={r.weeksRed ? "st-red" : "st-green"}>{r.weeksRed}</td>
+      <td>{money(cur, r.churn)}</td>
+    </tr>
+  );
+  return (
+    <div className="tbl-wrap">
+      <table className="data" data-testid="queue-summary">
+        <thead><tr><th>Queue</th><th>Volume</th><th>Required</th><th>Active</th><th>Coverage</th><th>Weeks red</th><th>Churn £</th></tr></thead>
+        <tbody>
+          {qs.rows.filter((r) => r.type === "voice").map((r) => row(r, ""))}
+          {qs.rows.some((r) => r.type === "voice") && row(qs.voice, "grp")}
+          {qs.rows.filter((r) => r.type === "digital").map((r) => row(r, ""))}
+          {qs.rows.some((r) => r.type === "digital") && row(qs.digital, "grp")}
+          {row(qs.total, "grp total")}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeViewId, onSetActive }) {
+  const cur = config.engine.currency;
+  const verdict = buildVerdict(sims, activeStrategy, activeViewId, config);
   const blocks = buildAudienceBlocks(sim, config);
   const risks = buildRiskRegister(sim, config);
   const [sort, setSort] = useState({ key: "severityValue", dir: -1 });
+  const f = blocks.finance, hr = blocks.hr, bz = blocks.business;
 
   const sortedRisks = [...risks].sort((a, b) => {
     const dir = sort.dir;
@@ -26,22 +91,31 @@ export function SummaryTab({ sim, strategySims, config, activeStrategy, activeVi
   const setSortKey = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : (key === "risk" ? 1 : -1) }));
   const arrow = (key) => (sort.key === key ? (sort.dir < 0 ? " ↓" : " ↑") : "");
 
-  const f = blocks.finance, hr = blocks.hr, bz = blocks.business;
-
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      <Card title="Verdict" sub={`${strategyName(activeStrategy)} · ${viewName(config, activeViewId)}`} hint="Auto-written from the active strategy and view. The recommendation is the lowest all-in cost that holds SLA, or the least-bad option if none does.">
+    <div className="grid summary-print" style={{ gap: 16 }} data-testid="summary-panel">
+      <div className="btnbar">
+        <PrintButton label="Print / PDF Summary" testid="summary-print" className="btn primary" />
+        <span className="note" style={{ padding: "6px 10px" }}>A leadership-ready one-pager under {resolveStrategyName(config, activeStrategy)} · view {viewName(config, activeViewId)}.</span>
+      </div>
+
+      <Card title="Strategy overview" hint="Every strategy at a glance under the active view. Set any one active to drive the whole app.">
+        <StrategyCards sims={sims} stratIds={stratIds} config={config} activeStrategyId={activeStrategy} onSetActive={onSetActive} />
+      </Card>
+
+      <Card title="Verdict & key findings">
         <p style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }}>{verdict.paragraph}</p>
-        <div className="stat-row">
-          <Stat l="Meets SLA" v={verdict.rag.green} sub="queue-wks" />
-          <Stat l="At risk" v={verdict.rag.amber} sub="queue-wks" />
-          <Stat l="Breach" v={verdict.rag.red} sub="queue-wks" />
-          <Stat l="Recommended" v={verdict.recommended || "–"} />
+        <div className="findings">
+          {sim.summary.findings.map((fd, i) => <div key={i} className={"finding " + fd.tone}><span className="pip" /><span>{fd.text}</span></div>)}
+          {sim.summary.findings.length === 0 && <div className="empty">The plan holds across the horizon.</div>}
         </div>
       </Card>
 
-      <div className="grid cols-3">
-        <Card title="Finance" hint="The money view: what it costs to run and what poor experience costs on top.">
+      <Card title="Queue summary" sub="under the active strategy" hint="Per queue with Voice, Digital and Total subtotals.">
+        <QueueSummaryTable sim={sim} config={config} />
+      </Card>
+
+      <div className="grid cols-2">
+        <Card title="Finance">
           <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
             <Stat l="Run cost" v={money(cur, f.runCost)} />
             <Stat l="Churn cost" v={money(cur, f.churn)} />
@@ -51,8 +125,7 @@ export function SummaryTab({ sim, strategySims, config, activeStrategy, activeVi
             <Stat l="Break-even week" v={f.breakEven ?? "–"} />
           </div>
         </Card>
-
-        <Card title="HR" hint="The people view: hiring against the cap, and the attrition/burnout trajectory.">
+        <Card title="HR">
           <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
             <Stat l="Total reqs raised" v={num(hr.totalReqs, 0)} />
             <Stat l="Global cap" v={hr.cap} sub="/wk" />
@@ -62,12 +135,10 @@ export function SummaryTab({ sim, strategySims, config, activeStrategy, activeVi
             <Stat l="Avg in training" v={num(hr.avgTraining, 1)} />
           </div>
         </Card>
-
-        <Card title="Business / CX" hint="The customer view: SLA attainment, lost customers, incident readiness and deflection.">
+        <Card title="Business" hint="SLA attainment and incident readiness.">
           <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
-            <Stat l="Customers lost" v={num(bz.customersLost, 0)} />
-            <Stat l="Deflected → voice" v={num(bz.totalDeflected, 0)} />
-            <Stat l="P1 stress in view" v={bz.p1Enabled ? "yes" : "no"} />
+            <Stat l="Incident (P1) in view" v={bz.p1Enabled ? "yes — stress applied" : "no"} />
+            <Stat l="Cap infeasible" v={bz.capInfeasible ? "yes" : "no"} />
             <div>
               <div className="l" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>SLA attainment by queue</div>
               {bz.perQueueSla.map((s) => (
@@ -78,9 +149,17 @@ export function SummaryTab({ sim, strategySims, config, activeStrategy, activeVi
             </div>
           </div>
         </Card>
+        <Card title="CX" hint="Customer experience economics.">
+          <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
+            <Stat l="Customers lost" v={num(bz.customersLost, 0)} />
+            <Stat l="Churn cost" v={money(cur, f.churn)} />
+            <Stat l="Deflected → voice" v={num(bz.totalDeflected, 0)} />
+            <Stat l="Repeat-contact uplift" v={"×" + num(config.cx.repeatUplift, 2)} />
+          </div>
+        </Card>
       </div>
 
-      <Card title="Risk register" sub={`${risks.length} risk(s)`} hint="Auto-generated and sortable. Severity is the projected £ (or SLA weeks) at stake; the lever is the cheapest mitigation.">
+      <Card title="Risk register" sub={`${risks.length} risk(s)`}>
         <div className="tbl-wrap">
           <table className="data" data-testid="risk-table">
             <thead>

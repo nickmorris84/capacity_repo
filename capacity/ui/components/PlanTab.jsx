@@ -20,7 +20,8 @@ function Findings({ findings }) {
   );
 }
 
-// Per-queue status card for the scrubbed week.
+// Per-queue status card for the scrubbed week — now carries weekly volume and
+// uses Active (§14.6).
 function QueueCard({ q, s }) {
   const voice = q.type === "voice";
   return (
@@ -28,11 +29,12 @@ function QueueCard({ q, s }) {
       <div className="qn">
         <span>{q.name}</span>
         <span className="spacer" />
+        {q.resourcing === "supported" && <span className="badge amber" title={undefined}>supported</span>}
         <span className="qtype">{q.type}</span>
       </div>
       <div className="kpis">
+        <div className="kpi"><div className="l">Volume</div><div className="v">{num(s.volume, 0)}</div></div>
         <div className="kpi"><div className="l">Coverage</div><div className="v">{pct(s.cover)}</div></div>
-        <div className="kpi"><div className="l">Status</div><div className="v"><span className={"badge " + s.status}>{s.status}</span></div></div>
         {voice ? (
           <>
             <div className="kpi"><div className="l">ASA</div><div className="v">{secs(s.asa)}</div></div>
@@ -45,9 +47,45 @@ function QueueCard({ q, s }) {
           </>
         )}
         <div className="kpi"><div className="l">Occupancy</div><div className="v">{pct(s.occ)}</div></div>
-        <div className="kpi"><div className="l">Paid / req</div><div className="v">{num(s.paid, 0)}/{num(s.reqFte, 0)}</div></div>
+        <div className="kpi"><div className="l">Active / req</div><div className="v">{num(s.active != null ? s.active : s.trained + s.ramp, 0)}/{num(s.reqFte, 0)}</div></div>
       </div>
     </div>
+  );
+}
+
+// §14.6 hiring summary — per queue and Voice / Digital / Overall.
+function HiringSummary({ sim, cur }) {
+  const h = sim.summary.hiring;
+  if (!h) return null;
+  const q = sim.config.queues;
+  const row = (label, r, cls) => (
+    <tr key={label} className={cls}>
+      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{label}</td>
+      <td>{num(r.volume, 0)}</td>
+      <td>{num(r.required, 1)}</td>
+      <td>{num(r.hiring, 1)}</td>
+      <td>{num(r.training, 1)}</td>
+      <td>{num(r.active, 1)}</td>
+      <td>{num(r.churnCount, 1)}</td>
+      <td>{pct(r.churnPct, 1)}</td>
+    </tr>
+  );
+  return (
+    <Card title="Hiring summary" hint="Volume, required HC, hiring (requisitions raised over the horizon), training and active heads, and agent churn — per queue and rolled up for Voice, Digital and Overall.">
+      <div className="tbl-wrap">
+        <table className="data" data-testid="hiring-summary">
+          <thead>
+            <tr><th>Scope</th><th>Volume</th><th>Required</th><th>Hiring</th><th>Training</th><th>Active</th><th>Churn #</th><th>Churn %</th></tr>
+          </thead>
+          <tbody>
+            {q.map((qq) => row(qq.name + (qq.resourcing === "supported" ? " (supported)" : ""), h.queues[qq.id], ""))}
+            {row("Voice", h.groups.voice, "grp")}
+            {row("Digital", h.groups.digital, "grp")}
+            {row("Overall", h.groups.overall, "grp total")}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
@@ -89,10 +127,12 @@ export function PlanTab({ sim, viewLabel }) {
         <div className="stat-row">
           <div className="stat"><div className="l">Week run cost</div><div className="v">{money(cur, week.totals.totalCost)}</div></div>
           <div className="stat"><div className="l">Week churn cost</div><div className="v">{money(cur, week.totals.churnCost)}</div></div>
-          <div className="stat"><div className="l">Paid FTE</div><div className="v">{num(week.totals.paid, 0)} <small>/ {num(week.totals.reqFte, 0)} req</small></div></div>
+          <div className="stat"><div className="l">Active FTE</div><div className="v">{num(week.totals.active != null ? week.totals.active : week.totals.paid, 0)} <small>/ {num(week.totals.reqFte, 0)} req</small></div></div>
           <div className="stat"><div className="l">Horizon all-in</div><div className="v">{money(cur, sm.allIn)}</div></div>
         </div>
       </Card>
+
+      <HiringSummary sim={sim} cur={cur} />
 
       <div className="grid cols-2">
         <CoverageChart sim={sim} selectedWeek={wk} />

@@ -24,7 +24,7 @@ const readText = (file) => new Promise((res, rej) => {
    config JSON round-trip, saved-run .json, and CSV fallbacks. Export builders
    are pure (in exports.js); this card only wires them to buttons and file
    inputs. */
-export function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, onImportConfig }) {
+export function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, onImportConfig, title = "Files — export & import" }) {
   const [msg, setMsg] = useState(null);
   const wbInput = useRef(null), cfgInput = useRef(null), runInput = useRef(null), csvInput = useRef(null);
   const say = (text, tone = "ok") => setMsg({ text, tone });
@@ -58,7 +58,7 @@ export function FilesCard({ sim, strategySims, config, activeStrategy, activeVie
   };
 
   return (
-    <Card title="Files — export & import" hint="One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.">
+    <Card title={title} hint="One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.">
       <div className="btnbar">
         <button type="button" className="btn primary" data-testid="export-workbook" onClick={onWorkbook}>Export Excel workbook</button>
         <button type="button" className="btn" data-testid="export-config" onClick={() => downloadText("capacity-config.json", configJSON(config), "application/json")}>Export config JSON</button>

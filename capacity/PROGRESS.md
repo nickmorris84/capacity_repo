@@ -365,8 +365,76 @@ print action + package reachability, editors for strategies/schedules,
 supported-queue + supports editor replacing the crossSkill toggles, global
 starting HC field, new scenario types in the editor, hiring-summary table.
 
+## P6b — Revision 1 UI restructure: ✅ COMPLETE
+
+Gate tally: **P1 20 · R1 engine 19 · R1 UI 13 · §13 harness 20 (source + built HTML)
+= 72 tests, 0 failures.** `npm test` runs engine → r1 → r1ui → harness. Engine files
+untouched this session (UI only). dist/ rebuilt from source (committed).
+
+Exact 10-tab order (§14): Summary · Strategies · Plan · Data · Intraday · Queues ·
+Scenarios · Seasonality · Snapshots · Settings. Workforce and Report tabs removed;
+the Model-notes content folded into Settings so the tab list stays exact.
+
+- Global context bar (ui/print.jsx + components/ContextBar.jsx) under the header on
+  every tab: active strategy/schedule chip (tap to switch or edit segments, shows
+  "S3 → S1 from wk 10"), view selector, loaded-snapshot name, recalculating dot, and
+  the Print / PDF this page action.
+- Per-tab print (§14.8): a PrintProvider flips a `printing` flag on `beforeprint`
+  via flushSync so charts re-render at a fixed 660px width (verified by dispatching
+  beforeprint in the gate); the print stylesheet hides chrome and keeps sections
+  from breaking. Summary has its own Print / PDF Summary button.
+- Sim engine rewritten (ui/sim-set.js `useStrategySims`): the dashboard runs the
+  ACTIVE strategy (which may be a schedule); the comparison runs every strategy in
+  config for the active view; ≤8 sims/change, memoised, E4-safe. The P3
+  strategies-vs-views dimension toggle is gone (§14.7 folds multi-comparison into
+  Snapshots; the Strategies tab now uses metric×scope).
+- Summary: strategy overview cards (name, all-in, weeks red, end coverage, Set
+  active) driving the whole app; verdict + findings; queue summary table with Voice/
+  Digital/Total subtotals; four boxes Finance/HR/Business/CX; sortable risk register;
+  own print button.
+- Strategies: add/duplicate/delete custom strategies (meet/buffer/backfill/manual/
+  schedule), edit name/bufferPct/excludedQueueIds/segments, save the active schedule
+  as a named strategy; detailed comparison with metric {All-in · HC cost · Coverage}
+  × scope {Overall · Voice · Digital · each queue}, chart + table. Holistic panel not
+  here.
+- Plan: hiring-summary table (§14.6, incl. agent churn # and %), Coverage chart title,
+  Active/Req labels, weekly volume on status cards, and the holistic requirement panel
+  (Active vs required, per-queue coloured panels grouped Voice/Digital with Ops cost +
+  Customer cost, cap-allocation trace retained).
+- Data: per-group colour tints (Demand/Service/People/Money) + new columns Starting HC,
+  Active FTE, Attrition #, Attrition %.
+- Intraday: an all-weeks RAG strip (coloured for the selected queue, click to load)
+  replaces the week dropdown.
+- Queues: separated Voice and Digital sections plus a Service-teams section (relocated
+  from the removed Workforce tab). Each queue card: Description (channel/volumes/AHT/
+  SLA/patience-or-concurrency/backlog/arrival pattern), Resourcing toggle
+  (Resourced/Supported + badge, HC input disabled when supported), Workforce (starting
+  HC with blank→global-spread, attrition, training/hiring incl. manual hires, burnout),
+  and Interdependencies (outbound Supports editor with priority 1..x and max-share %,
+  plus the derived inbound Supported-by list). crossSkill is migrated to supports on
+  load (migrateConfig) so the UI speaks only the new field.
+- Scenarios: growth card gains a stop-week; new manual-weekly-growth (sparse week→%
+  grid) and manual-freeze (tick-the-weeks grid) cards.
+- Seasonality: unchanged, its own tab.
+- Snapshots (renamed from Runs everywhere): the frozen-results library + before/after
+  compare (totals delta, all-in overlay, per-queue blocks by name), the tick set lifted
+  above tabs, a one-line snapshots-vs-views distinction, and the full Excel package.
+- Settings (renamed from Money & engine): engine/hiring-cap/costs/CX/loops, the Global
+  starting HC field with helper text (§14.4), the Excel package (§14.8, also on
+  Snapshots), and the E1–E3 model notes folded in.
+
+Gate: tests/r1ui.test.js (13 tests) asserts the exact tab order; the context-bar print
+action on every tab firing from ≥3 tabs; Summary Set-active changing Plan numbers; a
+schedule pivot at week 10 changing late-horizon numbers; a Supported queue's badge +
+disabled HC input; the Intraday strip loading a week; the Data new columns + group
+tints; editable manual growth/freeze grids; the Excel export firing + a params-CSV
+import applying; Snapshots naming; and fixed-width print charts. tests/harness.test.js
+runs the §13 checklist (now save-a-snapshot, exports from Settings, per-tab context-bar
+print) against both the source and the rebuilt dist/capacity-sim.html. The old
+ui/strategies/documents gates were superseded by r1ui + the updated harness and removed.
+
 ## Build & run
-- `npm test` — all seven gates (engine, r1, ui, strategies, documents, harness).
+- `npm test` — all gates (engine, r1, r1ui, harness).
 - `npm run build:html` — regenerate dist/ deliverables from source.
 - Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
   into a React artifact host.

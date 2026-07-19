@@ -13,6 +13,40 @@ export const STRATEGIES = [
 export const STRATEGY_IDS = STRATEGIES.map((s) => s.id);
 export const strategyName = (id) => (STRATEGIES.find((s) => s.id === id) || { name: id }).name;
 
+const BASE_BLURB = {
+  meet: "Close the requirement gap at the landing week.",
+  buffer: "Target requirement × (1 + buffer).",
+  backfill: "Replace projected leavers only — never hire for growth.",
+  manual: "Your per-queue hires, exactly as entered; ignores the cap.",
+  schedule: "An ordered plan that pivots strategy at set weeks.",
+};
+
+// §14.1: strategies live in config.strategies (built-ins + custom + schedules).
+// Fall back to the four built-ins for configs that predate the array.
+export function strategyList(config) {
+  const list = (config && config.strategies) || [];
+  return list.length ? list : STRATEGIES.map((s, i) => ({ id: s.id, name: s.name, baseType: ["meet", "buffer", "backfill", "manual"][i], builtin: true }));
+}
+export function strategyObj(config, id) {
+  return strategyList(config).find((s) => s.id === id) || null;
+}
+export function resolveStrategyName(config, id) {
+  const s = strategyObj(config, id);
+  return s ? s.name : id;
+}
+export const isSchedule = (s) => !!s && s.baseType === "schedule";
+export const strategyBlurb = (s) => (s && s.blurb) || (s && BASE_BLURB[s.baseType]) || "";
+
+// "S3 → S1 from wk 10" style one-liner for a schedule strategy.
+export function scheduleSummary(config, strat) {
+  if (!isSchedule(strat) || !(strat.segments || []).length) return "";
+  const segs = [...strat.segments].sort((a, b) => (a.fromWeek || 1) - (b.fromWeek || 1));
+  return segs.map((seg, i) => {
+    const nm = resolveStrategyName(config, seg.strategyId);
+    return i === 0 ? nm : `${nm} from wk ${seg.fromWeek}`;
+  }).join(" → ");
+}
+
 // Resolve a view id to the concrete scenario-id list simulate() expects.
 // "Plan of record" has no fixed set — it tracks whatever is currently enabled;
 // every other view carries an explicit (possibly empty) scenarioIds list.

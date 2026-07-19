@@ -49,7 +49,7 @@ export function HolisticPanel({ sim }) {
     >
       <div className="stat-row">
         <div className="stat"><div className="l">Required FTE (final wk)</div><div className="v">{num(last.reqFte, 0)}</div></div>
-        <div className="stat"><div className="l">Paid FTE (final wk)</div><div className="v">{num(last.paid, 0)}</div></div>
+        <div className="stat"><div className="l">Active FTE (final wk)</div><div className="v">{num(last.active != null ? last.active : last.paid, 0)}</div></div>
         <div className="stat"><div className="l">In pipeline (final wk)</div><div className="v">{num(pipeline, 0)}</div></div>
         <div className="stat"><div className="l">Global cap</div><div className="v">{cap}<small>/wk</small></div></div>
         <div className="stat"><div className="l">Cap-bound weeks</div><div className="v">{binding.length}</div></div>
@@ -60,6 +60,8 @@ export function HolisticPanel({ sim }) {
           ? `Feasibility: the cap allows +${cap}/wk, but this plan needs up to +${Math.round(maxWant)}/wk in week${bindingWeeks.length > 1 ? "s" : ""} ${formatWeekRange(bindingWeeks)} — infeasible. The shortfall lands as churn.`
           : `Feasibility: the plan fits within the +${cap}/wk cap across the whole horizon.`}
       </p>
+
+      <QueuePanels sim={sim} />
 
       <div className="tbl-wrap" style={{ marginTop: 12, maxHeight: 380 }}>
         <table className="data">
@@ -102,6 +104,42 @@ export function HolisticPanel({ sim }) {
         When the cap binds, scarce requisitions go to the queue with the greatest marginal churn cost averted per FTE (tie-break: earliest projected breach). A number in brackets is the shortfall that queue was denied that week.
       </p>
     </Card>
+  );
+}
+
+// §14.6: queues as coloured panels grouped Voice vs Digital, each showing its
+// Ops cost (salary run cost) and Customer cost (churn) over the horizon.
+function QueuePanels({ sim }) {
+  const cfg = sim.config;
+  const cur = cfg.engine.currency;
+  const worst = (q) => {
+    const sts = sim.weeks.map((w) => w.queues[q.id].status);
+    return sts.includes("red") ? "red" : sts.includes("amber") ? "amber" : "green";
+  };
+  const panel = (q) => {
+    const series = sim.weeks.map((w) => w.queues[q.id]);
+    const ops = series.reduce((a, s) => a + s.cost, 0);
+    const cust = series.reduce((a, s) => a + s.churnCost, 0);
+    const last = series[series.length - 1];
+    return (
+      <div className={"qcard " + worst(q)} key={q.id} style={{ minWidth: 190 }}>
+        <div className="qn"><span>{q.name}</span><span className="spacer" />{q.resourcing === "supported" && <span className="badge amber">supported</span>}</div>
+        <div className="kpis">
+          <div className="kpi"><div className="l">Ops cost</div><div className="v">{money(cur, ops)}</div></div>
+          <div className="kpi"><div className="l">Customer cost</div><div className="v">{money(cur, cust)}</div></div>
+          <div className="kpi"><div className="l">Active</div><div className="v">{num(last.active != null ? last.active : last.trained + last.ramp, 0)}</div></div>
+          <div className="kpi"><div className="l">Required</div><div className="v">{num(last.reqFte, 0)}</div></div>
+        </div>
+      </div>
+    );
+  };
+  const voice = cfg.queues.filter((q) => q.type === "voice");
+  const digital = cfg.queues.filter((q) => q.type === "digital");
+  return (
+    <div style={{ marginTop: 12 }} data-testid="holistic-queue-panels">
+      {voice.length > 0 && <><div className="section-title" style={{ margin: "6px 2px" }}>Voice</div><div className="qcards">{voice.map(panel)}</div></>}
+      {digital.length > 0 && <><div className="section-title" style={{ margin: "12px 2px 6px" }}>Digital</div><div className="qcards">{digital.map(panel)}</div></>}
+    </div>
   );
 }
 

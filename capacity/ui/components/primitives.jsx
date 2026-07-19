@@ -1,4 +1,5 @@
 import { useMeasuredWidth, useDisclosure } from "../hooks.js";
+import { usePrinting } from "../print.jsx";
 
 // Tap-to-reveal hint. A real button + popover, so it works on touch and by
 // keyboard — never a hover-only `title` attribute (SPEC §UI design rule).
@@ -91,16 +92,20 @@ export function Card({ title, sub, right, hint, children }) {
 
 // Chart shell that measures its own width and hands (w, h) to a render prop, so
 // recharts gets explicit pixel dimensions (never a 0-size ResponsiveContainer).
+// While printing (§14.8) it switches to a fixed pixel width so charts render at
+// a stable, page-friendly size instead of a collapsed container.
 export function Chart({ title, hint, height = 250, children }) {
-  const [ref, w] = useMeasuredWidth(620);
+  const [ref, measured] = useMeasuredWidth(620);
+  const { printing, printWidth } = usePrinting();
+  const w = printing ? printWidth : Math.max(280, measured - 16);
   return (
-    <div className="chart">
+    <div className={"chart" + (printing ? " printing" : "")} data-print-w={printing ? printWidth : undefined}>
       <div className="chart-h">
         <h4>{title}</h4>
         {hint ? <Hint text={hint} /> : null}
       </div>
       <div className="chart-b" ref={ref}>
-        {children(Math.max(280, w - 16), height)}
+        {children(w, height)}
       </div>
     </div>
   );

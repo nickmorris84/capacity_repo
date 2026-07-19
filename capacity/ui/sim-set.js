@@ -1,65 +1,50 @@
 import { useRef, useState, useEffect, useMemo } from "react";
 import { simulate } from "../engine/engine.js";
-import { viewIdsFor, STRATEGY_IDS } from "./views.js";
+import { viewIdsFor, strategyList } from "./views.js";
 
-/* P3 multi-simulation engine — the budgeted heart of the strategy/view matrix.
+/* Multi-simulation engine (Revision 1). The dashboard runs the ACTIVE strategy
+   (which may be a schedule); the Strategies comparison runs every strategy in
+   config for the ACTIVE view. So the needed set is {all strategy ids} × the
+   active view — the active/dashboard sim is always one of them, at no extra
+   cost. Capped at 8 sims/change (SPEC §0); if the config declares more than 8
+   strategies the first 8 (built-ins first) are computed.
 
-   SPEC §0 caps precompute at 8 simulations per change and demands <1s end-to-end
-   with a deferred/debounced recompute and a visible recalculating state. We keep
-   exactly what the screen needs, no more:
-     - the four strategies for the ACTIVE view  (comparison table + dashboard),
-     - the active strategy across the OVERLAY views, only while comparing views.
-   The active dashboard sim is always one of the four strategy sims, so it costs
-   nothing extra. Worst case = 4 + 4 − 1 (shared active cell) = 7 ≤ 8.
-
-   Every sim is memoised by a (configHash | strategy | viewId) key. Because the
-   key carries the whole config hash, a parameter edit misses the cache (correct
-   — it must re-simulate) while flipping the comparison dimension, adding an
-   overlay view, or switching the active strategy reuses cached results and
-   resolves instantly with no recalculating flicker. */
-
+   Memoised by (configHash | strategyId | viewId): a parameter edit misses (must
+   re-simulate) while switching the active strategy or view reuses the cache and
+   resolves instantly. During a parameter recompute the previous snapshot stays
+   visible so charts never read a half-built config (E4). */
 const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
-const CACHE_MAX = 48;
-const keyFor = (hash, strat, vid) => hash + "|" + strat + "|" + vid;
+const CACHE_MAX = 64;
+const BUDGET = 8;
+const keyFor = (hash, sid, vid) => hash + "|" + sid + "|" + vid;
 
-export function useStrategyViews(config, ctrl, delay = 160) {
-  const { activeStrategy, activeViewId, dimension, overlayViewIds } = ctrl;
+export function useStrategySims(config, activeStrategyId, activeViewId, delay = 160) {
   const hash = useMemo(() => JSON.stringify(config), [config]);
   const cacheRef = useRef(new Map());
 
+  // Which strategies to simulate: all in config, deduped, active first, ≤ budget.
+  const stratIds = useMemo(() => {
+    const all = strategyList(config).map((s) => s.id);
+    const ordered = [activeStrategyId, ...all.filter((id) => id !== activeStrategyId)].filter((v, i, a) => a.indexOf(v) === i);
+    return ordered.slice(0, BUDGET);
+  }, [hash, activeStrategyId]);
+
   const runInto = (missing) => {
-    for (const m of missing) {
-      cacheRef.current.set(m.k, simulate(config, { strategy: m.strat, viewIds: viewIdsFor(config, m.vid) }));
-    }
-    while (cacheRef.current.size > CACHE_MAX) {
-      cacheRef.current.delete(cacheRef.current.keys().next().value);
-    }
+    for (const m of missing) cacheRef.current.set(m.k, simulate(config, { strategy: m.sid, viewIds: viewIdsFor(config, activeViewId) }));
+    while (cacheRef.current.size > CACHE_MAX) cacheRef.current.delete(cacheRef.current.keys().next().value);
   };
 
-  // The set of (strategy, view) sims this screen state requires — deduplicated,
-  // and provably ≤ 8 entries.
-  const needed = useMemo(() => {
-    const set = new Map();
-    for (const s of STRATEGY_IDS) set.set(keyFor(hash, s, activeViewId), { k: keyFor(hash, s, activeViewId), strat: s, vid: activeViewId });
-    if (dimension === "views") {
-      for (const vid of overlayViewIds) {
-        const k = keyFor(hash, activeStrategy, vid);
-        set.set(k, { k, strat: activeStrategy, vid });
-      }
-    }
-    return [...set.values()];
-  }, [hash, activeStrategy, activeViewId, dimension, overlayViewIds.join(",")]);
+  const needed = useMemo(
+    () => stratIds.map((sid) => ({ k: keyFor(hash, sid, activeViewId), sid })),
+    [hash, activeViewId, stratIds.join(",")]
+  );
 
   const buildSnapshot = () => {
-    const strategySims = {};
-    for (const s of STRATEGY_IDS) strategySims[s] = cacheRef.current.get(keyFor(hash, s, activeViewId));
-    const viewSims = {};
-    if (dimension === "views") for (const vid of overlayViewIds) viewSims[vid] = cacheRef.current.get(keyFor(hash, activeStrategy, vid));
-    return { strategySims, viewSims, activeSim: strategySims[activeStrategy], hash };
+    const sims = {};
+    for (const sid of stratIds) sims[sid] = cacheRef.current.get(keyFor(hash, sid, activeViewId));
+    return { sims, activeSim: sims[activeStrategyId], stratIds, hash };
   };
 
-  // First paint runs synchronously so the dashboard is never empty (matches the
-  // P2 initial-sim contract). Only the initial needed set is computed here.
   const [snap, setSnap] = useState(() => {
     runInto(needed.filter((x) => !cacheRef.current.has(x.k)));
     return { ...buildSnapshot(), computeMs: 0, computeCount: 0 };
@@ -69,36 +54,24 @@ export function useStrategyViews(config, ctrl, delay = 160) {
   useEffect(() => {
     const missing = needed.filter((x) => !cacheRef.current.has(x.k));
     if (missing.length === 0) {
-      // Everything cached — resolve immediately (instant strategy/view/dimension
-      // switch), no debounce, no recalculating state.
       setPending(false);
       setSnap({ ...buildSnapshot(), computeMs: 0, computeCount: 0 });
       return;
     }
-    // The dashboard sim is the active (strategy, view) cell. If it is already
-    // cached — e.g. switching the active strategy while only overlay-view sims
-    // are stale — update the snapshot now so the dashboard reacts instantly,
-    // and let the missing overlay sims fill in on the debounce. If it is NOT
-    // cached (a parameter edit invalidated the hash), keep the previous
-    // snapshot visible so charts never read a half-built config (E4).
-    const activeCached = cacheRef.current.has(keyFor(hash, activeStrategy, activeViewId));
-    if (activeCached) setSnap({ ...buildSnapshot(), computeMs: 0, computeCount: 0 });
-
+    // Dashboard sim cached (a strategy/view switch, not an edit) → update now.
+    if (cacheRef.current.has(keyFor(hash, activeStrategyId, activeViewId))) {
+      setSnap({ ...buildSnapshot(), computeMs: 0, computeCount: 0 });
+    }
     setPending(true);
     const id = setTimeout(() => {
       const t0 = now();
       runInto(missing);
-      const ms = now() - t0;
-      setSnap({ ...buildSnapshot(), computeMs: ms, computeCount: missing.length });
+      setSnap({ ...buildSnapshot(), computeMs: now() - t0, computeCount: missing.length });
       setPending(false);
     }, delay);
     return () => clearTimeout(id);
-    // Depend on the active selection too, not just the set of sims to compute:
-    // switching the active strategy in "strategies" mode leaves `needed`
-    // unchanged (all four are always needed) but must still rebuild the snapshot
-    // so the dashboard's activeSim tracks the new strategy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash, activeStrategy, activeViewId, dimension, overlayViewIds.join(",")]);
+  }, [hash, activeStrategyId, activeViewId, stratIds.join(",")]);
 
   return { ...snap, pending };
 }
