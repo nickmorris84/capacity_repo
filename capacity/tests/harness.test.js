@@ -238,7 +238,7 @@ async function runHtmlTarget(html) {
 
   await t("[html] standalone HTML mounts clean in JSDOM", () => {
     ok(doc.getElementById("root").children.length > 0, "rendered");
-    ok(doc.querySelectorAll('[role="tab"]').length === 10, "all tabs present");
+    ok(doc.querySelectorAll('[role="tab"]').length === 9, "all tabs present");
     eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
   });
 

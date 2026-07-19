@@ -556,8 +556,87 @@ edits to aht / profile (replaced array) / occupancyCeiling / asaTarget /
 patience / maxAbandon / concurrency each change results and restore the
 original numbers exactly on revert, including with two configs interleaved.
 
+## P7b — Revision 2 UI restructure: ✅ COMPLETE — **STRUCTURE FROZEN**
+
+Scope: SPEC §15–§20 UI, on the P7a engine. NO engine change — the P1/R1/R2
+batteries pass byte-for-byte unmodified; only `tests/r1ui.test.js` (now the P7b
+UI gate) and the harness tab-count (10→9) were updated.
+
+### Tab structure (frozen)
+Summary · Strategies · Plan · Data · Intraday · Queues · Scenarios · Snapshots ·
+Settings. Seasonality dissolved into Settings; the R1 Workforce/Report tabs stay
+gone. Nine tabs, exact order asserted by the gate.
+
+### Context bar (§20)
+Three selectors, in order, drive every number below: **Strategy · Scenario-group
+· Snapshot** (groups replace views everywhere), plus Print/PDF-this-page.
+Selecting a snapshot renders its frozen config across all tabs (deterministically
+re-simulated) behind a "read-only" banner with the whole editor tree wrapped in a
+disabled `<fieldset>`; "Live" restores the working model.
+
+### What was built
+- **Decision matrix (§19)** — Summary top: groups (rows) × strategies (columns),
+  BOTH in config definition order, never reordered by selection. Cell = RAG +
+  all-in £ + flags (weeks red, ⚠ tip, ⚠ cap). Computed on demand ("Run matrix"),
+  cached in App, greyed with a "stale — re-run" banner on any sim-affecting edit.
+  The selected cell is the global (group × strategy) context rendered live on
+  every tab — clicking a cell sets both selectors. `runMatrix`/`simHash` in
+  sim-set.js.
+- **Risk register (§20a)** — first-class, parameterised: families now include
+  sustained-overtime dependence, training-debt peaks, borrowed-capacity
+  dependence and unmanned starvation, each scored against editable amber/red
+  bands in `config.settings.risk`. Crucially the register re-scores at RENDER
+  time — `simHash` excludes `settings.risk`, so changing a threshold updates the
+  register **without re-simulating** (Plan numbers stay identical).
+- **Queues (§15–§18)** — brand manager (create/rename/delete brands, brand
+  training profile, brand volume split), pool manager (cross-brand/cross-channel
+  membership with per-member share %), channel templates (voice/digital/support
+  knock-on defaults). Queues grouped Brand → Voice/Digital/Support; each an
+  accordion (Description, SLAs, Arrival, Workforce, Knock-on, Seasonality,
+  Scenarios-affecting, Dependencies, Assumptions-over-time) with per-section
+  inheritance indicators that flip inherited↔overridden. Resourcing modes
+  dedicated | leveraged | unmanned with badges; unmanned disables HC.
+- **Scenarios (§19)** — group builder (create groups, add scenarios, built-in
+  Plan-of-record/No-scenarios) + the unified scenario shape (parameter ·
+  mechanism · granularity · dates · scope · tag) with a manual-series grid
+  editor, alongside the legacy quick-add types; a parameter-timeline table shows
+  what is in force each week.
+- **Settings (§16/§20a)** — physics table (engine window, OT rules, training +
+  debt constants, knock-on channel defaults, hiring/costs/CX), the simulation-
+  window control clamped to [24, 78] (default 52), the Risk-parameters section
+  (every amber/red band), Seasonality dissolved in, and the Excel package.
+- **Data (§6/§16)** — new supply columns (OT hours, training shrinkage, training
+  debt, recycled/pool/leveraged in, borrowed %), an Outputs↔Assumptions-over-time
+  toggle exposing the §16 audit contract (resolved volume, blended AHT, SLA,
+  attrition, training shrinkage, OT used, active scenario tags per week), scenario
+  group selector, per-group column show/hide.
+- **Plan (§20)** — the full per-queue weekly data table now lives inline at the
+  bottom (no mini-tabs), plus the OT-aware hiring summary and holistic panel.
+- **Excel package (§20)** — the workbook gains Brands, Pools, Profiles and Groups
+  sheets; Parameters + Volumes still round-trip on import.
+
+### Gate: tests/r1ui.test.js (18 tests, P7b UI)
+Asserts the exact 9-tab order; the three context-bar selectors + print on every
+tab (print firing from ≥3); the matrix in definition order and NOT reordering on
+selection; a cell selection driving the Plan numbers; the stale banner on a
+config edit; a risk-threshold edit re-scoring the register while Plan all-in is
+unchanged (no re-sim); the horizon input clamping to [24, 78]; brand creation +
+queue adoption; cross-brand pool membership; the unmanned badge + disabled HC;
+accordion inheritance indicators flipping on override; manual-series grid edits;
+the assumptions view reflecting a scenario-driven AHT change; snapshot read-only
+mode and its restoration; and the Excel package carrying the four new sheets +
+re-importing a parameter — all with zero console noise. The harness (§13, both
+source and rebuilt dist) stays green at 9 tabs.
+
+Design note: the R2 concept model is backfilled by `migrateConfig` (UI) —
+brands, pools, groups, channel templates and an editable `settings` (physics +
+risk) block, with resourced→dedicated / supported→unmanned normalisation. The
+seeded settings equal the engine defaults, so every simulated number is
+unchanged; `settings.risk` is excluded from the simulation hash so risk-threshold
+edits never trigger a recompute.
+
 ## Build & run
-- `npm test` — all gates (engine, r1, r2, r1ui, harness).
+- `npm test` — all gates (engine, r1, r2, r1ui [P7b UI], harness).
 - `npm run build:html` — regenerate dist/ deliverables from source.
 - Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
   into a React artifact host.

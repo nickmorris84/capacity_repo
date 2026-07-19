@@ -257,4 +257,34 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   /* only the report panel prints; other tab panels are already hidden */
   [role="tabpanel"][hidden] { display: none !important; }
 }
+
+/* ---- P7b (Revision 2) additions ---- */
+.ro-banner { background: var(--amber-s); color: #8a5a06; border-bottom: 1px solid var(--amber); padding: 8px 20px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+table.data.grouped td.grp-week { background: rgba(120,130,140,.05); }
+table.data.grouped td.grp-supply { background: rgba(16,150,110,.06); }
+table.data.grouped td.grp-status { background: rgba(120,130,140,.04); }
+table.data.grouped thead th.grp-week { border-bottom: 2px solid #7a828a; }
+table.data.grouped thead th.grp-supply { border-bottom: 2px solid #10966e; }
+table.data.grouped thead th.grp-status { border-bottom: 2px solid #7a828a; }
+
+/* decision matrix (§19) */
+table.matrix { border-collapse: separate; border-spacing: 4px; }
+table.matrix th { font-size: 11px; color: var(--muted); font-weight: 700; padding: 4px 8px; text-align: center; }
+table.matrix th.row-h { text-align: right; white-space: nowrap; }
+.mx-cell { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 116px; cursor: pointer; background: var(--panel); text-align: center; font-variant-numeric: tabular-nums; }
+.mx-cell:hover { filter: brightness(0.98); box-shadow: 0 0 0 1px var(--line-2); }
+.mx-cell.green { background: var(--green-s); } .mx-cell.amber { background: var(--amber-s); } .mx-cell.red { background: var(--red-s); }
+.mx-cell.sel { box-shadow: 0 0 0 2px var(--ink); }
+.mx-cell .mx-all { font-weight: 700; font-size: 13px; }
+.mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+
+/* inheritance indicator (§16) */
+.inherit-ind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }
+.inherit-ind.inherited { background: rgba(58,123,213,.12); color: #2b5a9c; }
+.inherit-ind.overridden { background: var(--amber-s); color: #8a5a06; }
+.acc-sec { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
+.acc-sec > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.acc-sec > summary::-webkit-details-marker { display: none; }
+.acc-sec > .acc-b { padding: 0 12px 12px; }
 `;

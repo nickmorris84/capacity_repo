@@ -64,6 +64,21 @@ export const viewName = (config, viewId) => {
   return v ? v.name : viewId;
 };
 
+// ---- §19 scenario groups (replace views everywhere in R2) ----
+export const groupList = (config) => (config && config.groups) || [];
+export const groupName = (config, groupId) => {
+  const g = groupList(config).find((x) => x.id === groupId);
+  return g ? g.name : groupId;
+};
+// Resolve a group id to the concrete scenario-id list simulate() expects.
+// A group with an explicit scenarioIds array uses it (filtered to live
+// scenarios); a group without one tracks the currently-enabled set.
+export function groupScenarioIds(config, groupId) {
+  const g = groupList(config).find((x) => x.id === groupId) || groupList(config)[0];
+  if (g && Array.isArray(g.scenarioIds)) return g.scenarioIds.filter((id) => config.scenarios.some((s) => s.id === id));
+  return config.scenarios.filter((s) => s.enabled).map((s) => s.id);
+}
+
 // Headline comparison numbers for one simulation (SPEC §3 table columns).
 export function strategyStats(sim) {
   if (!sim) return null;

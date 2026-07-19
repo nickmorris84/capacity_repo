@@ -1,28 +1,37 @@
 import { useRef, useState, useEffect, useMemo } from "react";
 import { simulate } from "../engine/engine.js";
-import { viewIdsFor, strategyList } from "./views.js";
+import { groupScenarioIds, strategyList } from "./views.js";
 
-/* Multi-simulation engine (Revision 1). The dashboard runs the ACTIVE strategy
-   (which may be a schedule); the Strategies comparison runs every strategy in
-   config for the ACTIVE view. So the needed set is {all strategy ids} × the
-   active view — the active/dashboard sim is always one of them, at no extra
-   cost. Capped at 8 sims/change (SPEC §0); if the config declares more than 8
-   strategies the first 8 (built-ins first) are computed.
+/* Multi-simulation engine (Revision 2). The dashboard runs the ACTIVE strategy
+   (which may be a schedule) under the ACTIVE scenario group; the Strategies
+   comparison runs every strategy in config for the active group. So the needed
+   set is {all strategy ids} × the active group — the active/dashboard sim is
+   always one of them, at no extra cost. Capped at 8 sims/change (SPEC §0).
 
-   Memoised by (configHash | strategyId | viewId): a parameter edit misses (must
-   re-simulate) while switching the active strategy or view reuses the cache and
-   resolves instantly. During a parameter recompute the previous snapshot stays
-   visible so charts never read a half-built config (E4). */
+   Memoised by (configHash | strategyId | groupId): a parameter edit misses
+   (must re-simulate) while switching the active strategy or group reuses the
+   cache and resolves instantly. During a parameter recompute the previous
+   snapshot stays visible so charts never read a half-built config (E4). */
 const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
-const CACHE_MAX = 64;
+const CACHE_MAX = 128;
 const BUDGET = 8;
-const keyFor = (hash, sid, vid) => hash + "|" + sid + "|" + vid;
+const keyFor = (hash, sid, gid) => hash + "|" + sid + "|" + gid;
 
-export function useStrategySims(config, activeStrategyId, activeViewId, delay = 160) {
-  const hash = useMemo(() => JSON.stringify(config), [config]);
+/* Simulation-relevant config hash. Excludes settings.risk: the §20a risk
+   thresholds only affect render-time scoring, never the engine, so editing one
+   must NOT invalidate the sim cache or the matrix (the register re-scores from
+   the new threshold while every simulated number is untouched). */
+export function simHash(config) {
+  const { settings, ...rest } = config;
+  let s = settings;
+  if (settings && settings.risk) { s = { ...settings }; delete s.risk; }
+  return JSON.stringify({ ...rest, settings: s });
+}
+
+export function useStrategySims(config, activeStrategyId, activeGroupId, delay = 160) {
+  const hash = useMemo(() => simHash(config), [config]);
   const cacheRef = useRef(new Map());
 
-  // Which strategies to simulate: all in config, deduped, active first, ≤ budget.
   const stratIds = useMemo(() => {
     const all = strategyList(config).map((s) => s.id);
     const ordered = [activeStrategyId, ...all.filter((id) => id !== activeStrategyId)].filter((v, i, a) => a.indexOf(v) === i);
@@ -30,18 +39,18 @@ export function useStrategySims(config, activeStrategyId, activeViewId, delay = 
   }, [hash, activeStrategyId]);
 
   const runInto = (missing) => {
-    for (const m of missing) cacheRef.current.set(m.k, simulate(config, { strategy: m.sid, viewIds: viewIdsFor(config, activeViewId) }));
+    for (const m of missing) cacheRef.current.set(m.k, simulate(config, { strategy: m.sid, viewIds: groupScenarioIds(config, activeGroupId) }));
     while (cacheRef.current.size > CACHE_MAX) cacheRef.current.delete(cacheRef.current.keys().next().value);
   };
 
   const needed = useMemo(
-    () => stratIds.map((sid) => ({ k: keyFor(hash, sid, activeViewId), sid })),
-    [hash, activeViewId, stratIds.join(",")]
+    () => stratIds.map((sid) => ({ k: keyFor(hash, sid, activeGroupId), sid })),
+    [hash, activeGroupId, stratIds.join(",")]
   );
 
   const buildSnapshot = () => {
     const sims = {};
-    for (const sid of stratIds) sims[sid] = cacheRef.current.get(keyFor(hash, sid, activeViewId));
+    for (const sid of stratIds) sims[sid] = cacheRef.current.get(keyFor(hash, sid, activeGroupId));
     return { sims, activeSim: sims[activeStrategyId], stratIds, hash };
   };
 
@@ -58,8 +67,7 @@ export function useStrategySims(config, activeStrategyId, activeViewId, delay = 
       setSnap({ ...buildSnapshot(), computeMs: 0, computeCount: 0 });
       return;
     }
-    // Dashboard sim cached (a strategy/view switch, not an edit) → update now.
-    if (cacheRef.current.has(keyFor(hash, activeStrategyId, activeViewId))) {
+    if (cacheRef.current.has(keyFor(hash, activeStrategyId, activeGroupId))) {
       setSnap({ ...buildSnapshot(), computeMs: 0, computeCount: 0 });
     }
     setPending(true);
@@ -71,7 +79,30 @@ export function useStrategySims(config, activeStrategyId, activeViewId, delay = 
     }, delay);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hash, activeStrategyId, activeViewId, stratIds.join(",")]);
+  }, [hash, activeStrategyId, activeGroupId, stratIds.join(",")]);
 
   return { ...snap, pending };
+}
+
+/* §19 decision matrix — groups (rows) × strategies (columns), BOTH in config
+   definition order. Computed on demand, never reordered by selection. Returns
+   { hash, cells: { [gid]: { [sid]: {allIn, redWeeks, tipping, capInfeasible,
+   status} } } }. Pure — the caller caches it and compares hashes for staleness. */
+export function runMatrix(config) {
+  const groups = config.groups || [];
+  const strategies = strategyList(config);
+  const cells = {};
+  for (const g of groups) {
+    const ids = groupScenarioIds(config, g.id);
+    cells[g.id] = {};
+    for (const s of strategies) {
+      const sim = simulate(config, { strategy: s.id, viewIds: ids });
+      let redWeeks = 0;
+      for (const w of sim.weeks) if (config.queues.some((q) => w.queues[q.id].status === "red")) redWeeks++;
+      const flags = sim.summary.flags;
+      const status = flags.capInfeasible || flags.tippingPoint || redWeeks > 0 ? (redWeeks > sim.weeks.length * 0.1 || flags.tippingPoint ? "red" : "amber") : "green";
+      cells[g.id][s.id] = { allIn: sim.summary.allIn, redWeeks, tipping: !!flags.tippingPoint, capInfeasible: !!flags.capInfeasible, status };
+    }
+  }
+  return { hash: simHash(config), cells };
 }

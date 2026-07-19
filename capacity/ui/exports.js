@@ -156,6 +156,43 @@ function queueAOA(sim, queue, config) {
   return [header, ...body];
 }
 
+// ---- §20 R2 package sheets: Brands, Pools, Profiles, Groups ----
+function brandsAOA(config) {
+  const out = [["Brand", "ID", "Training weeks", "Training shrinkage %", "Brand daily volume"]];
+  for (const b of config.brands || []) {
+    const tr = b.training || {};
+    out.push([b.name, b.id, tr.trainingWeeks ?? "(inherit)", tr.trainingShrinkagePct != null ? +(tr.trainingShrinkagePct * 100).toFixed(1) : "(inherit)", b.dailyVolume ?? "(per-queue)"]);
+  }
+  return out;
+}
+function poolsAOA(config) {
+  const out = [["Pool", "ID", "Member queue", "Share %"]];
+  const nameOf = (id) => (config.queues.find((q) => q.id === id) || { name: id }).name;
+  for (const p of config.pools || []) {
+    if (!(p.members || []).length) { out.push([p.name, p.id, "(no members)", ""]); continue; }
+    for (const m of p.members) out.push([p.name, p.id, nameOf(m.queueId), m.sharePct != null ? m.sharePct : 100]);
+  }
+  return out;
+}
+function profilesAOA(config) {
+  const out = [["Queue", "Segment", "Share %", "AHT (s)"]];
+  for (const q of config.queues) {
+    const segs = q.volumeProfile && q.volumeProfile.segments;
+    if (!segs || !segs.length) { out.push([q.name, "(single — blended = base AHT)", 100, q.aht]); continue; }
+    for (const s of segs) out.push([q.name, s.label || "segment", s.sharePct, s.aht]);
+  }
+  return out;
+}
+function groupsAOA(config) {
+  const out = [["Group", "ID", "Built-in", "Scenarios"]];
+  const nameOf = (id) => (config.scenarios.find((s) => s.id === id) || { name: id }).name;
+  for (const g of config.groups || []) {
+    const list = Array.isArray(g.scenarioIds) ? g.scenarioIds.map(nameOf).join("; ") : "(tracks enabled set)";
+    out.push([g.name, g.id, g.builtin ? "yes" : "no", list || "(none)"]);
+  }
+  return out;
+}
+
 // Build the whole workbook → Uint8Array (pure).
 export function buildWorkbook(sim, strategySims, config, activeStrategyId, activeViewId) {
   const wb = XLSX.utils.book_new();
@@ -163,9 +200,13 @@ export function buildWorkbook(sim, strategySims, config, activeStrategyId, activ
   S(summaryAOA(sim, strategySims, activeStrategyId, activeViewId, config), "Summary");
   S(strategyAOA(strategySims, config), "Strategy comparison");
   S(findingsAOA(sim, config), "Findings & risks");
+  S(brandsAOA(config), "Brands");
+  S(poolsAOA(config), "Pools");
+  S(profilesAOA(config), "Profiles");
+  S(groupsAOA(config), "Groups");
   S([["Path", "Setting", "Value"], ...flattenParameters(config).map((r) => [r.path, r.setting, r.value])], "Parameters");
   S(volumesAOA(config), "Volumes");
-  const used = new Set(["Summary", "Strategy comparison", "Findings & risks", "Parameters", "Volumes"]);
+  const used = new Set(["Summary", "Strategy comparison", "Findings & risks", "Brands", "Pools", "Profiles", "Groups", "Parameters", "Volumes"]);
   for (const q of config.queues) {
     let name = q.name.replace(/[\\/?*[\]:]/g, " ").slice(0, 28) || q.id;
     let n = name, i = 2;

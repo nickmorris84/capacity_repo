@@ -2,45 +2,68 @@ import { useState } from "react";
 import { Card } from "./primitives.jsx";
 import { PrintButton } from "../print.jsx";
 import { buildVerdict, buildAudienceBlocks, buildRiskRegister, buildQueueSummary } from "../reporting.js";
-import { strategyList, strategyStats, resolveStrategyName, viewName } from "../views.js";
+import { strategyList, groupList, resolveStrategyName, groupName } from "../views.js";
 import { money, moneyFull, pct, num } from "../format.js";
 
 const Stat = ({ l, v, sub }) => (
   <div className="stat"><div className="l">{l}</div><div className="v">{v}{sub ? <small> {sub}</small> : null}</div></div>
 );
 
-const endCoverage = (sim) => {
-  if (!sim) return 0;
-  const last = sim.weeks[sim.weeks.length - 1];
-  const qs = sim.config.queues;
-  return qs.length ? qs.reduce((a, q) => a + last.queues[q.id].cover, 0) / qs.length : 0;
-};
-
-// §14: strategy overview cards — name, all-in, weeks red, end coverage, Set active.
-function StrategyCards({ sims, stratIds, config, activeStrategyId, onSetActive }) {
+/* §19 decision matrix — rows = groups, columns = strategies, BOTH in config
+   definition order and never reordered by selection or results. Cell = RAG +
+   all-in £ + flags. Computed on demand ("Run matrix"), cached, greyed with a
+   "stale — re-run" banner on any config change. The selected cell (group ×
+   strategy) is the global context pair rendered live on every tab. */
+function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }) {
   const cur = config.engine.currency;
+  const groups = groupList(config);
+  const strategies = strategyList(config);
   return (
-    <div className="qcards" data-testid="strategy-cards">
-      {stratIds.map((id) => {
-        const sim = sims[id];
-        const st = strategyStats(sim);
-        const active = id === activeStrategyId;
-        return (
-          <div key={id} className={"qcard " + (st ? (st.redWeeks ? "red" : "green") : "")}>
-            <div className="qn"><span>{resolveStrategyName(config, id)}</span><span className="spacer" />{active && <span className="tag">active</span>}</div>
-            <div className="kpis">
-              <div className="kpi"><div className="l">All-in</div><div className="v">{st ? money(cur, st.allIn) : "…"}</div></div>
-              <div className="kpi"><div className="l">Weeks red</div><div className="v">{st ? st.redWeeks : "…"}</div></div>
-              <div className="kpi"><div className="l">End coverage</div><div className="v">{pct(endCoverage(sim))}</div></div>
-              <div className="kpi"><div className="l">Feasible</div><div className="v">{st ? (st.feasible ? "yes" : "no") : "…"}</div></div>
-            </div>
-            <button type="button" className={"btn sm" + (active ? " primary" : "")} style={{ marginTop: 10, width: "100%" }} disabled={active} onClick={() => onSetActive(id)} data-testid={"set-active-" + id}>
-              {active ? "Active" : "Set active"}
-            </button>
-          </div>
-        );
-      })}
-    </div>
+    <Card title="Decision matrix" sub="groups × strategies" hint="Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.">
+      {(matrixStale) && (
+        <div className="mx-stale" data-testid="matrix-stale">
+          <span>{matrix ? "Config changed — the matrix is stale." : "Matrix not yet computed."}</span>
+          <button type="button" className="btn sm primary" onClick={onRunMatrix} data-testid="run-matrix">Run matrix</button>
+        </div>
+      )}
+      {!matrixStale && (
+        <div className="btnbar" style={{ marginBottom: 8 }}>
+          <button type="button" className="btn sm" onClick={onRunMatrix} data-testid="run-matrix">Re-run matrix</button>
+          <span className="note" style={{ padding: "6px 10px" }}>Cached. Click any cell to select the (group × strategy) context.</span>
+        </div>
+      )}
+      <div className="tbl-wrap">
+        <table className="matrix" data-testid="decision-matrix">
+          <thead>
+            <tr>
+              <th className="row-h" />
+              {strategies.map((s) => <th key={s.id} data-testid={"mx-col-" + s.id}>{s.name}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              <tr key={g.id}>
+                <th className="row-h" data-testid={"mx-row-" + g.id}>{g.name}</th>
+                {strategies.map((s) => {
+                  const cell = matrix && matrix.cells[g.id] && matrix.cells[g.id][s.id];
+                  const sel = g.id === activeGroupId && s.id === activeStrategy;
+                  const flags = cell ? [cell.redWeeks ? `${cell.redWeeks} red` : null, cell.tipping ? "⚠ tip" : null, cell.capInfeasible ? "⚠ cap" : null].filter(Boolean).join(" · ") : "";
+                  return (
+                    <td key={s.id} style={{ padding: 0 }}>
+                      <button type="button" className={"mx-cell " + (cell ? cell.status : "") + (sel ? " sel" : "")}
+                        onClick={() => onSelectCell(g.id, s.id)} data-testid={"mx-" + g.id + "-" + s.id} aria-pressed={sel}>
+                        <div className="mx-all">{cell ? money(cur, cell.allIn) : "—"}</div>
+                        <div className="mx-flags">{cell ? (flags || "holds") : "not run"}</div>
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
@@ -49,7 +72,7 @@ function QueueSummaryTable({ sim, config }) {
   const qs = buildQueueSummary(sim, config);
   const row = (r, cls) => (
     <tr key={r.id} className={cls}>
-      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{r.name}{r.resourcing === "supported" ? " (supported)" : ""}</td>
+      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{r.name}{r.resourcing && r.resourcing !== "dedicated" && r.resourcing !== "resourced" ? ` (${r.resourcing})` : ""}</td>
       <td>{num(r.volume, 0)}</td>
       <td>{num(r.required, 1)}</td>
       <td>{num(r.active, 1)}</td>
@@ -74,11 +97,11 @@ function QueueSummaryTable({ sim, config }) {
   );
 }
 
-export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeViewId, onSetActive }) {
+export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
   const cur = config.engine.currency;
-  const verdict = buildVerdict(sims, activeStrategy, activeViewId, config);
+  const verdict = buildVerdict(sims, activeStrategy, activeGroupId, config);
   const blocks = buildAudienceBlocks(sim, config);
-  const risks = buildRiskRegister(sim, config);
+  const risks = buildRiskRegister(sim, config); // §20a — re-scores from config.settings.risk at render
   const [sort, setSort] = useState({ key: "severityValue", dir: -1 });
   const f = blocks.finance, hr = blocks.hr, bz = blocks.business;
 
@@ -95,12 +118,10 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
     <div className="grid summary-print" style={{ gap: 16 }} data-testid="summary-panel">
       <div className="btnbar">
         <PrintButton label="Print / PDF Summary" testid="summary-print" className="btn primary" />
-        <span className="note" style={{ padding: "6px 10px" }}>A leadership-ready one-pager under {resolveStrategyName(config, activeStrategy)} · view {viewName(config, activeViewId)}.</span>
+        <span className="note" style={{ padding: "6px 10px" }}>Leadership one-pager — {resolveStrategyName(config, activeStrategy)} · group {groupName(config, activeGroupId)}.</span>
       </div>
 
-      <Card title="Strategy overview" hint="Every strategy at a glance under the active view. Set any one active to drive the whole app.">
-        <StrategyCards sims={sims} stratIds={stratIds} config={config} activeStrategyId={activeStrategy} onSetActive={onSetActive} />
-      </Card>
+      <DecisionMatrix config={config} matrix={matrix} matrixStale={matrixStale} onRunMatrix={onRunMatrix} onSelectCell={onSelectCell} activeGroupId={activeGroupId} activeStrategy={activeStrategy} />
 
       <Card title="Verdict & key findings">
         <p style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }}>{verdict.paragraph}</p>
@@ -118,6 +139,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
         <Card title="Finance">
           <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
             <Stat l="Run cost" v={money(cur, f.runCost)} />
+            <Stat l="OT cost" v={money(cur, sim.weeks.reduce((a, w) => a + (w.totals.otCost || 0), 0))} />
             <Stat l="Churn cost" v={money(cur, f.churn)} />
             <Stat l="Idle pay" v={money(cur, f.idle)} />
             <Stat l="All-in" v={money(cur, f.allIn)} />
@@ -132,12 +154,11 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
             <Stat l="Avg leavers" v={num(hr.avgLeavers, 1)} sub="/wk" />
             <Stat l="Tipping margin" v={num(hr.tippingMargin, 1)} sub={hr.tippingPoint ? "· tipped" : "/wk"} />
             <Stat l="Peak burnout" v={num(hr.peakBurn, 0) + "/100"} />
-            <Stat l="Avg in training" v={num(hr.avgTraining, 1)} />
+            <Stat l="Peak training debt" v={num(Math.max(0, ...config.queues.map((q) => Math.max(0, ...sim.weeks.map((w) => w.queues[q.id].trainingDebt || 0)))), 0) + "/100"} />
           </div>
         </Card>
         <Card title="Business" hint="SLA attainment and incident readiness.">
           <div className="stat-row" style={{ flexDirection: "column", gap: 12 }}>
-            <Stat l="Incident (P1) in view" v={bz.p1Enabled ? "yes — stress applied" : "no"} />
             <Stat l="Cap infeasible" v={bz.capInfeasible ? "yes" : "no"} />
             <div>
               <div className="l" style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>SLA attainment by queue</div>
@@ -159,7 +180,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
         </Card>
       </div>
 
-      <Card title="Risk register" sub={`${risks.length} risk(s)`}>
+      <Card title="Risk register" sub={`${risks.length} risk(s) · thresholds in Settings`}>
         <div className="tbl-wrap">
           <table className="data" data-testid="risk-table">
             <thead>
@@ -175,7 +196,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
             <tbody>
               {sortedRisks.map((r, i) => (
                 <tr key={i}>
-                  <td style={{ textAlign: "left", fontWeight: 600 }}>{r.risk}</td>
+                  <td style={{ textAlign: "left", fontWeight: 600 }}>{r.band && <span className={"badge " + r.band} style={{ marginRight: 6 }}>{r.band}</span>}{r.risk}</td>
                   <td style={{ textAlign: "left", whiteSpace: "normal", maxWidth: 280 }}>{r.driver}</td>
                   <td>{r.week ?? "–"}</td>
                   <td>{r.severityMoney != null ? money(cur, r.severityMoney) : "—"}</td>

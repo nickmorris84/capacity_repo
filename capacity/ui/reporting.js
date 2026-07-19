@@ -47,8 +47,37 @@ export function buildWeeklyRows(sim, queue, config) {
       churnCost: s.churnCost,
       customersLost: s.churnCustomers,
       status: s.status,
+      // §16/§17/§20a R2 audit + supply-ladder fields.
+      otHours: s.otHours || 0,
+      otCost: s.otCost || 0,
+      reclaimedHours: s.reclaimedHours || 0,
+      trainingDebt: s.trainingDebt || 0,
+      trainShrink: s.trainShrinkInEffect || 0,
+      recycledIn: s.recycledIn || 0,
+      poolIn: s.poolIn || 0,
+      leveragedIn: s.leveragedIn || 0,
+      borrowedShare: s.borrowedSharePct || 0,
+      ahtInEffect: s.ahtInEffect != null ? s.ahtInEffect : queue.aht,
+      slaInEffect: s.slaInEffect != null ? s.slaInEffect : (queue.type === "voice" ? queue.asaTarget : queue.digitalSlaMinutes),
+      scenarioTags: (s.scenarioTags || []).join(", "),
     };
   });
+}
+
+// §16 audit contract — the resolved assumptions in effect, per week.
+export function assumptionsColumns(queue, cur = "£") {
+  const N1 = (v) => num(v, 1);
+  return [
+    { key: "week", label: "Week", fmt: (v) => String(v) },
+    { key: "volume", label: "Volume", fmt: (v) => num(v, 0) },
+    { key: "ahtInEffect", label: "Blended AHT (s)", fmt: (v) => num(v, 0) },
+    { key: "slaInEffect", label: "SLA in effect", fmt: (v) => num(v, queue.type === "voice" ? 0 : 1) },
+    { key: "attrInEffect", label: "Attrition %", fmt: (v) => pct(v, 1) },
+    { key: "trainShrink", label: "Train shrink %", fmt: (v) => pct(v, 1) },
+    { key: "otHours", label: "OT used (h)", fmt: N1 },
+    { key: "trainingDebt", label: "Training debt", fmt: (v) => num(v, 0) },
+    { key: "scenarioTags", label: "Active scenarios", fmt: (v) => v || "—" },
+  ];
 }
 
 // Per-queue summary for the Summary tab (§14.6): one row per queue plus Voice /
@@ -118,14 +147,22 @@ export function columnsFor(queue, cur = "£") {
     { key: "trained", label: "Trained", group: "People", fmt: N1 },
     { key: "active", label: "Active FTE", group: "People", fmt: N1 },
     { key: "reqFte", label: "Req FTE", group: "People", fmt: N1 },
+    { key: "otHours", label: "OT hours", group: "Supply", fmt: N1 },
+    { key: "trainShrink", label: "Train shrink", group: "Supply", fmt: (v) => pct(v, 1) },
+    { key: "trainingDebt", label: "Training debt", group: "Supply", fmt: N0 },
+    { key: "recycledIn", label: "Recycled in", group: "Supply", fmt: N0 },
+    { key: "poolIn", label: "Pool in", group: "Supply", fmt: N0 },
+    { key: "leveragedIn", label: "Leveraged in", group: "Supply", fmt: N0 },
+    { key: "borrowedShare", label: "Borrowed %", group: "Supply", fmt: P0 },
     { key: "cost", label: "Run cost", group: "Money", fmt: M },
+    { key: "otCost", label: "OT cost", group: "Money", fmt: M },
     { key: "churnCost", label: "Churn cost", group: "Money", fmt: M },
     { key: "customersLost", label: "Cust. lost", group: "Money", fmt: N0 },
     { key: "status", label: "Status", group: "Status", fmt: (v) => v },
   ];
 }
 
-export const COLUMN_GROUPS = ["Week", "Demand", "Service", "People", "Money", "Status"];
+export const COLUMN_GROUPS = ["Week", "Demand", "Service", "People", "Supply", "Money", "Status"];
 
 // ---- §7 verdict + recommendation ----
 export function buildVerdict(strategySims, activeStrategyId, activeViewId, config) {
@@ -205,10 +242,23 @@ export function buildAudienceBlocks(sim, config) {
   };
 }
 
-// ---- §7 sortable risk register ----
+// ---- §20a parameterised risk register ----
+// Thresholds come from config.settings.risk so the register RE-SCORES at render
+// time when a threshold changes — no re-simulation needed (the sim ignores
+// settings.risk). Families beyond the R1 set: sustained-overtime dependence,
+// training-debt peaks, borrowed-capacity dependence and unmanned starvation.
 export function buildRiskRegister(sim, config) {
   const cur = config.engine.currency;
   const weeks = sim.weeks;
+  const R = (config.settings && config.settings.risk) || {};
+  const th = {
+    burnout: R.burnout || { amber: 60, red: 85 },
+    trainingDebt: R.trainingDebt || { amber: 40, red: 70 },
+    otStreakWeeks: R.otStreakWeeks || { amber: 4, red: 8 },
+    borrowedShare: R.borrowedShare || { amber: 0.25, red: 0.5 },
+    unmanned: R.unmannedStarvation || { floorCover: 0.5, weeks: 4 },
+    overCap: R.overCapacityPct || { amber: 0.1, red: 0.2 },
+  };
   const risks = [];
   const push = (r) => risks.push(r);
 
@@ -254,17 +304,60 @@ export function buildRiskRegister(sim, config) {
       });
     }
     const peakBurn = Math.max(...series.map((s) => s.burnout));
-    if (peakBurn > 60) {
+    if (peakBurn >= th.burnout.amber) {
       const wk = series.findIndex((s) => s.burnout === peakBurn);
       push({
         risk: `${q.name} burnout peak`, driver: `Occupancy over threshold lifts attrition (peak ${Math.round(peakBurn)}/100)`,
         week: wk + 1, severityValue: peakBurn * 1000, severityMoney: null, sla: `${Math.round(peakBurn)}/100`,
-        lever: "Add heads or ease occupancy",
+        lever: "Add heads or ease occupancy", band: peakBurn >= th.burnout.red ? "red" : "amber",
       });
+    }
+    // §17 sustained-overtime dependence
+    const peakOtStreak = Math.max(0, ...series.map((s) => s.otStreakWeeks || 0));
+    if (peakOtStreak >= th.otStreakWeeks.amber) {
+      const wk = series.findIndex((s) => (s.otStreakWeeks || 0) === peakOtStreak);
+      const otCost = series.reduce((a, s) => a + (s.otCost || 0), 0);
+      push({
+        risk: `${q.name} sustained overtime`, driver: `OT used ${peakOtStreak} consecutive weeks`,
+        week: wk + 1, severityValue: otCost, severityMoney: otCost, sla: `${peakOtStreak} wk streak`,
+        lever: "Hire — OT is masking a structural shortfall", band: peakOtStreak >= th.otStreakWeeks.red ? "red" : "amber",
+      });
+    }
+    // §17 training-debt peaks
+    const peakDebt = Math.max(0, ...series.map((s) => s.trainingDebt || 0));
+    if (peakDebt >= th.trainingDebt.amber) {
+      const wk = series.findIndex((s) => (s.trainingDebt || 0) === peakDebt);
+      push({
+        risk: `${q.name} training debt`, driver: `Reclaimed training accrues debt (peak ${Math.round(peakDebt)}/100 — AHT + attrition drift up)`,
+        week: wk + 1, severityValue: peakDebt * 1500, severityMoney: null, sla: `${Math.round(peakDebt)}/100`,
+        lever: "Restore training hours to let debt decay", band: peakDebt >= th.trainingDebt.red ? "red" : "amber",
+      });
+    }
+    // §20a borrowed-capacity dependence (a resilience risk even when green)
+    const peakBorrow = Math.max(0, ...series.map((s) => s.borrowedSharePct || 0));
+    if (peakBorrow > th.borrowedShare.amber) {
+      const wk = series.findIndex((s) => (s.borrowedSharePct || 0) === peakBorrow);
+      push({
+        risk: `${q.name} borrowed-capacity dependence`, driver: `Meets ${Math.round(peakBorrow * 100)}% of requirement from pools / leverage / recycling`,
+        week: wk + 1, severityValue: peakBorrow * 5000, severityMoney: null, sla: `${Math.round(peakBorrow * 100)}% borrowed`,
+        lever: "Resource this queue directly to reduce fragility", band: peakBorrow > th.borrowedShare.red ? "red" : "amber",
+      });
+    }
+    // §17/§20a unmanned starvation
+    if ((q.resourcing === "unmanned" || q.resourcing === "supported")) {
+      const starved = series.filter((s) => s.cover < th.unmanned.floorCover).length;
+      if (starved >= th.unmanned.weeks) {
+        const wk = series.findIndex((s) => s.cover < th.unmanned.floorCover);
+        push({
+          risk: `${q.name} unmanned starvation`, driver: `Below ${Math.round(th.unmanned.floorCover * 100)}% cover for ${starved} weeks with no own staff`,
+          week: wk + 1, severityValue: starved * 4000 + qChurn, severityMoney: qChurn, sla: `${starved} wk starved`,
+          lever: "Add a supporter/pool donor or give it dedicated HC", band: "red",
+        });
+      }
     }
     // over-capacity carrying cost with time-to-rectify under a freeze
     const last = series[series.length - 1];
-    if (last.paid > last.reqFte * 1.1 && last.reqFte > 0) {
+    if (last.paid > last.reqFte * (1 + th.overCap.amber) && last.reqFte > 0) {
       const excess = last.paid - last.reqFte;
       const perWeek = last.paid * (q.wf.attrition / 4.345);
       const wks = perWeek > 0 ? Math.ceil(excess / perWeek) : 999;

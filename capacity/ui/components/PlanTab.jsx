@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Ribbon } from "./Ribbon.jsx";
-import { Card } from "./primitives.jsx";
+import { Card, SelectField } from "./primitives.jsx";
 import { HolisticPanel } from "./HolisticPanel.jsx";
 import { CoverageChart, HeadcountChart, VolumeChart, CostChart, IdleChurnChart, BurnoutChart } from "./charts.jsx";
+import { columnsFor, buildWeeklyRows } from "../reporting.js";
 import { money, pct, num, secs } from "../format.js";
 
 // Findings strip — colour-coded advisory cards from the engine summary.
@@ -89,6 +90,33 @@ function HiringSummary({ sim, cur }) {
   );
 }
 
+// §20 Plan — the full per-queue weekly data table lives at the bottom (no
+// mini-tabs), so the plan and its underlying numbers read on one page.
+function PlanDataTable({ sim, cfg }) {
+  const [qid, setQid] = useState(cfg.queues[0] ? cfg.queues[0].id : "");
+  const queue = cfg.queues.find((q) => q.id === qid) || cfg.queues[0];
+  if (!queue) return null;
+  const cols = columnsFor(queue, cfg.engine.currency);
+  const rows = buildWeeklyRows(sim, queue, cfg);
+  return (
+    <Card title="Weekly data table" sub="the numbers behind the plan" hint="The full per-queue weekly record — the same data the Data tab exposes, inline here for the plan of record.">
+      <div className="fieldrow" style={{ maxWidth: 320, marginBottom: 10 }}>
+        <SelectField label="Queue" value={queue.id} onChange={setQid} options={cfg.queues.map((q) => ({ value: q.id, label: q.name }))} />
+      </div>
+      <div className="tbl-wrap" style={{ maxHeight: 420 }}>
+        <table className="data grouped" data-testid="plan-data-table">
+          <thead><tr>{cols.map((c) => <th key={c.key} className={"grp-" + c.group.toLowerCase()}>{c.label}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.week}>{cols.map((c) => <td key={c.key} className={"grp-" + c.group.toLowerCase() + (c.key === "status" ? " st-" + row.status : "")}>{c.fmt(row[c.key])}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export function PlanTab({ sim, viewLabel }) {
   const cfg = sim.config;
   const [selectedWeek, setSelectedWeek] = useState(0);
@@ -144,6 +172,8 @@ export function PlanTab({ sim, viewLabel }) {
       </div>
 
       <HolisticPanel sim={sim} />
+
+      <PlanDataTable sim={sim} cfg={cfg} />
     </div>
   );
 }

@@ -1,11 +1,13 @@
 import { useDisclosure } from "../hooks.js";
 import { PrintButton } from "../print.jsx";
-import { strategyList, strategyObj, isSchedule, scheduleSummary } from "../views.js";
+import { strategyList, strategyObj, isSchedule, scheduleSummary, groupList } from "../views.js";
 
-/* Global context bar (§14.8) — under the header on every tab. Carries the
-   active strategy/schedule (tap to switch or edit segments), the active view,
-   the loaded-snapshot name, and the Print / PDF this page action. */
-export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, activeViewId, onSetActiveView, ops, loadedSnapshotName, pending }) {
+/* Global context bar (§20) — under the header on every tab. Three selectors, in
+   this order, drive every number rendered below: Strategy · Scenario-group ·
+   Snapshot. The strategy chip also edits an active schedule's segments inline.
+   Selecting a snapshot switches the whole app into read-only mode; "Live"
+   returns to the current model. Plus the Print / PDF this page action. */
+export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, activeGroupId, onSetActiveGroup, ops, snapshots, viewingSlug, onSelectSnapshot, pending }) {
   const strat = strategyObj(config, activeStrategyId);
   const sched = isSchedule(strat) ? scheduleSummary(config, strat) : "";
   const disc = useDisclosure();
@@ -52,15 +54,18 @@ export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, acti
       </div>
 
       <div className="ctx-item">
-        <span className="ctx-label">View</span>
-        <select className="ctx-select" value={activeViewId} onChange={(e) => onSetActiveView(e.target.value)} aria-label="Active scenario view" data-testid="ctx-view">
-          {config.views.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        <span className="ctx-label">Scenario group</span>
+        <select className="ctx-select" value={activeGroupId} onChange={(e) => onSetActiveGroup(e.target.value)} aria-label="Active scenario group" data-testid="ctx-group">
+          {groupList(config).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
       </div>
 
       <div className="ctx-item">
         <span className="ctx-label">Snapshot</span>
-        <span className="ctx-snapshot" data-testid="ctx-snapshot">{loadedSnapshotName || "— live model —"}</span>
+        <select className="ctx-select" value={viewingSlug || ""} onChange={(e) => onSelectSnapshot(e.target.value || null)} aria-label="View snapshot" data-testid="ctx-snapshot">
+          <option value="">— Live —</option>
+          {snapshots.map((r) => <option key={r.slug} value={r.slug}>{r.name}</option>)}
+        </select>
       </div>
 
       <span className="spacer" />
