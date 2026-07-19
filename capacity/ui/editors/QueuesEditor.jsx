@@ -100,20 +100,37 @@ function SupportsEditor({ config, q, ops }) {
   );
 }
 
+// §24.8 read-only view: scenario GROUPS whose scope targets this queue, and the
+// factors inside them. Scope lives on the group (brands / channels / queues);
+// an empty scope means the whole operation. Creation and targeting happen only
+// on the Scenarios tab — this accordion never edits anything.
+function groupTargetsQueue(group, q) {
+  const sc = group.scope;
+  if (!sc) return true;
+  const anyTarget = (sc.brandIds || []).length || (sc.channels || []).length || (sc.queueIds || []).length;
+  if (!anyTarget) return true;
+  return (sc.brandIds || []).includes(q.brandId)
+    || (sc.channels || []).includes(channelOf(q))
+    || (sc.queueIds || []).includes(q.id);
+}
 function ScenariosAffecting({ config, q }) {
-  const hits = config.scenarios.filter((s) => {
-    if (s.type === "unified") {
-      const sc = s.scope;
-      if (!sc || sc === "all" || sc.kind === "all") return true;
-      if (sc.kind === "template") return channelOf(q) === sc.channel;
-      if (sc.kind === "brand") return q.brandId === sc.brandId;
-      if (sc.kind === "queues") return (sc.queueIds || []).includes(q.id);
-      return false;
-    }
-    return s.queueIds === "all" || (Array.isArray(s.queueIds) && s.queueIds.includes(q.id));
-  });
-  if (!hits.length) return <p className="note">No scenarios currently target this queue.</p>;
-  return <div className="rowflex" style={{ flexWrap: "wrap" }}>{hits.map((s) => <span key={s.id} className="pill">{s.name}{s.enabled ? "" : " (off)"}</span>)}</div>;
+  const groups = (config.groups || []).filter((g) => Array.isArray(g.scenarioIds) && g.scenarioIds.length && groupTargetsQueue(g, q));
+  const rows = groups.map((g) => ({
+    group: g,
+    factors: g.scenarioIds.map((id) => config.scenarios.find((s) => s.id === id)).filter(Boolean),
+  })).filter((r) => r.factors.length);
+  if (!rows.length) return <p className="note">No scenario groups currently target this queue. Create and target groups on the Scenarios tab.</p>;
+  return (
+    <div className="rows" style={{ gap: 8 }} data-testid="q-scenarios-readonly">
+      <p className="note">Read-only. Scenario groups are created and targeted on the Scenarios tab; this shows the ones that reach this queue.</p>
+      {rows.map(({ group, factors }) => (
+        <div key={group.id} className="rowflex" style={{ flexWrap: "wrap", gap: 6 }}>
+          <span className="tag soft">{group.name}</span>
+          {factors.map((s) => <span key={s.id} className="pill">{s.name}{s.enabled ? "" : " (off)"}</span>)}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function AssumptionsMini({ sim, config, q }) {
@@ -228,14 +245,15 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
           <div className="acc-b">
             <div className="fieldrow">
               <TextField label="Name" value={q.name} onChange={(v) => ops.patchQueue(q.id, ["name"], v)} />
-              <SelectField label="Channel" value={ch} onChange={(v) => ops.patchQueue(q.id, ["channel"], v)} options={[{ value: "voice", label: "Voice" }, { value: "digital", label: "Digital" }, { value: "support", label: "Support" }]} />
+              <SelectField label="Channel" value={q.channelId || ""} onChange={(v) => v && ops.attachQueueChannel(q.id, v)} id={"queue-channel-" + q.id}
+                options={[{ value: "", label: "— pick a channel —" }, ...(config.channelDefs || []).map((d) => ({ value: d.id, label: d.name }))]} />
               {isDigital && (
                 <SelectField label="Digital subtype" value={q.subtype || "customer"} onChange={(v) => ops.setQueueSubtype(q.id, v)} id={"subtype-" + q.id}
                   options={[{ value: "customer", label: "Customer (live)" }, { value: "workflow", label: "Workflow (backlog)" }]} />
               )}
               <NumField label={workflow ? "Handle time / item" : "AHT"} unit="s" value={q.aht} onChange={(v) => ops.patchQueue(q.id, ["aht"], v)} />
             </div>
-            {isDigital && <p className="note">{workflow ? "Workflow: backlog processing — no concurrency; SLA measured in hours." : "Customer: live interaction — concurrency and a minutes SLA."}</p>}
+            <p className="note">Attaching a channel sets this queue's channel group ({chLabel}) and inherits its template sections. Create channels in Settings → Channels.{isDigital ? (workflow ? " Workflow: backlog processing — no concurrency; SLA in hours." : " Customer: live interaction — concurrency and a minutes SLA.") : ""}</p>
           </div>
         </details>
 
@@ -250,10 +268,10 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
           <summary><strong>Arrival pattern</strong></summary>
           <div className="acc-b">
             <div className="rowflex">
-              <ApplyPreset presets={intradayPresets} onApply={(p) => ops.patchQueue(q.id, ["profile"], [...p.curve])} label="Apply arrival pattern" />
-              <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Arrival patterns. Hand-tune below.</span>
+              <ApplyPreset presets={intradayPresets} onApply={(p) => { ops.patchQueue(q.id, ["profile"], [...p.curve]); ops.patchQueue(q.id, ["arrivalPresetId"], p.id); }} label="Apply arrival pattern" />
+              <span className="note" style={{ padding: "6px 10px" }}>Apply a pattern to link it live; editing that pattern in Settings re-simulates this queue. Hand-tuning below unlinks it.</span>
             </div>
-            <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => ops.patchQueue(q.id, ["profile"], next)} />
+            <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => { ops.patchQueue(q.id, ["profile"], next); ops.patchQueue(q.id, ["arrivalPresetId"], null); }} />
           </div>
         </details>
 
@@ -303,13 +321,13 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
               </div>
             ) : workflow ? (
               <div className="fieldrow">
-                <NumField label="SLA within" unit="h" value={q.workflowSlaHours != null ? q.workflowSlaHours : 24} onChange={(v) => ops.patchQueue(q.id, ["workflowSlaHours"], v)} />
+                <NumField label="SLA within" unit="h" value={q.workflowSlaHours != null ? q.workflowSlaHours : 24} onChange={(v) => ops.patchQueue(q.id, ["workflowSlaHours"], v)} id={"q-sla-hours-" + q.id} />
                 <NumField label="SLA target" unit="%" value={+((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0)} onChange={(v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100)} />
                 <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
               </div>
             ) : (
               <div className="fieldrow">
-                <NumField label="Concurrency" value={q.concurrency} onChange={(v) => ops.patchQueue(q.id, ["concurrency"], v)} />
+                <NumField label="Concurrency" value={q.concurrency} onChange={(v) => ops.patchQueue(q.id, ["concurrency"], v)} id={"q-concurrency-" + q.id} />
                 <NumField label="SLA within" unit="min" value={q.digitalSlaMinutes} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v)} />
                 <NumField label="SLA target" unit="%" value={+(q.digitalSlaPct * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100)} />
                 <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
@@ -365,10 +383,10 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
               <>
                 <div className="rowflex" style={{ marginBottom: 8 }}>
                   <button type="button" className="btn sm" onClick={() => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1))}>Initialise overlay</button>
-                  <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patchQueue(q.id, ["seasonal"], [...p.months])} label="Apply seasonality pattern" />
-                  <span className="note" style={{ padding: "6px 10px" }}>Multiplies on top of the system pattern.</span>
+                  <ApplyPreset presets={seasonalityPresets} onApply={(p) => { ops.patchQueue(q.id, ["seasonal"], [...p.months]); ops.patchQueue(q.id, ["seasonalPresetId"], p.id); }} label="Apply seasonality pattern" />
+                  {q.seasonalPresetId ? <span className="pill" data-testid={"q-seasonal-linked-" + q.id}>linked</span> : <span className="note" style={{ padding: "6px 10px" }}>Multiplies on top of the system pattern. Apply a pattern to link it live.</span>}
                 </div>
-                {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); }} /></div>)}</div>}
+                {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); ops.patchQueue(q.id, ["seasonalPresetId"], null); }} /></div>)}</div>}
               </>
             ) : <p className="note">Inheriting the system seasonality only. Turn on Override to add a queue overlay.</p>}
           </div>
@@ -391,17 +409,20 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
 // System seasonality — the multiplier applied to every queue.
 function SystemSeasonality({ config, ops, seasonalityPresets }) {
   const seas = config.seasonality;
+  const usingPreset = seas.systemPresetId ? seasonalityPresets.find((p) => p.id === seas.systemPresetId) : null;
   return (
-    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Each queue can layer its own overlay in its Seasonality section.">
+    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Apply a pattern to link it live — editing that pattern in Settings then re-simulates every queue. Hand-editing a month unlinks it.">
       <div className="rowflex" style={{ marginBottom: 12 }}>
-        <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.patch(["seasonality", "system"], [...p.months])} label="Apply seasonality pattern" />
-        <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Seasonality patterns.</span>
+        <ApplyPreset presets={seasonalityPresets} onApply={(p) => { ops.patch(["seasonality", "system"], [...p.months]); ops.patch(["seasonality", "systemPresetId"], p.id); }} label="Apply seasonality pattern" id="system-seasonality-apply" />
+        {usingPreset
+          ? <span className="pill" data-testid="system-seasonality-linked">Linked · {usingPreset.name}</span>
+          : <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Seasonality patterns.</span>}
       </div>
       <div className="fieldrow">
         {MONTHS.map((m, i) => (
           <div key={m} style={{ width: 82 }}>
             <NumField label={m} unit="%" value={+((seas.system[i] || 0) * 100).toFixed(0)}
-              onChange={(v) => { const n = seas.system.slice(); n[i] = v / 100; ops.patch(["seasonality", "system"], n); }} />
+              onChange={(v) => { const n = seas.system.slice(); n[i] = v / 100; ops.patch(["seasonality", "system"], n); ops.patch(["seasonality", "systemPresetId"], null); }} />
           </div>
         ))}
       </div>
@@ -431,7 +452,7 @@ export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPre
       </div>
     ) : null;
     return (
-      <div key={b.id} className="grid" style={{ gap: 8 }}>
+      <div key={b.id} className="grid" style={{ gap: 8 }} data-testid={"brand-section-" + b.id}>
         <div className="section-title" style={{ fontSize: 15, color: "var(--ink)" }}>Brand · {b.name} <span className="pill">{qs.length} queue(s)</span></div>
         {["voice", "digital", "support"].map((ch) => chBlock(ch.charAt(0).toUpperCase() + ch.slice(1), byCh(ch)))}
         {qs.length === 0 && <p className="note">No queues in this brand yet.</p>}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Card } from "./primitives.jsx";
-import { buildVerdict, buildAudienceBlocks, buildRiskRegister, buildQueueSummary } from "../reporting.js";
+import { HierTable } from "./HierTable.jsx";
+import { buildVerdict, buildAudienceBlocks, buildRiskRegister, queueSummaryMetric, sumQueueSummary } from "../reporting.js";
 import { strategyList, groupList, resolveStrategyName, groupName } from "../views.js";
 import { money, moneyFull, pct, num } from "../format.js";
 
@@ -68,32 +69,15 @@ function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell
 
 function QueueSummaryTable({ sim, config }) {
   const cur = config.engine.currency;
-  const qs = buildQueueSummary(sim, config);
-  const row = (r, cls) => (
-    <tr key={r.id} className={cls}>
-      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{r.name}{r.resourcing && r.resourcing !== "dedicated" && r.resourcing !== "resourced" ? ` (${r.resourcing})` : ""}</td>
-      <td>{num(r.volume, 0)}</td>
-      <td>{num(r.required, 1)}</td>
-      <td>{num(r.active, 1)}</td>
-      <td>{pct(r.cover)}</td>
-      <td className={r.weeksRed ? "st-red" : "st-green"}>{r.weeksRed}</td>
-      <td>{money(cur, r.churn)}</td>
-    </tr>
-  );
-  return (
-    <div className="tbl-wrap">
-      <table className="data" data-testid="queue-summary">
-        <thead><tr><th>Queue</th><th>Volume</th><th>Required</th><th>Active</th><th>Coverage</th><th>Weeks red</th><th>Churn £</th></tr></thead>
-        <tbody>
-          {qs.rows.filter((r) => r.type === "voice").map((r) => row(r, ""))}
-          {qs.rows.some((r) => r.type === "voice") && row(qs.voice, "grp")}
-          {qs.rows.filter((r) => r.type === "digital").map((r) => row(r, ""))}
-          {qs.rows.some((r) => r.type === "digital") && row(qs.digital, "grp")}
-          {row(qs.total, "grp total")}
-        </tbody>
-      </table>
-    </div>
-  );
+  const columns = [
+    { key: "volume", label: "Volume", fmt: (m) => num(m.volume, 0) },
+    { key: "required", label: "Required", fmt: (m) => num(m.required, 1) },
+    { key: "active", label: "Active", fmt: (m) => num(m.active, 1) },
+    { key: "cover", label: "Coverage", fmt: (m) => pct(m.coverN ? m.coverSum / m.coverN : 0) },
+    { key: "weeksRed", label: "Weeks red", fmt: (m) => num(m.weeksRed, 0), cls: (m) => (m.weeksRed ? "st-red" : "st-green") },
+    { key: "churn", label: "Churn £", fmt: (m) => money(cur, m.churn) },
+  ];
+  return <HierTable config={config} testid="queue-summary" columns={columns} metric={(q) => queueSummaryMetric(sim, q)} aggregate={sumQueueSummary} />;
 }
 
 export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
@@ -129,7 +113,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
         </div>
       </Card>
 
-      <Card title="Queue summary" sub="under the active strategy" hint="Per queue with Voice, Digital and Total subtotals.">
+      <Card title="Queue summary" sub="under the active strategy" hint="Brand → Voice / Digital / Support → queue, with channel and brand subtotal rows.">
         <QueueSummaryTable sim={sim} config={config} />
       </Card>
 

@@ -322,4 +322,14 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .acc-sec > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .acc-sec > summary::-webkit-details-marker { display: none; }
 .acc-sec > .acc-b { padding: 0 12px 12px; }
+
+/* §24.6 (R3c) Data tab — clear vertical divider between column groups, editable
+   input cells and a muted read-only treatment so the input/outcome boundary
+   reads at a glance. */
+table.data.seg th.seg-first, table.data.seg td.seg-first { border-left: 2px solid var(--line-2); }
+table.data td.cell-ro { color: var(--muted); }
+table.data th.col-input { color: var(--accent-ink); }
+table.data td.col-input { background: rgba(31,157,85,.05); }
+.cell-inp { width: 74px; font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--accent-2); border-radius: 5px; background: var(--panel); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.cell-inp:focus { outline: 2px solid var(--accent-2); outline-offset: 0; }
 `;

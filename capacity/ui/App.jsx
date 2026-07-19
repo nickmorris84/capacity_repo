@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { makeDefaultConfig, makeBlankConfig } from "../engine/engine.js";
 import { useStrategySims, runMatrix, simHash } from "./sim-set.js";
-import { useConfigOps, migrateConfig } from "./config-ops.js";
+import { useConfigOps, migrateConfig, resolvePresets } from "./config-ops.js";
 import { INTRADAY_PRESETS, SEASONALITY_PRESETS } from "./presets.js";
 import { groupName, groupList, strategyList } from "./views.js";
 import { makeStorageAdapter, KEYS } from "./storage.js";
@@ -83,14 +83,20 @@ export default function App() {
   const effectiveConfig = viewing ? migrateConfig(viewing.config) : config;
   const readOnly = !!viewing;
 
-  const simSet = useStrategySims(effectiveConfig, safeStrategy, safeGroup);
+  // §24.6: bake the CURRENT library values of any applied seasonality / arrival
+  // pattern into the config the engine simulates, so editing a pattern in
+  // Settings reflects in every queue that uses it. Editors keep effectiveConfig
+  // (the references); simulation and display read the resolved config.
+  const simConfig = useMemo(() => resolvePresets(effectiveConfig, seasonalityPresets, intradayPresets), [effectiveConfig, seasonalityPresets, intradayPresets]);
+
+  const simSet = useStrategySims(simConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
 
   // §19 decision matrix — computed on demand, cached, stale on any config edit.
   const [matrix, setMatrix] = useState(null);
-  const liveHash = useMemo(() => simHash(effectiveConfig), [effectiveConfig]);
+  const liveHash = useMemo(() => simHash(simConfig), [simConfig]);
   const matrixStale = !matrix || matrix.hash !== liveHash;
-  const onRunMatrix = useCallback(() => setMatrix(runMatrix(effectiveConfig)), [effectiveConfig]);
+  const onRunMatrix = useCallback(() => setMatrix(runMatrix(simConfig)), [simConfig]);
   const onSelectCell = useCallback((gid, sid) => { setActiveGroupId(gid); setActiveStrategyId(sid); }, []);
 
   // ---- snapshot actions ----
@@ -208,7 +214,7 @@ function TabBody(props) {
     case "summary": return <SummaryTab sim={activeSim} sims={simSet.sims} stratIds={simSet.stratIds} config={config} activeStrategy={props.activeStrategy} activeGroupId={props.activeGroupId} onSetActive={props.onSetActive} matrix={props.matrix} matrixStale={props.matrixStale} onRunMatrix={props.onRunMatrix} onSelectCell={props.onSelectCell} />;
     case "strategies": return <StrategiesTab simSet={simSet} config={config} activeStrategy={props.activeStrategy} ops={ops} />;
     case "plan": return <PlanTab sim={activeSim} config={config} viewLabel={groupName(config, props.activeGroupId)} />;
-    case "data": return <DataTab sim={activeSim} config={config} activeGroupId={props.activeGroupId} onSelectGroup={props.onSelectGroup} />;
+    case "data": return <DataTab sim={activeSim} config={config} ops={ops} activeGroupId={props.activeGroupId} onSelectGroup={props.onSelectGroup} />;
     case "intraday": return <IntradayTab sim={activeSim} />;
     case "queues": return <QueuesEditor config={config} ops={ops} sim={activeSim} intradayPresets={props.intradayPresets} setIntradayPresets={props.setIntradayPresets} seasonalityPresets={props.seasonalityPresets} setSeasonalityPresets={props.setSeasonalityPresets} />;
     case "scenarios": return <ScenariosEditor config={config} ops={ops} />;

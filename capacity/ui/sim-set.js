@@ -22,9 +22,14 @@ const keyFor = (hash, sid, gid) => hash + "|" + sid + "|" + gid;
    must NOT invalidate the sim cache or the matrix (the register re-scores from
    the new threshold while every simulated number is untouched). */
 export function simHash(config) {
-  const { settings, ...rest } = config;
+  // channelDefs (§24.5/§7 channel-template library) seed queues on attach but
+  // never feed the engine directly, so they stay out of the hash.
+  const { settings, channelDefs, ...rest } = config;
   let s = settings;
-  if (settings && settings.risk) { s = { ...settings }; delete s.risk; }
+  // settings.risk (§20a thresholds) and settings.dataColours (§24.6 Data-tab
+  // presentation) affect render-time only — never the engine — so exclude them
+  // to keep threshold/colour edits from invalidating the sim cache or matrix.
+  if (settings && (settings.risk || settings.dataColours)) { s = { ...settings }; delete s.risk; delete s.dataColours; }
   return JSON.stringify({ ...rest, settings: s });
 }
 

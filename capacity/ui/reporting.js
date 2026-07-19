@@ -20,6 +20,10 @@ export function buildWeeklyRows(sim, queue, config) {
     return {
       week: i + 1,
       base: s.baseVolume,
+      // §24.6 the genuine per-week volume INPUT (editable in the Data tab): the
+      // queue's weekly series value if present, else its single daily figure.
+      volInput: Array.isArray(queue.weeklyVolumes) && queue.weeklyVolumes[i] != null ? queue.weeklyVolumes[i]
+        : queue.dailyVolume != null ? queue.dailyVolume : null,
       seasonalMult: seasonalMult(i, config, queue),
       deflected: s.deflected || 0,
       redial: s.redial || 0,
@@ -79,29 +83,27 @@ export function assumptionsColumns(queue, cur = "£") {
   ];
 }
 
-// Per-queue summary for the Summary tab (§14.6): one row per queue plus Voice /
-// Digital / Total subtotals, all under the active strategy's simulation.
-export function buildQueueSummary(sim, config) {
-  const rows = [];
-  const mk = () => ({ volume: 0, required: 0, active: 0, coverNum: 0, coverDen: 0, weeksRed: 0, churn: 0 });
-  const voice = mk(), digital = mk(), total = mk();
-  for (const q of config.queues) {
-    const series = sim.weeks.map((w) => w.queues[q.id]);
-    const last = series[series.length - 1];
-    const volume = series.reduce((a, s) => a + s.volume, 0);
-    const required = last.reqFte;
-    const active = last.active != null ? last.active : last.trained + last.ramp;
-    const cover = series.reduce((a, s) => a + s.cover, 0) / Math.max(1, series.length);
-    const weeksRed = series.filter((s) => s.status === "red").length;
-    const churn = series.reduce((a, s) => a + s.churnCost, 0);
-    rows.push({ id: q.id, name: q.name, type: q.type, resourcing: q.resourcing || "resourced", volume, required, active, cover, weeksRed, churn });
-    for (const g of [q.type === "voice" ? voice : digital, total]) {
-      g.volume += volume; g.required += required; g.active += active;
-      g.coverNum += cover; g.coverDen += 1; g.weeksRed += weeksRed; g.churn += churn;
-    }
-  }
-  const fin = (g, name) => ({ id: name, name, subtotal: true, volume: g.volume, required: g.required, active: g.active, cover: g.coverDen ? g.coverNum / g.coverDen : 0, weeksRed: g.weeksRed, churn: g.churn });
-  return { rows, voice: fin(voice, "Voice subtotal"), digital: fin(digital, "Digital subtotal"), total: fin(total, "Total") };
+// Per-queue summary metric for the Summary rollup (§20). Returns raw accumulator
+// fields for one queue; sumQueueSummary merges a set of them into a subtotal so
+// the shared HierTable can render Brand → channel → queue subtotal rows.
+export function queueSummaryMetric(sim, q) {
+  const series = sim.weeks.map((w) => w.queues[q.id]);
+  const last = series[series.length - 1] || {};
+  return {
+    volume: series.reduce((a, s) => a + s.volume, 0),
+    required: last.reqFte || 0,
+    active: last.active != null ? last.active : (last.trained || 0) + (last.ramp || 0),
+    coverSum: series.reduce((a, s) => a + s.cover, 0),
+    coverN: Math.max(1, series.length),
+    weeksRed: series.filter((s) => s.status === "red").length,
+    churn: series.reduce((a, s) => a + s.churnCost, 0),
+  };
+}
+export function sumQueueSummary(list) {
+  return list.reduce((t, m) => ({
+    volume: t.volume + m.volume, required: t.required + m.required, active: t.active + m.active,
+    coverSum: t.coverSum + m.coverSum, coverN: t.coverN + m.coverN, weeksRed: t.weeksRed + m.weeksRed, churn: t.churn + m.churn,
+  }), { volume: 0, required: 0, active: 0, coverSum: 0, coverN: 0, weeksRed: 0, churn: 0 });
 }
 
 // Column model with groups + a formatter. columnsFor tailors the Service group
@@ -130,6 +132,8 @@ export function columnsFor(queue, cur = "£") {
   return [
     { key: "week", label: "Week", group: "Week", fmt: (v) => String(v) },
     { key: "base", label: "Base vol", group: "Demand", fmt: N0 },
+    // Editable input column (§24.6): writes back to the queue's weekly series.
+    { key: "volInput", label: "Vol input", group: "Demand", fmt: N0, input: "volume" },
     { key: "seasonalMult", label: "Seasonal ×", group: "Demand", fmt: (v) => v.toFixed(2) },
     { key: "deflected", label: "Deflected", group: "Demand", fmt: N0 },
     { key: "redial", label: "Redial", group: "Demand", fmt: N0 },

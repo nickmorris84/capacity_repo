@@ -831,3 +831,75 @@ Tests: `tests/r3ui.test.js` added; `tests/r1ui.test.js` and `tests/harness.test.
 updated where the structure moved (brand creation → Settings; sharing replaces
 the pool editor; scenarios group-first). The engine batteries (engine/r1/r2/r3)
 are byte-identical.
+
+
+## R3c (batched polish + defects — no engine changes)
+Seven numbered items, each with a JSDOM acceptance check in the new gate
+`tests/r3c.test.js` (9 tests, R3c GATE: GREEN). The ENTIRE pre-existing battery
+stays green — engine/r1/r2/r3, P7b UI (r1ui), R3b UI (r3ui) and the §13 harness
+(source + rebuilt dist) — with the engine untouched this phase (`git diff engine/`
+empty).
+
+What shipped (UI only):
+
+1. **Brand assignment defect.** A brand created in Settings is immediately
+   selectable on any queue and the queue now files under it EVERYWHERE. The
+   Summary queue rollup and the Plan hiring summary were re-based onto a shared
+   Brand → Voice/Digital/Support → queue table (`ui/components/HierTable.jsx`);
+   previously they grouped only by Voice/Digital, so a brand-2 queue never showed
+   under its brand in any rollup. Gate: create a brand → assign a queue → it
+   renders under that brand in the Queues grouping AND as a subtotal row in the
+   Summary rollup.
+2. **Hierarchy on the two tables that missed it.** `HierTable` renders per-queue
+   rows with a channel subtotal per channel and a brand subtotal per brand, plus
+   a grand total — the same grouping the Holistic panel and Business box already
+   use. Both the Summary queue table and the Plan hiring summary carry
+   `hier-chan-*` and `hier-brand-*` subtotal rows. `reporting.js` gained
+   `queueSummaryMetric`/`sumQueueSummary`; PlanTab computes hiring metrics per
+   queue and aggregates by hierarchy.
+3. **Holistic panel — hierarchy + weekly table.** Kept the hierarchy summary
+   blocks and the interactive queue-chip table; ADDED a second table beneath it —
+   one row per week (52), columns capacity required / hires / active / attrition /
+   agent £ / OT £ / customer £ — summed across the SAME chip filter, so toggling a
+   queue out recomputes every week's row live (`holo-weekly-table`).
+4. **Data tab — colours, dividers, editable inputs.** (a) A colour picker per
+   column group persists in `config.settings.dataColours` (excluded from the sim
+   hash so a colour edit never re-simulates) and drives the header underline + cell
+   tint. (b) A clear vertical divider rule marks the first column of each segment
+   (`.seg-first`). (c) The weekly volume series is editable in place — an input
+   cell writes back via `patchWeeklyVolume` (now materialising the whole series
+   from the single daily figure first, so editing one week never zeroes the rest)
+   and re-simulates; computed outcome columns stay read-only with a muted
+   treatment (`cell-ro`). Gate: editing a volume cell moves that week's simulated
+   coverage; an outcome cell has no input; a colour choice survives a re-render.
+5. **Scenario targeting defect.** Queue cards carry no scenario-add affordance;
+   the card's "Scenarios affecting this queue" accordion is a strictly read-only
+   view that now honours §24.8 GROUP scope — a group scoped (brands / channels /
+   queues) to a queue surfaces its factors there. Creation and targeting live only
+   on the Scenarios tab.
+6. **Settings libraries fully editable.** Seasonality and Arrival patterns get
+   full create / edit / delete in `PresetLibrary` (built-ins now editable too;
+   12-month editor / interval sliders). Application still happens on the Queues
+   tab, but it now stores a LIVE REFERENCE: applying a pattern to the system (or a
+   queue overlay / arrival) records its id, and `resolvePresets` (App-level, wired
+   into `sim-set`) bakes the library's CURRENT values into the simulated config —
+   so editing a pattern in Settings re-simulates every queue that uses it.
+   Hand-editing a value unlinks it. Gate: edit a linked pattern's month → a queue
+   using it moves after re-simulation.
+7. **Settings — channel creation with presets.** A `channelDefs` library (seeded
+   with Voice / Digital Customer / Digital Workflow / Service Workflow built-ins)
+   plus a Channels card: create a channel from a preset that seeds its template —
+   Voice (Erlang ASA/abandon/patience), Digital Customer (concurrency + minutes
+   SLA), Digital Workflow (no concurrency, hours SLA, default 90%/24h), Service
+   Workflow (support group, days SLA, default 95%/5d). A queue attaches to a
+   channel on the Queues tab (`attachQueueChannel`) and inherits its template
+   sections — group, type, subtype and SLA fields. Gate: a Digital Workflow
+   channel's template carries an hours SLA and no concurrency; a digital-customer
+   queue attached to it loses its concurrency field and gains the hours SLA.
+
+Files: new `ui/components/HierTable.jsx` and `tests/r3c.test.js`; edits to
+`config-ops.js` (resolvePresets, channelDefs + ops, materialising
+patchWeeklyVolume, migration channelId), `sim-set.js` (hash excludes dataColours +
+channelDefs), `reporting.js`, `App.jsx` (simConfig = resolvePresets), the Summary /
+Plan / Holistic / Data components, the Queues / Settings / PresetLibrary / PresetBar
+editors and `style.js`. `/dist` rebuilt.

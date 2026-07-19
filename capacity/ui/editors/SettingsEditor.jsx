@@ -1,8 +1,85 @@
-import { NumField, TextField, Card, Hint } from "../components/primitives.jsx";
+import { useState } from "react";
+import { NumField, TextField, SelectField, Card, Hint } from "../components/primitives.jsx";
 import { PresetLibrary } from "./PresetLibrary.jsx";
+import { CHANNEL_PRESET_LIST } from "../config-ops.js";
 import { clamp } from "../../engine/engine.js";
 
 const CHANNELS = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
+const KIND_LABEL = { voice: "Voice · Erlang", digitalCustomer: "Digital Customer · live", digitalWorkflow: "Digital Workflow · backlog", serviceWorkflow: "Service Workflow · support" };
+
+/* §24.5/§7 channel creation. A channel carries a template seeded from a preset —
+   Voice (Erlang), Digital Customer (concurrency + minutes SLA), Digital Workflow
+   (no concurrency, hours SLA, default 90%/24h) or Service Workflow (support,
+   deferrable, days SLA, default 95%/5d). Queues attach to a channel on the Queues
+   tab and inherit its template sections. */
+function ChannelTemplateFields({ d, ops }) {
+  const t = d.template || {};
+  const T = (path, v) => ops.patchChannelDef(d.id, ["template", ...path], v);
+  return (
+    <div className="fieldrow">
+      {d.kind === "voice" && (
+        <>
+          <NumField label="ASA target" unit="s" value={t.asaTarget} onChange={(v) => T(["asaTarget"], v)} id={"chdef-" + d.id + "-asa"} />
+          <NumField label="Max abandon" unit="%" value={+((t.maxAbandon || 0) * 100).toFixed(1)} onChange={(v) => T(["maxAbandon"], v / 100)} />
+          <NumField label="Patience" unit="s" value={t.patience} onChange={(v) => T(["patience"], v)} />
+        </>
+      )}
+      {d.kind === "digitalCustomer" && (
+        <>
+          <NumField label="Concurrency" value={t.concurrency} onChange={(v) => T(["concurrency"], v)} id={"chdef-" + d.id + "-concurrency"} />
+          <NumField label="SLA within" unit="min" value={t.digitalSlaMinutes} onChange={(v) => T(["digitalSlaMinutes"], v)} id={"chdef-" + d.id + "-slamins"} />
+          <NumField label="SLA target" unit="%" value={+((t.digitalSlaPct || 0) * 100).toFixed(0)} onChange={(v) => T(["digitalSlaPct"], v / 100)} />
+        </>
+      )}
+      {d.kind === "digitalWorkflow" && (
+        <>
+          <NumField label="SLA within" unit="h" value={t.workflowSlaHours} onChange={(v) => T(["workflowSlaHours"], v)} id={"chdef-" + d.id + "-slahours"} />
+          <NumField label="SLA target" unit="%" value={+((t.workflowSlaPct || 0) * 100).toFixed(0)} onChange={(v) => T(["workflowSlaPct"], v / 100)} />
+        </>
+      )}
+      {d.kind === "serviceWorkflow" && (
+        <>
+          <NumField label="SLA within" unit="days" value={Math.round((t.workflowSlaHours || 0) / 24)} onChange={(v) => T(["workflowSlaHours"], (v || 0) * 24)} id={"chdef-" + d.id + "-sladays"} />
+          <NumField label="SLA target" unit="%" value={+((t.workflowSlaPct || 0) * 100).toFixed(0)} onChange={(v) => T(["workflowSlaPct"], v / 100)} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChannelsManager({ config, ops }) {
+  const [name, setName] = useState("");
+  const [preset, setPreset] = useState("voice");
+  return (
+    <Card title="Channels" hint="Create a channel from a preset — its template carries the mechanics of that kind (Voice Erlang; Digital Customer concurrency + minutes SLA; Digital Workflow no concurrency + hours SLA; Service Workflow days SLA). Queues attach to a channel on the Queues tab and inherit its sections.">
+      <div className="rowflex" style={{ marginBottom: 10 }}>
+        <input type="text" className="inp" style={{ maxWidth: 200 }} placeholder="new channel name" value={name} onChange={(e) => setName(e.target.value)} data-testid="channel-name" />
+        <div style={{ minWidth: 210 }}>
+          <SelectField label="Preset" value={preset} onChange={setPreset} options={CHANNEL_PRESET_LIST} id="channel-preset" />
+        </div>
+        <button type="button" className="btn sm primary" style={{ alignSelf: "flex-end" }} onClick={() => { ops.addChannel(name.trim() || undefined, preset); setName(""); }} data-testid="add-channel">+ Add channel</button>
+      </div>
+      <div className="rows">
+        {(config.channelDefs || []).map((d) => {
+          const count = (config.queues || []).filter((q) => q.channelId === d.id).length;
+          return (
+            <div className="erow" key={d.id} data-testid={"chdef-" + d.id}>
+              <div className="erow-h">
+                <input type="text" className="inp" style={{ maxWidth: 200 }} value={d.name} aria-label="Channel name" onChange={(e) => ops.patchChannelDef(d.id, ["name"], e.target.value)} />
+                <span className="pill">{KIND_LABEL[d.kind] || d.kind}</span>
+                <span className="pill">{d.group}</span>
+                <span className="pill">{count} queue(s)</span>
+                <span className="spacer" />
+                <button type="button" className="btn sm danger" onClick={() => ops.deleteChannelDef(d.id)} data-testid={"chdef-del-" + d.id}>Delete</button>
+              </div>
+              <div className="erow-b"><ChannelTemplateFields d={d} ops={ops} /></div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
 
 /* §24.10 organisation setup — brand creation (name only; a queue's channel and
    digital subtype are chosen per queue on the Queues tab) and the week-1
@@ -109,6 +186,7 @@ export function SettingsEditor({ config, ops, intradayPresets, setIntradayPreset
   return (
     <div className="grid" style={{ gap: 16 }}>
       <OrgSetup config={config} ops={ops} />
+      <ChannelsManager config={config} ops={ops} />
       <CapsMatrix config={config} ops={ops} />
       <div className="grid cols-2" style={{ alignItems: "start" }}>
         <Card title="Engine & simulation window">
