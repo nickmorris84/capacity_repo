@@ -181,7 +181,28 @@ function reqCurveDigital(q, volume, eng, cache) {
   if (_rcCache.size < 100000) _rcCache.set(key, out);
   return out;
 }
-const reqCurve = (q, v, eng, cache) => (q.type === "voice" ? reqCurveVoice(q, v, eng, cache) : reqCurveDigital(q, v, eng, cache));
+/* §24.5 Digital Workflow requirement: backlog processing has no concurrency,
+   no Erlang scale effect and no intraday shape — required hours are simply
+   items × handle time ÷ the occupancy headroom, laid flat across the day. */
+function reqCurveWorkflow(q, volume, eng, cache) {
+  const key = "w" + profileId(q.profile) + "|" + Math.round(volume) + "|" + q.aht + "|" + eng.occupancyCeiling + "|" + eng.intervalMin;
+  const hit = _rcCache.get(key); if (hit) return hit;
+  const hours = (volume * q.aht) / 3600 / eng.occupancyCeiling;
+  const n = q.profile.length, iHrs = eng.intervalMin / 60;
+  const agents = new Array(n).fill(n > 0 ? hours / (n * iHrs) : 0);
+  const out = { agents, hours };
+  if (_rcCache.size < 100000) _rcCache.set(key, out);
+  return out;
+}
+
+// §24.5: digital queues carry a subtype — customer (live interaction, the
+// legacy digital model) or workflow (backlog processing). Absent = customer.
+const digitalSubtype = (q) => (q.type === "digital" ? (q.subtype === "workflow" ? "workflow" : "customer") : null);
+
+const reqCurve = (q, v, eng, cache) =>
+  q.type === "voice" ? reqCurveVoice(q, v, eng, cache)
+  : q.subtype === "workflow" ? reqCurveWorkflow(q, v, eng, cache)
+  : reqCurveDigital(q, v, eng, cache);
 
 // ---------- DAY MODELS ----------
 // Normalised-profile cache, keyed by the profile array object. Profile arrays
@@ -263,6 +284,38 @@ function runDigitalDay(q, volume, productiveHours, startBacklog, eng, rc, lite) 
   };
 }
 
+/* §24.5 Digital Workflow day: FIFO backlog processing at the daily rate
+   C = productiveHours × 3600 ÷ handle time (items/day, no concurrency).
+   Arrivals are uniform across the day and service continues at the same rate
+   into following days, so an arrival at day-fraction t waits
+   (B0 + (V − C)·t) / C days: waits run linearly wStart → wEnd — the same ramp
+   logic as the digital fluid model, at day grain, with the SLA in hours
+   (default 90% within 24h). Backlog carries across days and weeks. */
+function runWorkflowDay(q, volume, productiveHours, startBacklog, eng, rc, lite) {
+  const cap = q.aht > 0 ? (productiveHours * 3600) / q.aht : 0;
+  const cover = rc && rc.hours > 0 ? productiveHours / rc.hours : 1;
+  const slaDays = (q.workflowSlaHours != null ? q.workflowSlaHours : 24) / 24;
+  let wStart, wEnd, Bend;
+  if (cap <= 1e-9) { Bend = startBacklog + volume; wStart = wEnd = 400; }
+  else {
+    Bend = Math.max(0, startBacklog + volume - cap);
+    wStart = startBacklog / cap; wEnd = Bend / cap;
+  }
+  const served = Math.max(0, startBacklog + volume - Bend);
+  const lo = Math.min(wStart, wEnd), hi = Math.max(wStart, wEnd);
+  const frac = volume <= 0 ? 1 : hi <= slaDays ? 1 : lo >= slaDays ? 0 : (slaDays - lo) / Math.max(1e-9, hi - lo);
+  const meanWaitDays = (wStart + wEnd) / 2;
+  return {
+    volume, cover,
+    sl: clamp(frac, 0, 1),
+    respMin: meanWaitDays * 24 * 60,
+    respHours: meanWaitDays * 24,
+    endBacklog: Bend,
+    occ: cap > 0 ? clamp(served / cap, 0, 1) : 1,
+    byInterval: null,
+  };
+}
+
 // Productive hours delivered per head per day (before proficiency).
 const hoursPerHeadDay = (q, eng) =>
   eng.hoursPerFteDay * (eng.daysWorkedPerFte / eng.daysPerWeek) * (1 - clamp(q.shrinkage, 0, 0.95));
@@ -285,6 +338,9 @@ const blankAgg = () => ({
 const blankTot = () => ({
   volume: 0, cost: 0, trainCost: 0, waste: 0, churnCost: 0, churnCustomers: 0, paid: 0,
   reqFte: 0, svcHours: 0, trained: 0, inTraining: 0, ramping: 0,
+  // Seeded so a §24.9 blank world (zero queues) still reports finite totals;
+  // the queue loop adds onto these, so populated configs are unchanged.
+  active: 0, otHours: 0, otCost: 0,
 });
 
 
@@ -293,11 +349,30 @@ const blankTot = () => ({
 // system[m] * queue[m]; both default to flat. startMonth 0 = January.
 const MONTH_DAYS = 30.44;
 const monthOfWeek = (w, startMonth) => (startMonth + Math.floor((w * 7) / MONTH_DAYS)) % 12;
+// §24.6 calendar anchoring: when Settings carries a week-1 date, a week's month
+// is the real calendar month of (weekOneDate + 7w days); otherwise the legacy
+// startMonth mapping applies unchanged.
+function parseISODate(s) {
+  const [y, m, d] = String(s).split("-").map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+function monthForWeek(cfg, w) {
+  const cal = settingsOf(cfg).calendar;
+  if (cal && cal.weekOneDate) return new Date(parseISODate(cal.weekOneDate) + w * 7 * 86400000).getUTCMonth();
+  return monthOfWeek(w, cfg.seasonality.startMonth);
+}
 function seasonalMult(w, cfg, q) {
-  const m = monthOfWeek(w, cfg.seasonality.startMonth);
+  const m = monthForWeek(cfg, w);
   const sys = cfg.seasonality.system[m] ?? 1;
   const qm = (q.seasonal && q.seasonal[m]) ?? 1;
   return sys * qm;
+}
+// §24.6 seasonality wizard: one weekly base figure -> a fully editable weekly
+// series, base × the monthly multiplier of each week's (anchored) month.
+function generateWeeklySeries(cfg, base, months, horizon) {
+  const n = horizon != null ? horizon : resolveHorizon(cfg);
+  const m12 = months && months.length === 12 ? months : new Array(12).fill(1);
+  return Array.from({ length: n }, (_, w) => base * (m12[monthForWeek(cfg, w)] ?? 1));
 }
 const SEASONAL_PRESETS = {
   "Flat": [1,1,1,1,1,1,1,1,1,1,1,1],
@@ -423,6 +498,9 @@ const R2_DEFAULTS = {
     digital: { repeatPct: 0, spillPct: null, spillTargetQueue: null },
     support: { repeatPct: 0, spillPct: 0, spillTargetQueue: null },
   },
+  // §24.6/§24.10 calendar anchor: week 1 of the horizon corresponds to this
+  // ISO date ("YYYY-MM-DD"). null = legacy behaviour (seasonality.startMonth).
+  calendar: { weekOneDate: null },
   // §20a risk thresholds (amber/red bands). The engine only SHIPS these; risk
   // scoring against them happens at render time in the UI.
   risk: {
@@ -486,9 +564,32 @@ function resolveTraining(cfg, q) {
   };
 }
 
+// §24.1 the brand's primary voice queue — the default converts-to-calls
+// target: the brand's first voice queue in definition order, else the first
+// voice queue anywhere, else null.
+function primaryVoiceQueue(cfg, brandId) {
+  const voice = cfg.queues.filter((q) => channelOf(q) === "voice");
+  return voice.find((q) => q.brandId === brandId) || voice[0] || null;
+}
+
 // §18 knock-on resolution: queue → channel template → Settings channel default
 // → legacy loops (exact legacy reproduction when nothing newer is set).
+// §24.1 sits on top: a queue carrying the simplified `knock` block uses exactly
+// its two figures — repeat % (retries this queue) and converts-to-calls %
+// (spill mechanics) with its target. A missing convertTarget key defaults to
+// the brand's primary voice queue; an explicit null means "nowhere" (the
+// legacy no-target semantic, preserved by migration).
 function resolveKnockOn(cfg, q) {
+  if (q.knock) {
+    const k = q.knock;
+    const target = k.convertTarget !== undefined ? k.convertTarget
+      : (primaryVoiceQueue(cfg, q.brandId) || {}).id || null;
+    return {
+      repeatPct: k.repeatPct != null ? k.repeatPct : 0,
+      spillPct: k.convertPct != null ? k.convertPct : 0,
+      spillTargetQueue: target,
+    };
+  }
   const ch = channelOf(q);
   const tpl = channelTemplate(cfg, q);
   const sd = settingsOf(cfg).knockOn[ch] || {};
@@ -529,7 +630,7 @@ function seriesValueAt(s, week, day, cfg) {
   if (!ser) return undefined;
   let key;
   if (s.granularity === "day") key = week * cfg.engine.daysPerWeek + day;
-  else if (s.granularity === "month") key = monthOfWeek(week, cfg.seasonality.startMonth);
+  else if (s.granularity === "month") key = monthForWeek(cfg, week); // §24.6: anchored when a week-1 date is set
   else key = week;
   const v = ser[key] != null ? ser[key] : ser[String(key)];
   return v;
@@ -712,7 +813,15 @@ function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
     if (sObj.baseType === "manual") {
       want = (q.wf.hires || []).filter((h) => h.week === w).reduce((a, b) => a + b.heads, 0);
     } else if (sObj.baseType === "backfill") {
-      want = proj.leaversNext * 1; // replace the leavers projected for the landing week
+      // §24.4 forwardMonths (1–6): how far forward the leaver projection looks.
+      // Absent = legacy behaviour exactly (the landing week: reqToStart + training).
+      const fm = sObj.forwardMonths;
+      if (fm != null) {
+        const ahead = Math.max(1, Math.round(clamp(fm, 1, 6) * (52 / 12)));
+        want = projectSupply(s, q, ahead, wkAttr).leaversNext * 1;
+      } else {
+        want = proj.leaversNext * 1; // replace the leavers projected for the landing week
+      }
     } else {
       const buf = sObj.baseType === "buffer" ? (sObj.bufferPct != null ? sObj.bufferPct : cfg.hiring.buffer) : 0;
       const target = reqFteAt(q, L) * (1 + buf);
@@ -731,7 +840,82 @@ function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
     wants.push({ q, want, marginal, breachWk });
   }
   wants.sort((a, b) => b.marginal - a.marginal || a.breachWk - b.breachWk);
-  const cap = sObj.baseType === "manual" ? Infinity : cfg.hiring.cap;
+  const totalWant = sum(wants.map((x) => x.want));
+
+  /* §24.3 hiring cap hierarchy. When cfg.hiring.caps carries segment caps
+     (brand × channel) or brand ceilings, allocation is: marginal-churn greedy
+     within each segment cap (as today), then any binding brand ceiling and
+     then the total ceiling trim grants starting from the LOWEST marginal.
+     The trace names each level that bound. Configs without those levels —
+     including migrated ones whose caps carry only a Total — run the legacy
+     single-cap greedy verbatim, so pre-§24 numbers are reproduced exactly. */
+  const caps = cfg.hiring.caps || null;
+  const hasSeg = !!(caps && caps.segments && Object.keys(caps.segments).length);
+  const hasBrand = !!(caps && caps.brands && Object.keys(caps.brands).length);
+  if (sObj.baseType !== "manual" && (hasSeg || hasBrand)) {
+    const brandName = (id) => (((cfg.brands || []).find((b) => b.id === id)) || { name: String(id) }).name;
+    const segKey = (q) => (q.brandId || "") + "|" + channelOf(q);
+    const segCap = (q) => { const v = caps.segments ? caps.segments[segKey(q)] : null; return v != null ? v : Infinity; };
+    const segLeft = {};
+    const granted = [];
+    const boundBy = [];
+    for (const x of wants) {
+      const k = segKey(x.q);
+      if (segLeft[k] == null) segLeft[k] = segCap(x.q);
+      const give = Math.min(segLeft[k], x.want);
+      segLeft[k] -= give;
+      granted.push({ x, give });
+      if (give < x.want - 1e-6) {
+        const label = brandName(x.q.brandId) + " × " + channelOf(x.q) + " cap";
+        if (!boundBy.includes(label)) boundBy.push(label);
+      }
+    }
+    if (hasBrand) {
+      for (const bid of Object.keys(caps.brands)) {
+        const ceil = caps.brands[bid];
+        if (ceil == null) continue;
+        let tot = granted.reduce((a, g) => a + ((g.x.q.brandId || "") === bid ? g.give : 0), 0);
+        if (tot <= ceil + 1e-9) continue;
+        boundBy.push(brandName(bid) + " ceiling");
+        for (let i = granted.length - 1; i >= 0 && tot > ceil + 1e-9; i--) {
+          const g = granted[i];
+          if ((g.x.q.brandId || "") !== bid || g.give <= 1e-9) continue;
+          const cut = Math.min(g.give, tot - ceil);
+          g.give -= cut; tot -= cut;
+        }
+      }
+    }
+    if (caps.total != null) {
+      let tot = granted.reduce((a, g) => a + g.give, 0);
+      if (tot > caps.total + 1e-9) {
+        boundBy.push("Total");
+        for (let i = granted.length - 1; i >= 0 && tot > caps.total + 1e-9; i--) {
+          const g = granted[i];
+          if (g.give <= 1e-9) continue;
+          const cut = Math.min(g.give, tot - caps.total);
+          g.give -= cut; tot -= cut;
+        }
+      }
+    }
+    const grants = {}, denied = {};
+    for (const g of granted) {
+      if (g.give > 1e-6) grants[g.x.q.id] = g.give;
+      if (g.x.want - g.give > 1e-6) denied[g.x.q.id] = g.x.want - g.give;
+    }
+    return {
+      grants,
+      trace: {
+        week: w, cap: caps.total != null ? caps.total : null, want: totalWant,
+        grants: Object.fromEntries(Object.entries(grants).map(([k, v]) => [k, +v.toFixed(2)])),
+        denied: Object.fromEntries(Object.entries(denied).map(([k, v]) => [k, +v.toFixed(2)])),
+        binding: boundBy.length > 0,
+        order: wants.map((x) => x.q.id),
+        boundBy,
+      },
+    };
+  }
+
+  const cap = sObj.baseType === "manual" ? Infinity : (caps && caps.total != null ? caps.total : cfg.hiring.cap);
   let left = cap;
   const grants = {}, denied = {};
   for (const x of wants) {
@@ -740,7 +924,6 @@ function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
     if (x.want - give > 1e-6) denied[x.q.id] = x.want - give;
     left -= give;
   }
-  const totalWant = sum(wants.map((x) => x.want));
   return {
     grants,
     trace: {
@@ -749,6 +932,7 @@ function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
       denied: Object.fromEntries(Object.entries(denied).map(([k, v]) => [k, +v.toFixed(2)])),
       binding: Number.isFinite(cap) && totalWant > cap + 1e-6,
       order: wants.map((x) => x.q.id),
+      boundBy: Number.isFinite(cap) && totalWant > cap + 1e-6 ? ["Total"] : [],
     },
   };
 }
@@ -887,12 +1071,22 @@ function simulate(cfg, opts = {}) {
         const effAht = blendedAht(q, sc.profileShares) * sc.ahtMult * debtAht;
         const slaM = sc.slaMult;
         const eq = (effAht !== q.aht || slaM !== 1)
-          ? { ...q, aht: effAht, asaTarget: q.asaTarget * slaM, digitalSlaMinutes: q.digitalSlaMinutes * slaM }
+          ? {
+              ...q, aht: effAht, asaTarget: q.asaTarget * slaM, digitalSlaMinutes: q.digitalSlaMinutes * slaM,
+              // §24.5: the workflow SLA window shifts with sla scenarios too.
+              ...(q.subtype === "workflow" ? { workflowSlaHours: (q.workflowSlaHours != null ? q.workflowSlaHours : 24) * slaM } : null),
+            }
           : q;
         rc[q.id] = reqCurve(eq, vol[q.id], eng, rcCache);
         req[q.id] = rc[q.id].hours;
         s.eq = eq;
-        if (d === 0) { s.wkAht = effAht; s.wkSla = q.type === "voice" ? eq.asaTarget : eq.digitalSlaMinutes; s.wkSlaMult = slaM; s.wkTags = sc.tags; }
+        if (d === 0) {
+          s.wkAht = effAht;
+          s.wkSla = q.type === "voice" ? eq.asaTarget
+            : q.subtype === "workflow" ? (eq.workflowSlaHours != null ? eq.workflowSlaHours : 24)
+            : eq.digitalSlaMinutes;
+          s.wkSlaMult = slaM; s.wkTags = sc.tags;
+        }
       }
       /* §17 rungs 2–3 — own overtime, then training reclaim, strictly in that
          order and only against the queue's OWN deficit. OT: hard cap 2 h/agent/
@@ -1014,11 +1208,65 @@ function simulate(cfg, opts = {}) {
           }
         }
       }
-      /* §17 rung 5 — pools. Members' spare (× their committed sharePct)
-         aggregates; when joint demand exceeds it, donor members may top the
-         pool up from their remaining training-reclaim capacity (rung-3
-         mechanics, their own debt). Recipients share pro-rata by deficit — no
-         priorities. Donors never drop below their own requirement. */
+      /* §24.2 rung 5 — decentralised sharing (replaces pools). Each donor
+         queue declares share % of its spare + a shares-with list. Pass 1:
+         every donor (config order) offers sharePct × its spare to its listed
+         recipients in deficit, pro-rata by deficit, no priorities. Pass 2:
+         donors that still see listed recipients in deficit reclaim training
+         (rung-3 mechanics, their own debt) to honour the sharing — capped at
+         their remaining reclaim capacity — FCFS in config order, exactly the
+         pool shortfall feed. Donor eligibility matches the pool rung (spare
+         at stage start); a donor never drops below its own requirement (it
+         gives only spare plus conjured reclaim hours). The two-pass shape
+         reproduces the joint pool arithmetic exactly for decomposed pools:
+         pro-rata allocation preserves deficit ratios, so offers-then-feed
+         equals the pool's aggregate-then-allocate. */
+      const sharers = cfg.queues.filter((x) => x.sharing && Array.isArray(x.sharing.sharesWith) && x.sharing.sharesWith.length);
+      if (sharers.length) {
+        const stageSpare = {};
+        for (const x of sharers) stageSpare[x.id] = spare[x.id];
+        const shareRecs = (donor) => (donor.sharing.sharesWith || [])
+          .filter((id) => id !== donor.id && st[id] && deficit[id] > 1e-9)
+          .map((id) => ({ qid: id, need: deficit[id] / prof, taken: 0 }));
+        const deliver = (recs) => {
+          for (const r of recs) {
+            if (r.taken <= 1e-9) continue;
+            const recv = r.taken * prof;
+            hrs[r.qid] += recv; deficit[r.qid] = Math.max(0, deficit[r.qid] - recv);
+            agg[r.qid].poolIn += recv; // shared inflow reports on the pool channel
+          }
+        };
+        for (const donor of sharers) { // pass 1 — offered spare
+          if (stageSpare[donor.id] <= 1e-9) continue;
+          const offer = clamp((donor.sharing.sharePct != null ? donor.sharing.sharePct : 100) / 100, 0, 1) * stageSpare[donor.id];
+          if (offer <= 1e-9) continue;
+          const recs = shareRecs(donor);
+          if (!recs.length) continue;
+          const given = fillProRata(Math.min(offer, spare[donor.id]), recs);
+          if (given <= 1e-9) continue;
+          spare[donor.id] -= given; hrs[donor.id] -= given;
+          deliver(recs);
+        }
+        for (const donor of sharers) { // pass 2 — training feed for the shortfall
+          if (stageSpare[donor.id] <= 1e-9) continue;
+          const s2 = st[donor.id];
+          if ((s2.reclaimLeftDay || 0) <= 1e-9) continue;
+          const recs = shareRecs(donor);
+          if (!recs.length) continue;
+          const given = fillProRata(Math.min(s2.reclaimLeftDay, recs.reduce((a, r) => a + r.need, 0)), recs);
+          if (given <= 1e-9) continue;
+          s2.reclaimLeftDay -= given; agg[donor.id].reclaimedHours += given;
+          deliver(recs);
+        }
+      }
+      /* §17 rung 5 (legacy shim) — pools. §24.2 deletes pools as a concept
+         (migrateConfigR3 decomposes them into per-queue sharing declarations);
+         un-migrated configs carrying `pools` keep their exact behaviour here.
+         Members' spare (× their committed sharePct) aggregates; when joint
+         demand exceeds it, donor members may top the pool up from their
+         remaining training-reclaim capacity (rung-3 mechanics, their own
+         debt). Recipients share pro-rata by deficit — no priorities. Donors
+         never drop below their own requirement. */
       for (const pool of cfg.pools || []) {
         const members = (pool.members || []).map((m) => ({ m, q: cfg.queues.find((x) => x.id === m.queueId) })).filter((x) => x.q);
         const recs = members.filter((x) => deficit[x.q.id] > 1e-9)
@@ -1123,7 +1371,12 @@ function simulate(cfg, opts = {}) {
         if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes && m.backlog0 === s.backlog) {
           r = m.r;
         } else {
-          r = runDigitalDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
+          // §24.5: workflow-subtype queues run the backlog-processing day model;
+          // customer subtype (and legacy queues with no subtype) run the
+          // digital fluid model unchanged.
+          r = q.subtype === "workflow"
+            ? runWorkflowDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0)
+            : runDigitalDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
           s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, backlog0: s.backlog, r };
         }
         // §18 spill: over-limit backlog overflows to the spill target next day
@@ -1213,9 +1466,12 @@ function simulate(cfg, opts = {}) {
       const headsPipe = sum(s.pipeline.map((c) => c.heads));
       const paid = s.trained + headsRamp + headsTrain;
       const reqFte = a.reqHours / eng.daysPerWeek / Math.max(0.01, hoursPerHeadDay(q, eng));
-      const wkCost = (paid * q.agentCost) / 52;
-      const trainCost = (headsTrain * q.agentCost) / 52;
-      const hourly = q.agentCost / 52 / (eng.hoursPerFteDay * eng.daysWorkedPerFte);
+      // §24.7 monthly costs: a queue carrying agentCostMonthly is costed at
+      // monthly × 12 ÷ 52 per week; legacy annual configs keep the exact
+      // legacy arithmetic (annual ÷ 52) untouched.
+      const wkCost = q.agentCostMonthly != null ? (paid * q.agentCostMonthly * 12) / 52 : (paid * q.agentCost) / 52;
+      const trainCost = q.agentCostMonthly != null ? (headsTrain * q.agentCostMonthly * 12) / 52 : (headsTrain * q.agentCost) / 52;
+      const hourly = (q.agentCostMonthly != null ? (q.agentCostMonthly * 12) / 52 : q.agentCost / 52) / (eng.hoursPerFteDay * eng.daysWorkedPerFte);
       const waste = Math.max(0, a.hours - a.reqHours) * hourly;
       const cx = cfg.cx;
       const repeatShare = clamp((a.redial + a.deflected) / V, 0, 1);
@@ -1229,9 +1485,16 @@ function simulate(cfg, opts = {}) {
       s.cumChurn += lost;
       const churnCost = lost * cx.costPerLostCustomer;
       // Status judged against the SLA IN EFFECT (§19 sla scenarios; ×1 legacy).
+      // §24.5: workflow queues judge against their %-within-X-hours target.
       const asaT = q.asaTarget * (s.wkSlaMult || 1);
-      const ok = q.type === "voice" ? asa <= asaT && ab <= q.maxAbandon : sl >= q.digitalSlaPct && a.backlog <= q.backlogLimit;
-      const near = q.type === "voice" ? asa <= asaT * 1.5 && ab <= q.maxAbandon * 1.5 : sl >= q.digitalSlaPct * 0.9;
+      const wfQ = q.type === "digital" && q.subtype === "workflow";
+      const wfPct = q.workflowSlaPct != null ? q.workflowSlaPct : 0.9;
+      const ok = q.type === "voice" ? asa <= asaT && ab <= q.maxAbandon
+        : wfQ ? sl >= wfPct && a.backlog <= (q.backlogLimit != null ? q.backlogLimit : Infinity)
+        : sl >= q.digitalSlaPct && a.backlog <= q.backlogLimit;
+      const near = q.type === "voice" ? asa <= asaT * 1.5 && ab <= q.maxAbandon * 1.5
+        : wfQ ? sl >= wfPct * 0.9
+        : sl >= q.digitalSlaPct * 0.9;
       const status = ok ? "green" : near ? "amber" : "red";
       const otCost = a.otHours * hourly * set.ot.premium;
       wk.queues[q.id] = {
@@ -1241,6 +1504,8 @@ function simulate(cfg, opts = {}) {
         // §14.6: active excludes trainees; startingHC is the week-0 resolved HC.
         active: s.trained + headsRamp, startingHC: startHC[q.id], resourcing: q.resourcing || "resourced",
         channel: channelOf(q), brandId: q.brandId || null,
+        // §24.5 subtype + hour-grain response for workflow presentation.
+        subtype: digitalSubtype(q), respHours: resp / 60,
         reqFte, hours: a.hours, reqHours: a.reqHours, svcHours: a.svcHours, flexIn: a.flexIn,
         cover: a.reqHours > 0 ? a.hours / a.reqHours : 1,
         burnout: s.burnout, leavers: s.lastLeavers || 0, reqsRaised: s.lastReqs || 0,
@@ -1272,7 +1537,10 @@ function simulate(cfg, opts = {}) {
     const managers = Math.ceil(wk.totals.paid / Math.max(1, cfg.costs.managerRatio));
     wk.totals.serviceCost = svcCost;
     wk.totals.managers = managers;
-    wk.totals.managerCost = (managers * cfg.costs.managerCost) / 52;
+    // §24.7: monthly manager cost when configured; legacy annual otherwise.
+    wk.totals.managerCost = cfg.costs.managerCostMonthly != null
+      ? (managers * cfg.costs.managerCostMonthly * 12) / 52
+      : (managers * cfg.costs.managerCost) / 52;
     wk.totals.productiveCost = wk.totals.cost - wk.totals.trainCost;
     wk.totals.totalCost = wk.totals.cost + wk.totals.managerCost + svcCost + (wk.totals.otCost || 0);
     wk.totals.allInCost = wk.totals.totalCost + wk.totals.churnCost;
@@ -1319,12 +1587,14 @@ function summarise(cfg, weeks, allocTrace, strategy) {
     const worst = binding.reduce((a, b) => (b.want - b.cap > a.want - a.cap ? b : a));
     findings.push({ tone: "red", text: `Hiring cap binds in ${binding.length} week(s). Worst: week ${worst.week + 1} — cap ${worst.cap}, plan wants ${worst.want.toFixed(0)}; short queues: ${Object.keys(worst.denied).map((id) => cfg.queues.find((q) => q.id === id)?.name || id).join(", ")}.` });
   }
-  // operation-level tipping point vs the global cap
+  // operation-level tipping point vs the global cap (§24.3: the caps
+  // hierarchy's Total ceiling when present, else the legacy single cap)
+  const capTotal = cfg.hiring.caps && cfg.hiring.caps.total != null ? cfg.hiring.caps.total : cfg.hiring.cap;
   const leaversWk = weeks.map((w) => sum(cfg.queues.map((q) => w.queues[q.id].leavers)));
-  const avgLeavers = sum(leaversWk.slice(-8)) / Math.min(8, leaversWk.length);
-  if (avgLeavers > cfg.hiring.cap * 1.0001 && !strategyAllManual(cfg, strategy)) {
+  const avgLeavers = sum(leaversWk.slice(-8)) / Math.min(8, Math.max(1, leaversWk.length));
+  if (avgLeavers > capTotal * 1.0001 && !strategyAllManual(cfg, strategy)) {
     flags.tippingPoint = true;
-    findings.push({ tone: "red", text: `Tipping point: the operation is losing ${avgLeavers.toFixed(1)} people/week against a hiring cap of ${cfg.hiring.cap}/week. Headcount cannot recover at any allocation.` });
+    findings.push({ tone: "red", text: `Tipping point: the operation is losing ${avgLeavers.toFixed(1)} people/week against a hiring cap of ${capTotal}/week. Headcount cannot recover at any allocation.` });
   }
   for (const q of cfg.queues) {
     const series = weeks.map((w) => w.queues[q.id]);
@@ -1334,7 +1604,12 @@ function summarise(cfg, weeks, allocTrace, strategy) {
     const breachWeeks = series.filter((s) => s.status !== "green").length;
     const firstBreach = series.findIndex((s) => s.status === "red");
     const peakBurn = Math.max(...series.map((s) => s.burnout));
-    perQueue[q.id] = { breachWeeks, firstBreach, peakBurn };
+    // §24.10 business-box support: simulated SLA attainment (share of green
+    // weeks) against the queue's editable attainment target, RAG'd.
+    const slaAttainment = series.length ? (series.length - breachWeeks) / series.length : 1;
+    const slaTarget = q.slaAttainmentTarget != null ? q.slaAttainmentTarget : null;
+    const slaRag = slaTarget == null ? null : slaAttainment >= slaTarget ? "green" : slaAttainment >= slaTarget * 0.9 ? "amber" : "red";
+    perQueue[q.id] = { breachWeeks, firstBreach, peakBurn, slaAttainment, slaTarget, slaRag };
     if (firstBreach >= 0) {
       const lead = q.wf.reqToStart + q.wf.trainingWeeks + q.wf.learningCurve.length;
       const raiseBy = firstBreach - lead;
@@ -1353,7 +1628,8 @@ function summarise(cfg, weeks, allocTrace, strategy) {
       const excess = last.paid - last.reqFte;
       const perWeek = last.paid * (q.wf.attrition / 4.345);
       const wks = perWeek > 0 ? Math.ceil(excess / perWeek) : 999;
-      findings.push({ tone: "amber", text: `${qLabel} ends ${excess.toFixed(0)} FTE over requirement. Under a freeze, attrition clears it in ~${wks} weeks (~${f(((excess * q.agentCost) / 52) * (wks / 2))} carrying cost).` });
+      const wkExcessCost = q.agentCostMonthly != null ? (excess * q.agentCostMonthly * 12) / 52 : (excess * q.agentCost) / 52; // §24.7
+      findings.push({ tone: "amber", text: `${qLabel} ends ${excess.toFixed(0)} FTE over requirement. Under a freeze, attrition clears it in ~${wks} weeks (~${f(wkExcessCost * (wks / 2))} carrying cost).` });
     }
   }
   if (churnCost > 0) findings.push({ tone: churnCost > waste ? "red" : "green", text: `Over ${weeks.length} weeks: ${f(totalCost)} to run, ${f(churnCost)} lost to poor experience (${Math.round(lost).toLocaleString()} customers), ${f(waste)} idle pay.` });
@@ -1395,7 +1671,16 @@ function summarise(cfg, weeks, allocTrace, strategy) {
   }
   hiring.groups = groups;
 
-  return { totalCost, churnCost, waste, lost, allIn: totalCost + churnCost, findings: findings.slice(0, 10), flags, perQueue, strategy, hiring };
+  // §24.7 monthly + annual run-rate presentation of the weekly engine totals.
+  const weeksN = Math.max(1, weeks.length);
+  const finance = {
+    monthlyRun: (totalCost / weeksN) * (52 / 12),
+    annualRun: (totalCost / weeksN) * 52,
+    monthlyAllIn: ((totalCost + churnCost) / weeksN) * (52 / 12),
+    annualAllIn: ((totalCost + churnCost) / weeksN) * 52,
+  };
+
+  return { totalCost, churnCost, waste, lost, allIn: totalCost + churnCost, findings: findings.slice(0, 10), flags, perQueue, strategy, hiring, finance };
 }
 
 // ---------- DEFAULT CONFIG (SPEC §12) ----------
@@ -1562,6 +1847,133 @@ function groupScenarioIds(cfg, groupId) {
   return cfg.scenarios.filter((s) => s.enabled).map((s) => s.id);
 }
 
+// ---------- R3 (SPEC §24) ----------
+// §24.8 group scope resolution: a group may carry scope targets (brands /
+// channels / queues); a queue is in scope when it matches ANY listed target.
+// Empty or absent scope = unscoped (null).
+function groupScopeQueueIds(cfg, scope) {
+  if (!scope) return null;
+  const brands = new Set(scope.brandIds || []);
+  const channels = new Set(scope.channels || []);
+  const ids = new Set(scope.queueIds || []);
+  if (!brands.size && !channels.size && !ids.size) return null;
+  return cfg.queues.filter((q) => brands.has(q.brandId) || channels.has(channelOf(q)) || ids.has(q.id)).map((q) => q.id);
+}
+
+/* §24.8 group-scoped scenarios: scope lives on the GROUP; the factors inside
+   inherit it. Returns a derived config whose in-group scenarios carry the
+   group's resolved queue-list scope (covering both unified `scope` and legacy
+   `queueIds` shapes); groups without a scope return the config untouched.
+   Legacy operation-wide people types (attritionShock / hiringFreeze /
+   reducedTraining / freezeManual) remain op-wide by design. */
+function applyGroupScope(cfg, groupId) {
+  const g = (cfg.groups || []).find((x) => x.id === groupId);
+  const qids = g ? groupScopeQueueIds(cfg, g.scope) : null;
+  if (!qids) return cfg;
+  const inGroup = new Set(groupScenarioIds(cfg, groupId));
+  return {
+    ...cfg,
+    scenarios: cfg.scenarios.map((s) => inGroup.has(s.id)
+      ? { ...s, scope: { kind: "queues", queueIds: qids }, queueIds: qids }
+      : s),
+  };
+}
+
+// §24.9 truly-blank start: no brands, no queues, no scenarios. Simulates to an
+// empty world (zero volumes, zero costs, finite everywhere) without crashing.
+function makeBlankConfig() {
+  return {
+    engine: { horizonWeeks: 52, dayStart: 8, dayEnd: 20, intervalMin: 30, occupancyCeiling: 0.85, currency: "£", daysPerWeek: 7, hoursPerFteDay: 8, daysWorkedPerFte: 5, crossSkillProficiency: 0.9, globalStartingHC: null },
+    settings: {},
+    brands: [],
+    pools: [],
+    groups: [{ id: "g_por", name: "Plan of record", builtin: true }, { id: "g_none", name: "No scenarios", builtin: true, scenarioIds: [] }],
+    hiring: { cap: 18, buffer: 0.1, activeStrategy: "S1", caps: { segments: {}, brands: {}, total: 18 } },
+    strategies: BUILTIN_STRATEGIES.map((s) => ({ ...s })),
+    seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS["Flat"]] },
+    queues: [],
+    serviceTeams: [],
+    costs: { managerCost: 48000, managerCostMonthly: 4000, managerRatio: 12 },
+    cx: { customerBase: 0, costPerLostCustomer: 500, churnAbandon: 0.03, churnWait: 0.015, churnDigital: 0.02, repeatUplift: 1.5 },
+    loops: { redial: 0.3, deflection: 0.4 },
+    views: [],
+    scenarios: [],
+  };
+}
+
+/* §24 one-shot migration (idempotent, layered over R2):
+   – §24.1 knock-on: the resolved legacy repeat/spill values freeze 1:1 into the
+     simplified per-queue block {repeatPct, convertPct, convertTarget}, so
+     legacy numbers reproduce exactly. The primary-voice default fills the
+     target only where conversion is inert (spill 0); an active legacy spill
+     keeps its exact target — including null (“nowhere”).
+   – §24.2 sharing: each pool decomposes into per-queue declarations
+     {sharePct, sharesWith: co-members}. Exact for single-pool members whose
+     member order follows queue order (the UI always built them that way);
+     multi-pool members merge lists and keep their largest share (flagged).
+   – §24.3 caps: the legacy global cap becomes the hierarchy's Total ceiling
+     (empty segment matrix = unlimited), reproducing the legacy allocator.
+   – §24.5 subtype: digital queues declare "customer" (the legacy model).
+   – §24.7 monthly costs: agent/manager monthly = annual ÷ 12 (weekly cost
+     identical to the last ulp: monthly × 12 ÷ 52 ≡ annual ÷ 52).
+   – §24.10: per-queue SLA attainment target (default 90%). */
+function migrateConfigR3(cfg) {
+  const r2 = migrateConfigR2(cfg);
+  const knockOf = {};
+  for (const q of r2.queues) knockOf[q.id] = resolveKnockOn(r2, q);
+  const shareOf = {};
+  for (const pool of r2.pools || []) {
+    for (const m of pool.members || []) {
+      const others = (pool.members || []).filter((x) => x.queueId !== m.queueId).map((x) => x.queueId);
+      const pct = m.sharePct != null ? m.sharePct : 100;
+      const cur = shareOf[m.queueId];
+      if (!cur) shareOf[m.queueId] = { sharePct: pct, sharesWith: [...others] };
+      else {
+        cur.sharePct = Math.max(cur.sharePct, pct);
+        for (const id of others) if (!cur.sharesWith.includes(id)) cur.sharesWith.push(id);
+      }
+    }
+  }
+  return {
+    ...r2,
+    queues: r2.queues.map((q) => {
+      const kn = knockOf[q.id];
+      const primary = primaryVoiceQueue(r2, q.brandId);
+      const knock = q.knock || {
+        repeatPct: kn.repeatPct,
+        convertPct: kn.spillPct,
+        convertTarget: kn.spillTargetQueue != null ? kn.spillTargetQueue
+          : kn.spillPct > 0 ? null
+          : primary && primary.id !== q.id ? primary.id : null,
+      };
+      return {
+        ...q,
+        knock,
+        // Keep the legacy mirror fields aligned with the canonical knock block
+        // (idempotency: a later R2 pass re-materialises from resolveKnockOn,
+        // which now reads `knock`). Inert where they differ — convertPct 0.
+        repeatPct: knock.repeatPct,
+        spillPct: knock.convertPct,
+        spillTargetQueue: knock.convertTarget,
+        sharing: q.sharing || shareOf[q.id] || null,
+        subtype: q.type === "digital" ? (q.subtype || "customer") : q.subtype,
+        agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? q.agentCost / 12 : null,
+        slaAttainmentTarget: q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9,
+      };
+    }),
+    pools: [],
+    hiring: {
+      ...r2.hiring,
+      caps: r2.hiring.caps || { segments: {}, brands: {}, total: r2.hiring.cap != null ? r2.hiring.cap : null },
+    },
+    costs: {
+      ...r2.costs,
+      managerCostMonthly: r2.costs.managerCostMonthly != null ? r2.costs.managerCostMonthly
+        : r2.costs.managerCost != null ? r2.costs.managerCost / 12 : null,
+    },
+  };
+}
+
 module.exports = {
   erlangB, erlangC, voiceRaw, voiceInterval, requiredAgentsInterval, reqCurve,
   runVoiceDay, runDigitalDay, hoursPerHeadDay, monthOfWeek, seasonalMult, SEASONAL_PRESETS,
@@ -1574,4 +1986,8 @@ module.exports = {
   settingsOf, resolveHorizon, resolveTraining, resolveKnockOn, blendedAht,
   channelOf, brandFor, brandShareVolume, R2_DEFAULTS,
   migrateScenarioToUnified, migrateServiceTeamsToLeveraged, migrateConfigR2, groupScenarioIds,
+  // Revision 3 (SPEC §24)
+  migrateConfigR3, makeBlankConfig, runWorkflowDay, digitalSubtype,
+  monthForWeek, generateWeeklySeries, primaryVoiceQueue,
+  groupScopeQueueIds, applyGroupScope,
 };

@@ -671,3 +671,93 @@ Fixes only; zero engine diffs (`git diff engine/` empty) and every gate green.
 
 Test moves: the Excel/params-CSV export/import checks in `harness.test.js` and
 `r1ui.test.js` now target the Files card on the Snapshots tab.
+
+## R3a (SPEC §24 — Revision 3 engine)
+Engine battery `tests/r3.test.js` (19 tests) — R3a / §24 GATE: GREEN, with the
+ENTIRE pre-existing battery (P1, R1, R2, P7b UI, §13 harness) green and the
+five validated test files byte-identical (hard regression gate honoured).
+
+What shipped (engine only; UI lands in R3b):
+* **§24.1 knock-on, simplified.** Canonical per-queue block `knock:
+  {repeatPct, convertPct, convertTarget}` sits as the TOP tier of
+  `resolveKnockOn`; mechanics are the existing repeat/spill paths unchanged.
+  `primaryVoiceQueue()` supplies the default target. Migration freezes the
+  resolved legacy values 1:1 (gate: legacy loops path reproduced exactly at
+  weeks 0/10/25/51; an active legacy spill keeps its exact target — including
+  null "nowhere"; the primary-voice default fills in only where conversion is
+  inert, and never targets the queue itself).
+* **§24.2 sharing, decentralised.** Pools are deleted from the concept model:
+  `migrateConfigR3` decomposes each pool into per-queue `sharing: {sharePct,
+  sharesWith}` declarations and empties `pools`. New rung-5 stage (config
+  order, two passes): pass 1 offers sharePct × spare pro-rata by recipient
+  deficit (no priorities); pass 2 reclaims training (rung-3 mechanics, own
+  debt) against what the offers left short — FCFS, exactly the pool shortfall
+  feed. Donor eligibility matches the pool rung (spare at stage start; never
+  below own requirement). Because pro-rata allocation preserves deficit
+  ratios, offers-then-feed equals the pool's aggregate-then-allocate: the
+  decomposition gate holds every rung number (poolIn, reclaim, debt, hours,
+  cover, status) to 1e-9, including the sharePct-0-donor-still-feeds edge.
+  The legacy pool rung remains as a shim for un-migrated configs (r2 battery
+  untouched). Exactness caveat: single-pool membership with member order
+  following queue order (how the UI always built them); multi-pool members
+  merge lists and keep their largest share. Shared inflow reports on the
+  existing `poolIn` channel (borrowedSharePct unchanged).
+* **§24.3 hiring cap hierarchy.** `hiring.caps = {segments: {"brand|channel":
+  n}, brands: {brandId: n}, total: n}`. Marginal-churn greedy within each
+  segment cap (missing entry = unlimited), then binding brand ceilings and
+  the Total ceiling trim grants from the LOWEST marginal upward; the trace
+  gains `boundBy` naming each level ("Brand 1 × digital cap", "Brand 1
+  ceiling", "Total"). Configs with no segment/brand levels — including
+  migrated ones (legacy cap → Total) — run the legacy greedy verbatim, so
+  pre-§24 allocations are reproduced exactly. Tipping-point summary reads
+  caps.total when present.
+* **§24.4 strategy params.** S2 `bufferPct` was already per-strategy; S3 gains
+  `forwardMonths` (clamped 1–6, weeks = round(m × 52/12)) — the projection
+  distance for the leaver estimate. ABSENT = legacy landing-week projection,
+  byte-identical (gate asserts built-in S3 unchanged and want monotone in m:
+  m=1 > default(lead) > m=6 under attrition, i.e. the backfill is sized to
+  the pool at the projection point).
+* **§24.5 digital subtypes.** `q.subtype: "customer" | "workflow"` (absent =
+  customer = legacy digital, bit-identical). Workflow: `reqCurveWorkflow`
+  (hours = items × handle time ÷ occupancy ceiling; no concurrency, no
+  Erlang, flat curve) + `runWorkflowDay` (FIFO fluid backlog at day grain;
+  wait ramps B0/C → Bend/C days; SLA share from the same ramp logic as the
+  digital model with the window in HOURS — `workflowSlaHours` default 24,
+  `workflowSlaPct` default 0.9). RAG judges %-within-window against
+  workflowSlaPct; sla scenarios scale the window; weekly record gains
+  `subtype` + `respHours`; spill/repeat knock-on identical to digital. Hand
+  gate: B0 25, V 100, C 50 → sl 50%, backlog 75, wait 1 day; simulated week
+  1/7 in-SLA, backlog 350, req 12.5 FTE.
+* **§24.6 volume anchoring.** `settings.calendar.weekOneDate` (ISO, default
+  null = legacy startMonth mapping). `monthForWeek()` anchors seasonality and
+  month-granular scenario series to real calendar months;
+  `generateWeeklySeries(cfg, base, months)` is the seasonality wizard (gate:
+  week 1 uses the Settings date's month). Weekly series remain first
+  precedence and fully editable (`weeklyVolumes` unchanged).
+* **§24.7 monthly costs.** `q.agentCostMonthly` / `costs.managerCostMonthly`
+  cost at monthly × 12 ÷ 52 per week (gate: £2,600/mo → £600/wk exact);
+  legacy annual expressions kept verbatim when absent. Migration stamps
+  monthly = annual ÷ 12 (weekly identical to ulps; equivalence gate 1e-6).
+  `summary.finance` reports monthly + annual run and all-in rates.
+* **§24.8 group-scoped scenarios.** `group.scope = {brandIds, channels,
+  queueIds}` (match ANY); `applyGroupScope(cfg, groupId)` derives a config
+  whose in-group scenarios carry the resolved queue-list scope (both unified
+  `scope` and legacy `queueIds` shapes). Gate: an op-wide volume step scoped
+  to Brand 2 leaves Brand 1 untouched. R3b wires this into sim-set.
+* **§24.9 lifecycle.** `makeBlankConfig()` — no brands, no queues; simulate
+  yields 52 finite weeks of zeros under every built-in strategy (blankTot
+  seeds active/otHours/otCost so the empty world stays NaN-free).
+* **§24.10 Settings.** Week-1 date (above); the caps matrix (above);
+  per-queue `slaAttainmentTarget` (migration default 0.9) with
+  `summary.perQueue.{slaAttainment, slaTarget, slaRag}` for the Business box.
+* **Migration.** `migrateConfigR3` = R2 migration + the §24 layers, idempotent
+  (legacy knock mirror fields kept aligned with the canonical block). Gate:
+  R3-over-R2 reproduces volumes/cover/redial/deflected/status EXACTLY and
+  costs to 1e-6 across S1–S4 on the stock config.
+
+Deferred to R3b (UI): caps-matrix editor, knock/sharing editors, subtype
+picker, week-1 date + wizard UI, monthly cost fields, group-scope editor,
+lifecycle actions (duplicate/defaults/blank + empty state), Business-box RAG
+presentation, and wiring applyGroupScope into sim-set. Note for R3b: the
+UI's strategy editor should surface bufferPct/forwardMonths (forwardMonths
+UI default 3 — write it only on explicit edit; unset keeps legacy S3).
