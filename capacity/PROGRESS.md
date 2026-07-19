@@ -903,3 +903,70 @@ patchWeeklyVolume, migration channelId), `sim-set.js` (hash excludes dataColours
 channelDefs), `reporting.js`, `App.jsx` (simConfig = resolvePresets), the Summary /
 Plan / Holistic / Data components, the Queues / Settings / PresetLibrary / PresetBar
 editors and `style.js`. `/dist` rebuilt.
+
+## R3d-A (SPEC §25 — Digital Customer under Erlang; engine only)
+New engine battery `tests/r3d.test.js` (5 tests, R3d-A / §25 GATE: GREEN) with the
+ENTIRE pre-existing battery green — P1 20 · R1 19 · R2 27 · R3a 20 · **R3d-A 5** ·
+P7b 20 · R3b 9 · R3c 9 · §13 harness 20 = **149 tests, 0 failures**. Engine only;
+the UI runs untouched on the new engine (both UI gates + harness re-verified green).
+`/dist` rebuilt from source.
+
+> **numeric results for Digital Customer queues intentionally changed at R3d-A.**
+
+What shipped (engine only; the model-notes UI copy of §25.3 lands in R3d-B):
+* **§25.1 model.** Digital Customer (live chat) leaves the fluid backlog model
+  and becomes an Erlang A queue: `reqCurveDigitalCustomer` + `runDigitalCustomerDay`
+  put **servers = agents × concurrency** through the existing `voiceInterval`
+  solver (fractional blending included). AHT is unchanged; the SLA "% within Y
+  minutes" is the Erlang service level at `Y×60` s; `patience` defaults to 180 s
+  and abandonment is a real output. The carrying **backlog is retired** for the
+  subtype (`s.backlog = 0`); economies of scale are now real (quiet intervals need
+  proportionally more agents). Digital/Service **Workflow keep the fluid backlog
+  model unchanged** (`runWorkflowDay`, `git`-verifiable regression isolation).
+  The `servers = agents × concurrency` treatment is the standard chat
+  approximation — mildly optimistic about juggling costs (stated in the engine and
+  destined for the Model-notes tab in R3d-B).
+* **§25.2 requirement.** The existing minimal-server search runs on effective
+  servers; required agents = `N_servers ÷ concurrency` (so `ceil(agents×conc)` is
+  the minimal N). `reqCurve` routes the customer subtype here; workflow and voice
+  unchanged.
+* **§25.3 knock-on.** For Digital Customer, converts-to-calls now fire on
+  **abandoned volume × convert %** (was over-limit backlog excess) and **repeat %
+  applies to abandons** — both land next day, no same-day fixed point.
+* **§25.4 migration/defaults.** `runDigitalCustomerDay`/`reqCurveDigitalCustomer`
+  fall back to patience 180 s + maxAbandon 5% when a queue omits them;
+  `migrateConfigR3` stamps those defaults onto Digital Customer queues (idempotent,
+  fill-when-absent) and `makeDefaultConfig`'s chat queues move patience 90→180.
+  `backlogLimit` is retired for the customer status/knock-on (Workflow keeps it).
+* **Weekly record.** Digital Customer now reports Erlang `asa`/`abandon` (workflow
+  reports neither); status is `sl ≥ digitalSlaPct` (backlog term dropped). New
+  exports: `runDigitalCustomerDay`, `reqCurveDigitalCustomer`, `customerPatience`,
+  `customerMaxAbandon`.
+
+### Existing tests updated to the new physics (each justified, per the §25 gate)
+* `tests/engine.test.js` [8] — the deflection round-trip becomes a **conversion**
+  round-trip: with a zero-server chat queue every contact abandons, so day-1
+  converts = `abandoned × convert %` (was backlog-excess × deflection %), the chat
+  carries **no backlog**, and next-day voice volume is lifted by that conversion.
+  (This IS the "adapt the existing deflection round-trip test" §25 gate item; the
+  isolated q_chat conversion target is neutralised so the arithmetic is exact.)
+* `tests/r1.test.js`, `tests/r2.test.js`, `tests/r3.test.js` — the exact-arithmetic
+  `dq()` rig moves from the customer subtype to **`subtype: "workflow"`**. The rig's
+  whole purpose is a *linear* `req h/day = dailyVolume` scaffold (r1 even calls it
+  "no Erlang fuzz"); that linear model now lives on the workflow subtype, so every
+  supply-ladder hand number (spare, poolIn, reclaim, debt, grants, cover, reqFte)
+  is preserved bit-for-bit while the customer subtype moved to Erlang. The three
+  day-model assertions in these files (r2 unmanned-green / leveraged-donor-red,
+  r3 donor-green) hold under workflow.
+* `tests/r2.test.js` [15] — `qd` pinned to `subtype: "customer"` so `slaInEffect`
+  still reports the **minutes** SLA (a workflow queue reports its hours SLA); the
+  audit-field assertions don't touch the requirement model, so the Erlang subtype
+  is fine here.
+* `tests/r3.test.js` [8] — the customer-vs-workflow contrast pins `qc` to
+  `subtype: "customer"` and its message now reads "runs the Erlang model (R3d-A),
+  not the day-grain workflow maths" (still asserts `sl ≠ 1/7`).
+
+Files: `engine/engine.js` (customer Erlang model + dispatch + day loop + migration +
+defaults + exports), new `tests/r3d.test.js`, `package.json` (wire `r3d`), the four
+existing test files above, `/dist` rebuilt. Deferred to R3d-B (UI): the Model-notes
+copy (§25.3), and any Data/Intraday presentation that still assumes a chat backlog.

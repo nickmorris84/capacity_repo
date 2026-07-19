@@ -42,9 +42,12 @@ function rigCfg(over = {}) {
     ...over,
   };
 }
+// Digital WORKFLOW rig: the subtype keeps requirement linear (req h/day =
+// dailyVolume), Erlang-free — R3d-A moved the Digital *Customer* subtype to
+// Erlang A. All hand numbers here are supply-ladder quantities (subtype-agnostic).
 function dq(cfg, id, reqHoursPerDay, over = {}) {
   const q = {
-    id, name: id, type: "digital", brandId: "b1", channel: "digital", priority: 5,
+    id, name: id, type: "digital", subtype: "workflow", brandId: "b1", channel: "digital", priority: 5,
     dailyVolume: reqHoursPerDay, aht: 3600, concurrency: 1,
     profile: new Array(24).fill(1), digitalSlaMinutes: 60, digitalSlaPct: 0.8, backlogLimit: 1e9,
     deflectsTo: null, shrinkage: 0, fte: 0, agentCost: 30000, crossSkill: [], supports: [],
@@ -410,7 +413,10 @@ t("ahtInEffect / slaInEffect / trainShrinkInEffect / scenarioTags / channel / br
       { id: "s_sla", type: "unified", name: "relax sla", enabled: true, tag: "custom", parameter: "sla", mechanism: "step", granularity: "week", startWeek: 0, stopWeek: null, queueIds: ["qd"], p: { value: 0.1 } },
     ],
   });
-  dq(cfg, "qd", 20, { fte: 40, shrinkage: 0.3 });
+  // Pin the customer subtype: slaInEffect reports the minutes SLA (a workflow
+  // queue would report its hours SLA). Audit fields don't touch the requirement
+  // model, so the Erlang customer subtype is fine to exercise here.
+  dq(cfg, "qd", 20, { fte: 40, shrinkage: 0.3, subtype: "customer" });
   const sim = E.simulate(cfg);
   const q0 = wq(sim, 0, "qd");
   eq(q0.ahtInEffect, 3600 * 1.2, 1e-6, "AHT in effect = base × scenario");
