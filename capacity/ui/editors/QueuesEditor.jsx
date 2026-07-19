@@ -253,7 +253,7 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
               )}
               <NumField label={workflow ? "Handle time / item" : "AHT"} unit="s" value={q.aht} onChange={(v) => ops.patchQueue(q.id, ["aht"], v)} />
             </div>
-            <p className="note">Attaching a channel sets this queue's channel group ({chLabel}) and inherits its template sections. Create channels in Settings → Channels.{isDigital ? (workflow ? " Workflow: backlog processing — no concurrency; SLA in hours." : " Customer: live interaction — concurrency and a minutes SLA.") : ""}</p>
+            <p className="note">Attaching a channel sets this queue's channel group ({chLabel}) and inherits its template sections. Create channels in Settings → Channels.{isDigital ? (workflow ? " Workflow: backlog processing — no concurrency; SLA in hours." : " Customer: live interaction modelled as Erlang A with servers = agents × concurrency — the standard chat approximation, mildly optimistic about the cost of juggling several conversations at once.") : ""}</p>
           </div>
         </details>
 
@@ -326,11 +326,13 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
                 <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
               </div>
             ) : (
+              // §25 Digital Customer (Erlang): concurrency + minutes SLA + patience
+              // (drives abandonment). No backlog limit — the backlog is retired.
               <div className="fieldrow">
                 <NumField label="Concurrency" value={q.concurrency} onChange={(v) => ops.patchQueue(q.id, ["concurrency"], v)} id={"q-concurrency-" + q.id} />
                 <NumField label="SLA within" unit="min" value={q.digitalSlaMinutes} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v)} />
                 <NumField label="SLA target" unit="%" value={+(q.digitalSlaPct * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100)} />
-                <NumField label="Backlog limit" value={q.backlogLimit} onChange={(v) => ops.patchQueue(q.id, ["backlogLimit"], v)} />
+                <NumField label="Patience" unit="s" value={q.patience != null ? q.patience : 180} onChange={(v) => ops.patchQueue(q.id, ["patience"], v)} id={"q-patience-" + q.id} hint="Average seconds a customer waits before abandoning the chat — drives abandonment; behaviour, not a target." />
               </div>
             )}
             <div className="fieldrow" style={{ maxWidth: 220 }}>
@@ -453,7 +455,12 @@ export function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPre
     ) : null;
     return (
       <div key={b.id} className="grid" style={{ gap: 8 }} data-testid={"brand-section-" + b.id}>
-        <div className="section-title" style={{ fontSize: 15, color: "var(--ink)" }}>Brand · {b.name} <span className="pill">{qs.length} queue(s)</span></div>
+        <div className="section-title rowflex" style={{ fontSize: 15, color: "var(--ink)", alignItems: "center" }}>
+          <span>Brand · {b.name} <span className="pill">{qs.length} queue(s)</span></span>
+          <span className="spacer" />
+          {/* Surgical brand fix: each section adds a queue pre-filed under ITS brand. */}
+          <button type="button" className="btn sm primary" onClick={() => ops.addQueue(b.id)} data-testid={"brand-add-queue-" + b.id}>+ Add queue to {b.name}</button>
+        </div>
         {["voice", "digital", "support"].map((ch) => chBlock(ch.charAt(0).toUpperCase() + ch.slice(1), byCh(ch)))}
         {qs.length === 0 && <p className="note">No queues in this brand yet.</p>}
       </div>

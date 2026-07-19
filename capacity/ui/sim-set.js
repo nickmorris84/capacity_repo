@@ -114,3 +114,26 @@ export function runMatrix(config) {
   }
   return { hash: simHash(config), cells };
 }
+
+/* The most favourable matrix cell (R3d-B startup auto-selection): the lowest
+   all-in £ among cells that hold every SLA (no red weeks); if none hold, the
+   fewest weeks-red, tie-broken by lowest all-in. Deterministic. Returns
+   { gid, sid } or null for an empty matrix. */
+export function bestCell(matrix) {
+  if (!matrix || !matrix.cells) return null;
+  let best = null;
+  const better = (a, b) => {
+    if (a.holds !== b.holds) return a.holds;            // a holds SLA, b does not
+    if (a.holds) return a.allIn < b.allIn;              // both hold → lowest all-in
+    if (a.redWeeks !== b.redWeeks) return a.redWeeks < b.redWeeks; // neither → fewest red
+    return a.allIn < b.allIn;                           // tie → lowest all-in
+  };
+  for (const gid of Object.keys(matrix.cells)) {
+    for (const sid of Object.keys(matrix.cells[gid])) {
+      const c = matrix.cells[gid][sid];
+      const cand = { gid, sid, allIn: c.allIn, redWeeks: c.redWeeks, holds: c.redWeeks === 0 };
+      if (!best || better(cand, best)) best = cand;
+    }
+  }
+  return best ? { gid: best.gid, sid: best.sid } : null;
+}

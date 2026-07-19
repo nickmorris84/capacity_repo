@@ -970,3 +970,50 @@ Files: `engine/engine.js` (customer Erlang model + dispatch + day loop + migrati
 defaults + exports), new `tests/r3d.test.js`, `package.json` (wire `r3d`), the four
 existing test files above, `/dist` rebuilt. Deferred to R3d-B (UI): the Model-notes
 copy (§25.3), and any Data/Intraday presentation that still assumes a chat backlog.
+
+## R3d-B (SPEC §24/§25 — brands, startup defaults, chat UI; UI only)
+New gate `tests/r3dui.test.js` (6 tests, R3d-B / §24–§25 UI GATE: GREEN) with the
+ENTIRE battery green — P1 20 · R1 19 · R2 27 · R3a 20 · R3d-A 5 · P7b 20 · R3b 9 ·
+R3c 9 · **R3d-B 6** · §13 harness 20 = **155 tests, 0 failures**. Engine untouched
+this phase (`git diff engine/` empty). `/dist` rebuilt; a real-Chromium smoke pass
+confirmed all three flows with zero console errors (the startup auto-pick survives a
+genuine page reload, not just a fresh JSDOM mount).
+
+1. **Brand fix (surgical, TDD).** The failing JSDOM test was written first — Queues →
+   Brand 2 section → its own "Add queue" button → the new queue renders under Brand 2 —
+   and shown red before the fix. `addQueue(brandId)` now pre-files a queue under a given
+   brand; every brand section carries a `brand-add-queue-<id>` button that passes its own
+   id (`QueuesEditor`). The per-card brand dropdown (already present, `setQueueBrand`)
+   re-files a queue everywhere instantly. The test was then extended to close the
+   hierarchy check: with two brands populated, BOTH appear with brand + channel subtotal
+   rows in the Summary queue rollup AND the Plan hiring summary, and each grand total
+   equals the sum of the brand subtotals (`HierTable`, unchanged — it already groups by
+   brand, so a correctly-filed queue rolls up correctly).
+2. **Startup matrix persistence + auto-selection (§19).** The decision matrix (hash +
+   cells) and the selected (group × strategy) pair now persist through the storage
+   adapter (`KEYS.matrix`). On open (`App` mount effect): if a cached matrix's hash
+   matches the live config, the app auto-selects the most favourable cell —
+   `bestCell()` (sim-set): lowest all-in £ among cells that hold every SLA (no red
+   weeks); if none hold, fewest weeks-red then lowest all-in — with a subtle "based on
+   your last matrix run" note (`matrix-autopick-note`); if the cache is stale or absent,
+   it restores the last selected pair (else Plan-of-record × active strategy) behind the
+   existing stale banner. It NEVER auto-runs the matrix on open — it only ever reads a
+   cache. Selecting a cell or re-running the matrix clears the auto-pick note.
+3. **Chat UI for §25.** Digital Customer cards gain a **Patience** input in the SLA
+   section (helper text: "…seconds a customer waits before abandoning…"), and the
+   backlog-limit field is gone for the subtype (retired); Workflow keeps its backlog
+   limit. Abandonment now shows where backlog used to: the Plan status card shows an
+   **Abandon** KPI, the Data-tab Service columns show **Abandon** for Customer (Backlog
+   for Workflow), and the Intraday interval detail uses the Erlang columns (ASA/Abandon/
+   SL) for Customer. Backlog columns/fields remain only on the Workflow subtype.
+
+Files: `ui/config-ops.js` (`addQueue(brandId)`), `ui/editors/QueuesEditor.jsx` (per-brand
+Add-queue button; customer SLA patience, no backlog), `ui/sim-set.js` (`bestCell`),
+`ui/storage.js` (`KEYS.matrix`), `ui/App.jsx` (persist + startup auto-select/restore),
+`ui/components/SummaryTab.jsx` (auto-pick note), `ui/components/PlanTab.jsx` (Abandon KPI),
+`ui/reporting.js` (Data columns by subtype), `ui/components/IntradayTab.jsx` (Erlang
+columns for Customer), `ui/style.js`; new `tests/r3dui.test.js`; `/dist` rebuilt.
+The §25.3 model note ("servers = agents × concurrency … the standard chat
+approximation, mildly optimistic about juggling costs") is now surfaced on the Digital
+Customer card's description (the E1–E3 prose card was dissolved into inline hints in the
+P7b restructure, so the caveat lives where the planner configures the chat queue).

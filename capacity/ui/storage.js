@@ -63,4 +63,7 @@ export const KEYS = {
   intraday: "presets-intraday",
   seasonality: "presets-seasonality",
   views: "views",
+  // R3d-B: last decision-matrix result (hash + cells) plus the selected
+  // (group × strategy) pair, so a reopen can auto-select or restore.
+  matrix: "matrix-state",
 };

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { makeDefaultConfig, makeBlankConfig } from "../engine/engine.js";
-import { useStrategySims, runMatrix, simHash } from "./sim-set.js";
+import { useStrategySims, runMatrix, simHash, bestCell } from "./sim-set.js";
 import { useConfigOps, migrateConfig, resolvePresets } from "./config-ops.js";
 import { INTRADAY_PRESETS, SEASONALITY_PRESETS } from "./presets.js";
 import { groupName, groupList, strategyList } from "./views.js";
@@ -93,11 +93,49 @@ export default function App() {
   const { activeSim, pending } = simSet;
 
   // §19 decision matrix — computed on demand, cached, stale on any config edit.
+  // R3d-B: persisted with the selected pair; a reopen auto-selects the best cell
+  // (when the cache matches) or restores the last pair.
   const [matrix, setMatrix] = useState(null);
+  const [autoPicked, setAutoPicked] = useState(false);
   const liveHash = useMemo(() => simHash(simConfig), [simConfig]);
+  const liveHashRef = useRef(liveHash); liveHashRef.current = liveHash;
+  const matrixHydrated = useRef(false);
   const matrixStale = !matrix || matrix.hash !== liveHash;
-  const onRunMatrix = useCallback(() => setMatrix(runMatrix(simConfig)), [simConfig]);
-  const onSelectCell = useCallback((gid, sid) => { setActiveGroupId(gid); setActiveStrategyId(sid); }, []);
+  const onRunMatrix = useCallback(() => { setMatrix(runMatrix(simConfig)); setAutoPicked(false); }, [simConfig]);
+  const onSelectCell = useCallback((gid, sid) => { setActiveGroupId(gid); setActiveStrategyId(sid); setAutoPicked(false); }, []);
+
+  // R3d-B startup: on mount, read the persisted matrix + selected pair. If the
+  // cached matrix hash matches the current config, auto-select the most
+  // favourable cell (with a subtle note); otherwise restore the last selected
+  // pair and leave the (stale/absent) matrix behind its existing banner. We
+  // NEVER auto-run the matrix on open — only ever read a cache.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ms = await storage.get(KEYS.matrix);
+      if (!alive) return;
+      if (ms) {
+        if (ms.cells) setMatrix({ hash: ms.hash, cells: ms.cells });
+        if (ms.cells && ms.hash === liveHashRef.current) {
+          const pick = bestCell({ hash: ms.hash, cells: ms.cells });
+          if (pick) { setActiveGroupId(pick.gid); setActiveStrategyId(pick.sid); setAutoPicked(true); }
+        } else if (ms.selected && ms.selected.gid) {
+          setActiveGroupId(ms.selected.gid); setActiveStrategyId(ms.selected.sid);
+        }
+      }
+      matrixHydrated.current = true;
+    })();
+    return () => { alive = false; };
+  }, [storage]);
+
+  // Persist the matrix (hash + cells) and the selected pair whenever either
+  // changes — after the initial hydration, so we never clobber a cache on open.
+  useEffect(() => {
+    if (!matrixHydrated.current) return;
+    const payload = { selected: { gid: safeGroup, sid: safeStrategy } };
+    if (matrix) { payload.hash = matrix.hash; payload.cells = matrix.cells; }
+    storage.set(KEYS.matrix, payload);
+  }, [matrix, safeGroup, safeStrategy, storage]);
 
   // ---- snapshot actions ----
   const saveSnapshot = useCallback(async (name) => {
@@ -136,7 +174,7 @@ export default function App() {
     simSet, activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config: effectiveConfig, ops,
     activeStrategy: safeStrategy, activeGroupId: safeGroup, onSetActive: setActiveStrategyId,
     onSelectGroup: setActiveGroupId, onImportConfig: importConfig,
-    matrix, matrixStale, onRunMatrix, onSelectCell,
+    matrix, matrixStale, onRunMatrix, onSelectCell, autoPicked,
     intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets,
     snapshots, compareSel, setCompareSel, storage,
     onSaveSnapshot: saveSnapshot, onDeleteSnapshot: deleteSnapshot, onLoadSnapshotSettings: loadSnapshotSettings, onRefreshSnapshots: loadSnapshots,
@@ -211,7 +249,7 @@ export default function App() {
 function TabBody(props) {
   const { id, simSet, activeSim, config, ops } = props;
   switch (id) {
-    case "summary": return <SummaryTab sim={activeSim} sims={simSet.sims} stratIds={simSet.stratIds} config={config} activeStrategy={props.activeStrategy} activeGroupId={props.activeGroupId} onSetActive={props.onSetActive} matrix={props.matrix} matrixStale={props.matrixStale} onRunMatrix={props.onRunMatrix} onSelectCell={props.onSelectCell} />;
+    case "summary": return <SummaryTab sim={activeSim} sims={simSet.sims} stratIds={simSet.stratIds} config={config} activeStrategy={props.activeStrategy} activeGroupId={props.activeGroupId} onSetActive={props.onSetActive} matrix={props.matrix} matrixStale={props.matrixStale} onRunMatrix={props.onRunMatrix} onSelectCell={props.onSelectCell} autoPicked={props.autoPicked} />;
     case "strategies": return <StrategiesTab simSet={simSet} config={config} activeStrategy={props.activeStrategy} ops={ops} />;
     case "plan": return <PlanTab sim={activeSim} config={config} viewLabel={groupName(config, props.activeGroupId)} />;
     case "data": return <DataTab sim={activeSim} config={config} ops={ops} activeGroupId={props.activeGroupId} onSelectGroup={props.onSelectGroup} />;

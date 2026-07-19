@@ -114,6 +114,9 @@ export function columnsFor(queue, cur = "£") {
   const N0 = (v) => num(v, 0);
   const N1 = (v) => num(v, 1);
   const M = (v) => money(cur, v);
+  // §25: Digital Customer is Erlang now — it reports abandonment (no backlog).
+  // Workflow keeps the backlog column. Voice unchanged.
+  const workflow = queue.type === "digital" && queue.subtype === "workflow";
   const service = queue.type === "voice"
     ? [
         { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
@@ -122,11 +125,19 @@ export function columnsFor(queue, cur = "£") {
         { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
         { key: "occ", label: "Occupancy", group: "Service", fmt: P0 },
       ]
-    : [
+    : workflow
+    ? [
         { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
         { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
         { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
         { key: "backlog", label: "Backlog", group: "Service", fmt: N0 },
+        { key: "occ", label: "Occupancy", group: "Service", fmt: P0 },
+      ]
+    : [
+        { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
+        { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
+        { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
+        { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
         { key: "occ", label: "Occupancy", group: "Service", fmt: P0 },
       ];
   return [

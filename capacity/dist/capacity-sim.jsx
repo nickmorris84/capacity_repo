@@ -2191,6 +2191,24 @@ function runMatrix(config) {
   }
   return { hash: simHash(config), cells };
 }
+function bestCell(matrix) {
+  if (!matrix || !matrix.cells) return null;
+  let best = null;
+  const better = (a, b) => {
+    if (a.holds !== b.holds) return a.holds;
+    if (a.holds) return a.allIn < b.allIn;
+    if (a.redWeeks !== b.redWeeks) return a.redWeeks < b.redWeeks;
+    return a.allIn < b.allIn;
+  };
+  for (const gid of Object.keys(matrix.cells)) {
+    for (const sid of Object.keys(matrix.cells[gid])) {
+      const c = matrix.cells[gid][sid];
+      const cand = { gid, sid, allIn: c.allIn, redWeeks: c.redWeeks, holds: c.redWeeks === 0 };
+      if (!best || better(cand, best)) best = cand;
+    }
+  }
+  return best ? { gid: best.gid, sid: best.sid } : null;
+}
 
 // ui/config-ops.js
 import { useMemo as useMemo2, useCallback } from "react";
@@ -2427,10 +2445,11 @@ function useConfigOps(setConfig) {
       return { ...c, queues: nextQueues };
     });
   }, [setConfig]);
-  const addQueue = useCallback(() => {
+  const addQueue = useCallback((brandId) => {
     setConfig((c) => {
       const q = blankQueue(c.queues.length + 1);
-      q.brandId = c.brands && c.brands[0] && c.brands[0].id || "b1";
+      const has = brandId && (c.brands || []).some((b) => b.id === brandId);
+      q.brandId = has ? brandId : c.brands && c.brands[0] && c.brands[0].id || "b1";
       q.channel = "voice";
       q.priority = c.queues.reduce((m, x) => Math.max(m, x.priority || 0), 0) + 1;
       q.resourcing = "dedicated";
@@ -3018,7 +3037,10 @@ var KEYS = {
   run: (slug) => "sim-" + slug,
   intraday: "presets-intraday",
   seasonality: "presets-seasonality",
-  views: "views"
+  views: "views",
+  // R3d-B: last decision-matrix result (hash + cells) plus the selected
+  // (group × strategy) pair, so a reopen can auto-select or restore.
+  matrix: "matrix-state"
 };
 
 // ui/saved-runs.js
@@ -3535,17 +3557,24 @@ function columnsFor(queue, cur = "\xA3") {
   const N0 = (v) => num(v, 0);
   const N1 = (v) => num(v, 1);
   const M = (v) => money(cur, v);
+  const workflow = queue.type === "digital" && queue.subtype === "workflow";
   const service = queue.type === "voice" ? [
     { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
     { key: "asa", label: "ASA (s)", group: "Service", fmt: (v) => secs(v) },
     { key: "sl", label: "SL", group: "Service", fmt: P0 },
     { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
     { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
-  ] : [
+  ] : workflow ? [
     { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
     { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
     { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
     { key: "backlog", label: "Backlog", group: "Service", fmt: N0 },
+    { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
+  ] : [
+    { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
+    { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
+    { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
+    { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
     { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
   ];
   return [
@@ -3843,11 +3872,12 @@ var Stat = ({ l, v, sub }) => /* @__PURE__ */ jsxs4("div", { className: "stat", 
     ] }) : null
   ] })
 ] });
-function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }) {
+function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy, autoPicked }) {
   const cur = config.engine.currency;
   const groups = groupList(config);
   const strategies = strategyList(config);
   return /* @__PURE__ */ jsxs4(Card, { title: "Decision matrix", sub: "groups \xD7 strategies", hint: "Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.", children: [
+    autoPicked && !matrixStale && /* @__PURE__ */ jsx5("div", { className: "mx-autopick", "data-testid": "matrix-autopick-note", children: "Selected the most favourable cell \u2014 based on your last matrix run." }),
     matrixStale && /* @__PURE__ */ jsxs4("div", { className: "mx-stale", "data-testid": "matrix-stale", children: [
       /* @__PURE__ */ jsx5("span", { children: matrix ? "Config changed \u2014 the matrix is stale." : "Matrix not yet computed." }),
       /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm primary", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Run matrix" })
@@ -3898,7 +3928,7 @@ function QueueSummaryTable({ sim, config }) {
   ];
   return /* @__PURE__ */ jsx5(HierTable, { config, testid: "queue-summary", columns, metric: (q) => queueSummaryMetric(sim, q), aggregate: sumQueueSummary });
 }
-function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
+function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell, autoPicked }) {
   const cur = config.engine.currency;
   const verdict = buildVerdict(sims, activeStrategy, activeGroupId, config);
   const blocks = buildAudienceBlocks(sim, config);
@@ -3921,7 +3951,7 @@ function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId
       groupName(config, activeGroupId),
       ". Print or save to PDF from the context bar above."
     ] }) }),
-    /* @__PURE__ */ jsx5(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }),
+    /* @__PURE__ */ jsx5(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy, autoPicked }),
     /* @__PURE__ */ jsxs4(Card, { title: "Verdict & key findings", children: [
       /* @__PURE__ */ jsx5("p", { style: { margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }, children: verdict.paragraph }),
       /* @__PURE__ */ jsxs4("div", { className: "findings", children: [
@@ -4738,6 +4768,7 @@ function Findings({ findings }) {
 }
 function QueueCard({ q, s }) {
   const voice = q.type === "voice";
+  const customer = q.type === "digital" && q.subtype !== "workflow";
   return /* @__PURE__ */ jsxs9("div", { className: "qcard " + s.status, children: [
     /* @__PURE__ */ jsxs9("div", { className: "qn", children: [
       /* @__PURE__ */ jsx10("span", { children: q.name }),
@@ -4758,6 +4789,15 @@ function QueueCard({ q, s }) {
         /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
           /* @__PURE__ */ jsx10("div", { className: "l", children: "ASA" }),
           /* @__PURE__ */ jsx10("div", { className: "v", children: secs(s.asa) })
+        ] }),
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "Abandon" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.abandon, 1) })
+        ] })
+      ] }) : customer ? /* @__PURE__ */ jsxs9(Fragment3, { children: [
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "In SLA" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.sl) })
         ] }),
         /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
           /* @__PURE__ */ jsx10("div", { className: "l", children: "Abandon" }),
@@ -5336,7 +5376,7 @@ function IntradayTab({ sim }) {
   const week = sim.weeks[Math.min(wk, sim.weeks.length - 1)];
   const day = week.intraday;
   const byInterval = day && day.res[q.id] && day.res[q.id].byInterval || [];
-  const voice = q.type === "voice";
+  const erlang = q.type === "voice" || q.type === "digital" && q.subtype !== "workflow";
   const data = byInterval.map((iv) => ({
     t: intervalLabel(iv.i, eng),
     required: +iv.req.toFixed(2),
@@ -5392,7 +5432,7 @@ function IntradayTab({ sim }) {
         /* @__PURE__ */ jsx12("th", { children: "Arrivals" }),
         /* @__PURE__ */ jsx12("th", { children: "Required" }),
         /* @__PURE__ */ jsx12("th", { children: "Available" }),
-        voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+        erlang ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
           /* @__PURE__ */ jsx12("th", { children: "ASA" }),
           /* @__PURE__ */ jsx12("th", { children: "Abandon" }),
           /* @__PURE__ */ jsx12("th", { children: "SL" })
@@ -5409,7 +5449,7 @@ function IntradayTab({ sim }) {
           /* @__PURE__ */ jsx12("td", { children: Math.round(iv.arrivals) }),
           /* @__PURE__ */ jsx12("td", { children: num(iv.req, 1) }),
           /* @__PURE__ */ jsx12("td", { children: num(iv.agents, 1) }),
-          voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+          erlang ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
             /* @__PURE__ */ jsx12("td", { children: secs(iv.asa) }),
             /* @__PURE__ */ jsx12("td", { children: pct(iv.abandon, 1) }),
             /* @__PURE__ */ jsx12("td", { children: pct(iv.sl) })
@@ -6126,7 +6166,7 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
             "Attaching a channel sets this queue's channel group (",
             chLabel,
             ") and inherits its template sections. Create channels in Settings \u2192 Channels.",
-            isDigital ? workflow ? " Workflow: backlog processing \u2014 no concurrency; SLA in hours." : " Customer: live interaction \u2014 concurrency and a minutes SLA." : ""
+            isDigital ? workflow ? " Workflow: backlog processing \u2014 no concurrency; SLA in hours." : " Customer: live interaction modelled as Erlang A with servers = agents \xD7 concurrency \u2014 the standard chat approximation, mildly optimistic about the cost of juggling several conversations at once." : ""
           ] })
         ] })
       ] }),
@@ -6191,12 +6231,16 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
             /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "h", value: q.workflowSlaHours != null ? q.workflowSlaHours : 24, onChange: (v) => ops.patchQueue(q.id, ["workflowSlaHours"], v), id: "q-sla-hours-" + q.id }),
             /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100) }),
             /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
-          ] }) : /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx17(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v), id: "q-concurrency-" + q.id }),
-            /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
-            /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
-            /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
-          ] }),
+          ] }) : (
+            // §25 Digital Customer (Erlang): concurrency + minutes SLA + patience
+            // (drives abandonment). No backlog limit — the backlog is retired.
+            /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+              /* @__PURE__ */ jsx17(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v), id: "q-concurrency-" + q.id }),
+              /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
+              /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
+              /* @__PURE__ */ jsx17(NumField, { label: "Patience", unit: "s", value: q.patience != null ? q.patience : 180, onChange: (v) => ops.patchQueue(q.id, ["patience"], v), id: "q-patience-" + q.id, hint: "Average seconds a customer waits before abandoning the chat \u2014 drives abandonment; behaviour, not a target." })
+            ] })
+          ),
           /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 220 }, children: /* @__PURE__ */ jsx17(NumField, { label: "SLA attainment target", unit: "%", value: +((q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["slaAttainmentTarget"], v / 100), hint: "Share of weeks that must hold SLA for the Business box to read green." }) })
         ] })
       ] }),
@@ -6313,13 +6357,20 @@ function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, s
       }) })
     ] }, label) : null;
     return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 8 }, "data-testid": "brand-section-" + b.id, children: [
-      /* @__PURE__ */ jsxs16("div", { className: "section-title", style: { fontSize: 15, color: "var(--ink)" }, children: [
-        "Brand \xB7 ",
-        b.name,
-        " ",
-        /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
-          qs.length,
-          " queue(s)"
+      /* @__PURE__ */ jsxs16("div", { className: "section-title rowflex", style: { fontSize: 15, color: "var(--ink)", alignItems: "center" }, children: [
+        /* @__PURE__ */ jsxs16("span", { children: [
+          "Brand \xB7 ",
+          b.name,
+          " ",
+          /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
+            qs.length,
+            " queue(s)"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+        /* @__PURE__ */ jsxs16("button", { type: "button", className: "btn sm primary", onClick: () => ops.addQueue(b.id), "data-testid": "brand-add-queue-" + b.id, children: [
+          "+ Add queue to ",
+          b.name
         ] })
       ] }),
       ["voice", "digital", "support"].map((ch) => chBlock(ch.charAt(0).toUpperCase() + ch.slice(1), byCh(ch))),
@@ -6963,13 +7014,55 @@ function App() {
   const simSet = useStrategySims(simConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
   const [matrix, setMatrix] = useState18(null);
+  const [autoPicked, setAutoPicked] = useState18(false);
   const liveHash = useMemo3(() => simHash(simConfig), [simConfig]);
+  const liveHashRef = useRef4(liveHash);
+  liveHashRef.current = liveHash;
+  const matrixHydrated = useRef4(false);
   const matrixStale = !matrix || matrix.hash !== liveHash;
-  const onRunMatrix = useCallback4(() => setMatrix(runMatrix(simConfig)), [simConfig]);
+  const onRunMatrix = useCallback4(() => {
+    setMatrix(runMatrix(simConfig));
+    setAutoPicked(false);
+  }, [simConfig]);
   const onSelectCell = useCallback4((gid, sid) => {
     setActiveGroupId(gid);
     setActiveStrategyId(sid);
+    setAutoPicked(false);
   }, []);
+  useEffect4(() => {
+    let alive = true;
+    (async () => {
+      const ms = await storage.get(KEYS.matrix);
+      if (!alive) return;
+      if (ms) {
+        if (ms.cells) setMatrix({ hash: ms.hash, cells: ms.cells });
+        if (ms.cells && ms.hash === liveHashRef.current) {
+          const pick = bestCell({ hash: ms.hash, cells: ms.cells });
+          if (pick) {
+            setActiveGroupId(pick.gid);
+            setActiveStrategyId(pick.sid);
+            setAutoPicked(true);
+          }
+        } else if (ms.selected && ms.selected.gid) {
+          setActiveGroupId(ms.selected.gid);
+          setActiveStrategyId(ms.selected.sid);
+        }
+      }
+      matrixHydrated.current = true;
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [storage]);
+  useEffect4(() => {
+    if (!matrixHydrated.current) return;
+    const payload = { selected: { gid: safeGroup, sid: safeStrategy } };
+    if (matrix) {
+      payload.hash = matrix.hash;
+      payload.cells = matrix.cells;
+    }
+    storage.set(KEYS.matrix, payload);
+  }, [matrix, safeGroup, safeStrategy, storage]);
   const saveSnapshot = useCallback4(async (name) => {
     if (!activeSim) return;
     const rec = makeSavedRun(name, activeSim.config, activeSim);
@@ -7019,6 +7112,7 @@ function App() {
     matrixStale,
     onRunMatrix,
     onSelectCell,
+    autoPicked,
     intradayPresets,
     setIntradayPresets,
     seasonalityPresets,
@@ -7093,7 +7187,7 @@ function TabBody(props) {
   const { id, simSet, activeSim, config, ops } = props;
   switch (id) {
     case "summary":
-      return /* @__PURE__ */ jsx21(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell });
+      return /* @__PURE__ */ jsx21(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell, autoPicked: props.autoPicked });
     case "strategies":
       return /* @__PURE__ */ jsx21(StrategiesTab, { simSet, config, activeStrategy: props.activeStrategy, ops });
     case "plan":
@@ -7415,6 +7509,7 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-all { font-weight: 700; font-size: 13px; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+.mx-autopick { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; font-style: italic; }
 
 /* \xA724 holistic hierarchy blocks + filter chips */
 .holo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
