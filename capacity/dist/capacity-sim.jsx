@@ -289,16 +289,106 @@ var require_engine = __commonJS({
       "FY-end Q4": [1.2, 1.25, 1.35, 0.95, 0.9, 0.95, 1, 1, 1, 1.05, 1.05, 1.1],
       "School-term": [1.1, 1.1, 1.05, 1.05, 1, 0.8, 0.75, 0.8, 1.15, 1.1, 1.05, 0.95]
     };
+    var BUILTIN_STRATEGIES = [
+      { id: "S1", name: "Meet requirement", baseType: "meet", builtin: true },
+      { id: "S2", name: "Buffer above", baseType: "buffer", builtin: true },
+      { id: "S3", name: "Forward backfill", baseType: "backfill", builtin: true },
+      { id: "S4", name: "Manual plan", baseType: "manual", builtin: true }
+    ];
+    function strategyById(cfg, id) {
+      return (cfg && cfg.strategies || []).find((s) => s.id === id) || BUILTIN_STRATEGIES.find((s) => s.id === id) || null;
+    }
+    function strategyAt(cfg, idOrObj, w, seen) {
+      const s = typeof idOrObj === "string" ? strategyById(cfg, idOrObj) : idOrObj;
+      if (!s) return { id: String(idOrObj), name: String(idOrObj), baseType: "meet" };
+      if (s.baseType !== "schedule") return s;
+      seen = seen || /* @__PURE__ */ new Set();
+      if (seen.has(s.id)) return { id: s.id, name: s.name, baseType: "meet" };
+      seen.add(s.id);
+      const segs = [...s.segments || []].sort((a, b) => (a.fromWeek || 1) - (b.fromWeek || 1));
+      let pick = null;
+      for (const seg of segs) if ((seg.fromWeek || 1) <= w + 1) pick = seg;
+      if (!pick) pick = segs[0];
+      if (!pick) return { id: s.id, name: s.name, baseType: "meet" };
+      return strategyAt(cfg, pick.strategyId, w, seen);
+    }
+    function strategyAllManual(cfg, idOrObj) {
+      for (let w = 0; w < cfg.engine.horizonWeeks; w++) {
+        if (strategyAt(cfg, idOrObj, w).baseType !== "manual") return false;
+      }
+      return true;
+    }
+    function effectiveSupports(cfg) {
+      const map = {};
+      for (const q of cfg.queues) {
+        map[q.id] = (q.supports || []).map((s) => ({
+          queueId: s.queueId,
+          priority: s.priority != null ? s.priority : 1,
+          maxSharePct: s.maxSharePct != null ? s.maxSharePct : null
+        }));
+      }
+      for (const r of cfg.queues) {
+        (r.crossSkill || []).forEach((donorId, i) => {
+          const list = map[donorId];
+          if (!list || list.some((s) => s.queueId === r.id)) return;
+          list.push({ queueId: r.id, priority: i + 1, maxSharePct: 100 });
+        });
+      }
+      return map;
+    }
+    function supportersOf(cfg, qid) {
+      const map = effectiveSupports(cfg);
+      const out = [];
+      for (const q of cfg.queues) {
+        for (const s of map[q.id]) if (s.queueId === qid) out.push({ queueId: q.id, priority: s.priority, maxSharePct: s.maxSharePct });
+      }
+      return out.sort((a, b) => a.priority - b.priority);
+    }
+    function resolveStartingHC(cfg) {
+      const out = {};
+      const blanks = [];
+      let explicitSum = 0;
+      for (const q of cfg.queues) {
+        if (q.resourcing === "supported") {
+          out[q.id] = 0;
+          continue;
+        }
+        if (q.fte == null || q.fte === "") blanks.push(q);
+        else {
+          out[q.id] = q.fte;
+          explicitSum += q.fte;
+        }
+      }
+      if (blanks.length) {
+        const g = cfg.engine.globalStartingHC;
+        const pool = g != null ? Math.max(0, g - explicitSum) : 0;
+        const wts = blanks.map((q) => q.dailyVolume * q.aht / Math.max(1e-9, q.concurrency || 1));
+        const tot = sum(wts) || 1;
+        blanks.forEach((q, i) => {
+          out[q.id] = pool * (wts[i] / tot);
+        });
+      }
+      return out;
+    }
     function scenarioFor(week, day, q, cfg, activeIds) {
       const out = { volMult: 1, attritionAdd: 0, freeze: false, ahtMult: 1, repeatAdd: 0, training: null };
+      let growthMult = 1, manualG = null;
       for (const s of cfg.scenarios) {
         if (!activeIds.has(s.id)) continue;
         const hits = s.queueIds === "all" || (s.queueIds || []).includes(q.id);
-        if (!hits && s.type !== "hiringFreeze" && s.type !== "attritionShock" && s.type !== "reducedTraining") continue;
+        const opWide = s.type === "hiringFreeze" || s.type === "attritionShock" || s.type === "reducedTraining" || s.type === "freezeManual";
+        if (!hits && !opWide) continue;
         const w = week - s.startWeek;
         if (w < 0) continue;
-        if (s.type === "growth") out.volMult *= Math.pow(1 + s.p.rate, w / 4.345);
-        else if (s.type === "launch") {
+        if (s.type === "growth") {
+          const wEff = s.p.stopWeek != null ? Math.max(0, Math.min(w, s.p.stopWeek - s.startWeek)) : w;
+          growthMult *= Math.pow(1 + s.p.rate, wEff / 4.345);
+        } else if (s.type === "growthManual") {
+          const v = s.p && s.p.weeklyPct ? s.p.weeklyPct[week] != null ? s.p.weeklyPct[week] : s.p.weeklyPct[String(week)] : void 0;
+          if (v != null) manualG = (manualG == null ? 1 : manualG) * (1 + v);
+        } else if (s.type === "freezeManual") {
+          if ((s.p.weeks || []).includes(week)) out.freeze = true;
+        } else if (s.type === "launch") {
           const { ramp, peak, decay } = s.p;
           let m = 0;
           if (w < ramp) m = peak * ((w + 1) / ramp);
@@ -316,6 +406,7 @@ var require_engine = __commonJS({
           out.repeatAdd += s.p.repeatUplift;
         }
       }
+      out.volMult *= manualG != null ? manualG : growthMult;
       return out;
     }
     function exogenousVolume(q, week, day, cfg, activeIds) {
@@ -352,8 +443,12 @@ var require_engine = __commonJS({
       return { effective, heads, leaversNext: (trained + sum(ramp.map((c) => c.heads))) * wkAttr };
     }
     function decideHiring(cfg, st, w, activeIds, strategy, reqFteAt) {
+      const sObj = strategyAt(cfg, strategy, w);
+      const excluded = new Set(sObj.excludedQueueIds || []);
       const wants = [];
       for (const q of cfg.queues) {
+        if (q.resourcing === "supported") continue;
+        if (excluded.has(q.id)) continue;
         const s = st[q.id];
         const sc = scenarioFor(w, 0, q, cfg, activeIds);
         if (sc.freeze) continue;
@@ -364,12 +459,13 @@ var require_engine = __commonJS({
         const wkAttr = clamp(q.wf.attrition * (1 + q.wf.attritionGrowth * (w / 4.345)) + sc.attritionAdd, 0, 0.6) / 4.345;
         const proj = projectSupply(s, q, lead, wkAttr);
         let want = 0;
-        if (strategy === "S4") {
+        if (sObj.baseType === "manual") {
           want = (q.wf.hires || []).filter((h) => h.week === w).reduce((a, b) => a + b.heads, 0);
-        } else if (strategy === "S3") {
+        } else if (sObj.baseType === "backfill") {
           want = proj.leaversNext * 1;
         } else {
-          const target = reqFteAt(q, L) * (strategy === "S2" ? 1 + cfg.hiring.buffer : 1);
+          const buf = sObj.baseType === "buffer" ? sObj.bufferPct != null ? sObj.bufferPct : cfg.hiring.buffer : 0;
+          const target = reqFteAt(q, L) * (1 + buf);
           want = Math.max(0, target - proj.effective);
         }
         if (want <= 1e-6) continue;
@@ -387,7 +483,7 @@ var require_engine = __commonJS({
         wants.push({ q, want, marginal, breachWk });
       }
       wants.sort((a, b) => b.marginal - a.marginal || a.breachWk - b.breachWk);
-      const cap = strategy === "S4" ? Infinity : cfg.hiring.cap;
+      const cap = sObj.baseType === "manual" ? Infinity : cfg.hiring.cap;
       let left = cap;
       const grants = {}, denied = {};
       for (const x of wants) {
@@ -426,9 +522,11 @@ var require_engine = __commonJS({
         reqFteCache.set(key, fte);
         return fte;
       };
+      const startHC = resolveStartingHC(cfg);
+      const supportsMap = effectiveSupports(cfg);
       const st = {};
       for (const q of cfg.queues) {
-        st[q.id] = { trained: q.fte, ramp: [], training: [], pipeline: [], burnout: 0, backlog: 0, deflectIn: 0, cumChurn: 0, lastCurve: q.wf.learningCurve };
+        st[q.id] = { trained: startHC[q.id], ramp: [], training: [], pipeline: [], burnout: 0, backlog: 0, deflectIn: 0, cumChurn: 0, lastCurve: q.wf.learningCurve };
       }
       const weeks = [], allocTrace = [];
       const svcUsed = {};
@@ -482,9 +580,9 @@ var require_engine = __commonJS({
           for (const q of cfg.queues) {
             const s = st[q.id];
             const sc = scenarioFor(w, d, q, cfg, activeIds);
-            const prof = s.trained + sum(s.ramp.map((c) => c.heads * (s.lastCurve[c.age] ?? 1)));
+            const prof2 = s.trained + sum(s.ramp.map((c) => c.heads * (s.lastCurve[c.age] ?? 1)));
             const absence = s.burnout / 100 * q.burn.absenceUplift;
-            hrs[q.id] = prof * eng.hoursPerFteDay * (eng.daysWorkedPerFte / eng.daysPerWeek) * clamp(1 - q.shrinkage - absence, 0.02, 1);
+            hrs[q.id] = prof2 * eng.hoursPerFteDay * (eng.daysWorkedPerFte / eng.daysPerWeek) * clamp(1 - q.shrinkage - absence, 0.02, 1);
             vol[q.id] = exogenousVolume(q, w, d, cfg, activeIds) + (q.type === "voice" ? s.deflectIn : 0);
             s.deflectIn = 0;
             s.ahtMult = sc.ahtMult;
@@ -495,19 +593,49 @@ var require_engine = __commonJS({
             req[q.id] = rc[q.id].hours;
             st[q.id].eq = eq;
           }
-          const spare = {};
-          for (const q of cfg.queues) spare[q.id] = hrs[q.id] - req[q.id];
+          const spare = {}, deficit = {};
           for (const q of cfg.queues) {
-            if (spare[q.id] >= 0) continue;
-            for (const donorId of q.crossSkill || []) {
-              if (!st[donorId] || spare[donorId] <= 0) continue;
-              const give = Math.min(spare[donorId], -spare[q.id] / eng.crossSkillProficiency);
-              spare[donorId] -= give;
-              hrs[donorId] -= give;
-              hrs[q.id] += give * eng.crossSkillProficiency;
-              spare[q.id] += give * eng.crossSkillProficiency;
-              agg[q.id].flexIn += give * eng.crossSkillProficiency;
-              if (spare[q.id] >= 0) break;
+            spare[q.id] = Math.max(0, hrs[q.id] - req[q.id]);
+            deficit[q.id] = Math.max(0, req[q.id] - hrs[q.id]);
+          }
+          const prof = eng.crossSkillProficiency;
+          for (const donor of cfg.queues) {
+            const outs = supportsMap[donor.id] || [];
+            if (!outs.length || spare[donor.id] <= 1e-9) continue;
+            const S0 = spare[donor.id];
+            const tiers = [...new Set(outs.map((o) => o.priority))].sort((a, b) => a - b);
+            for (const tier of tiers) {
+              if (spare[donor.id] <= 1e-9) break;
+              const rec = outs.filter((o) => o.priority === tier && st[o.queueId] && deficit[o.queueId] > 1e-9).map((o) => ({
+                qid: o.queueId,
+                need: deficit[o.queueId] / prof,
+                // in donor-hours
+                cap: o.maxSharePct != null ? o.maxSharePct / 100 * S0 : Infinity,
+                taken: 0
+              }));
+              let avail = spare[donor.id];
+              for (let guard = 0; guard < rec.length + 2 && avail > 1e-9; guard++) {
+                const act = rec.filter((r) => Math.min(r.need, r.cap) - r.taken > 1e-9);
+                if (!act.length) break;
+                const totNeed = act.reduce((a, r) => a + (r.need - r.taken), 0);
+                let gave = 0;
+                for (const r of act) {
+                  const give = Math.min(Math.min(r.need, r.cap) - r.taken, avail * ((r.need - r.taken) / totNeed));
+                  r.taken += give;
+                  gave += give;
+                }
+                avail -= gave;
+                if (gave <= 1e-9) break;
+              }
+              for (const r of rec) {
+                if (r.taken <= 1e-9) continue;
+                spare[donor.id] -= r.taken;
+                hrs[donor.id] -= r.taken;
+                const recv = r.taken * prof;
+                hrs[r.qid] += recv;
+                deficit[r.qid] = Math.max(0, deficit[r.qid] - recv);
+                agg[r.qid].flexIn += recv;
+              }
             }
           }
           for (const t of cfg.serviceTeams) {
@@ -631,6 +759,10 @@ var require_engine = __commonJS({
             training: headsTrain,
             pipeline: headsPipe,
             paid,
+            // §14.6: active excludes trainees; startingHC is the week-0 resolved HC.
+            active: s.trained + headsRamp,
+            startingHC: startHC[q.id],
+            resourcing: q.resourcing || "resourced",
             reqFte,
             hours: a.hours,
             reqHours: a.reqHours,
@@ -661,6 +793,7 @@ var require_engine = __commonJS({
           wk.totals.trained += s.trained;
           wk.totals.inTraining += headsTrain;
           wk.totals.ramping += headsRamp;
+          wk.totals.active = (wk.totals.active || 0) + s.trained + headsRamp;
         }
         let svcCost = 0;
         for (const t of cfg.serviceTeams) {
@@ -718,12 +851,13 @@ var require_engine = __commonJS({
       }
       const leaversWk = weeks.map((w) => sum(cfg.queues.map((q) => w.queues[q.id].leavers)));
       const avgLeavers = sum(leaversWk.slice(-8)) / Math.min(8, leaversWk.length);
-      if (avgLeavers > cfg.hiring.cap * 1.0001 && strategy !== "S4") {
+      if (avgLeavers > cfg.hiring.cap * 1.0001 && !strategyAllManual(cfg, strategy)) {
         flags.tippingPoint = true;
         findings.push({ tone: "red", text: `Tipping point: the operation is losing ${avgLeavers.toFixed(1)} people/week against a hiring cap of ${cfg.hiring.cap}/week. Headcount cannot recover at any allocation.` });
       }
       for (const q of cfg.queues) {
         const series = weeks.map((w) => w.queues[q.id]);
+        const qLabel = q.resourcing === "supported" ? `${q.name} (supported)` : q.name;
         const breachWeeks = series.filter((s) => s.status !== "green").length;
         const firstBreach = series.findIndex((s) => s.status === "red");
         const peakBurn = Math.max(...series.map((s) => s.burnout));
@@ -733,34 +867,78 @@ var require_engine = __commonJS({
           const raiseBy = firstBreach - lead;
           findings.push({
             tone: "red",
-            text: raiseBy >= 0 ? `${q.name} goes red in week ${firstBreach + 1}. Requisitions must land by week ${raiseBy + 1} given the ${lead}-week hire-to-productive lead.` : `${q.name} goes red in week ${firstBreach + 1}, inside the ${lead}-week lead time. Hiring cannot fix it \u2014 cover with flexing, service teams or deferral.`
+            text: q.resourcing === "supported" ? `${qLabel} goes red in week ${firstBreach + 1}. It is staffed only from supporter spare hours \u2014 add support routes or resource it directly.` : raiseBy >= 0 ? `${qLabel} goes red in week ${firstBreach + 1}. Requisitions must land by week ${raiseBy + 1} given the ${lead}-week hire-to-productive lead.` : `${qLabel} goes red in week ${firstBreach + 1}, inside the ${lead}-week lead time. Hiring cannot fix it \u2014 cover with flexing, service teams or deferral.`
           });
         }
-        if (peakBurn > 60) findings.push({ tone: "amber", text: `${q.name} peaks at ${Math.round(peakBurn)}/100 burnout, lifting attrition and absence.` });
+        if (peakBurn > 60) findings.push({ tone: "amber", text: `${qLabel} peaks at ${Math.round(peakBurn)}/100 burnout, lifting attrition and absence.` });
         const last = series[series.length - 1];
         if (last.paid > last.reqFte * 1.1 && last.reqFte > 0) {
           const excess = last.paid - last.reqFte;
           const perWeek = last.paid * (q.wf.attrition / 4.345);
           const wks = perWeek > 0 ? Math.ceil(excess / perWeek) : 999;
-          findings.push({ tone: "amber", text: `${q.name} ends ${excess.toFixed(0)} FTE over requirement. Under a freeze, attrition clears it in ~${wks} weeks (~${f(excess * q.agentCost / 52 * (wks / 2))} carrying cost).` });
+          findings.push({ tone: "amber", text: `${qLabel} ends ${excess.toFixed(0)} FTE over requirement. Under a freeze, attrition clears it in ~${wks} weeks (~${f(excess * q.agentCost / 52 * (wks / 2))} carrying cost).` });
         }
       }
       if (churnCost > 0) findings.push({ tone: churnCost > waste ? "red" : "green", text: `Over ${weeks.length} weeks: ${f(totalCost)} to run, ${f(churnCost)} lost to poor experience (${Math.round(lost).toLocaleString()} customers), ${f(waste)} idle pay.` });
-      return { totalCost, churnCost, waste, lost, allIn: totalCost + churnCost, findings: findings.slice(0, 10), flags, perQueue, strategy };
+      const hiring = { queues: {}, groups: {} };
+      const blankAggRow = () => ({ volume: 0, required: 0, hiring: 0, pipelineEnd: 0, training: 0, active: 0, churnCount: 0, _avgActive: 0 });
+      const groups = { voice: blankAggRow(), digital: blankAggRow(), overall: blankAggRow() };
+      for (const q of cfg.queues) {
+        const series = weeks.map((w) => w.queues[q.id]);
+        const last = series[series.length - 1];
+        const row = {
+          name: q.name,
+          type: q.type,
+          resourcing: q.resourcing || "resourced",
+          volume: sum(series.map((s) => s.volume)),
+          required: last.reqFte,
+          hiring: sum(series.map((s) => s.reqsRaised || 0)),
+          pipelineEnd: last.pipeline,
+          training: last.training,
+          active: last.active != null ? last.active : last.trained + last.ramp,
+          churnCount: sum(series.map((s) => s.leavers || 0))
+        };
+        const avgActive = sum(series.map((s) => s.active != null ? s.active : s.trained + s.ramp)) / Math.max(1, series.length);
+        row.churnPct = avgActive > 1e-9 ? row.churnCount / avgActive : 0;
+        hiring.queues[q.id] = row;
+        for (const g of [groups[q.type] || (groups[q.type] = blankAggRow()), groups.overall]) {
+          g.volume += row.volume;
+          g.required += row.required;
+          g.hiring += row.hiring;
+          g.pipelineEnd += row.pipelineEnd;
+          g.training += row.training;
+          g.active += row.active;
+          g.churnCount += row.churnCount;
+          g._avgActive += avgActive;
+        }
+      }
+      for (const k of Object.keys(groups)) {
+        const g = groups[k];
+        g.churnPct = g._avgActive > 1e-9 ? g.churnCount / g._avgActive : 0;
+        delete g._avgActive;
+      }
+      hiring.groups = groups;
+      return { totalCost, churnCost, waste, lost, allIn: totalCost + churnCost, findings: findings.slice(0, 10), flags, perQueue, strategy, hiring };
     }
     function makeDefaultConfig2() {
       const wf = () => ({ attrition: 0.04, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [0.6, 0.75, 0.9, 1], hires: [] });
       const burn = () => ({ occThreshold: 0.85, sensitivity: 1.5, recovery: 8, maxAttritionMult: 2, absenceUplift: 0.05 });
       const v1 = "q_bill", v2 = "q_tech", d1 = "q_wapp", d2 = "q_chat";
       return {
-        engine: { horizonWeeks: 26, dayStart: 8, dayEnd: 20, intervalMin: 30, occupancyCeiling: 0.85, currency: "\xA3", daysPerWeek: 7, hoursPerFteDay: 8, daysWorkedPerFte: 5, crossSkillProficiency: 0.9 },
+        engine: { horizonWeeks: 26, dayStart: 8, dayEnd: 20, intervalMin: 30, occupancyCeiling: 0.85, currency: "\xA3", daysPerWeek: 7, hoursPerFteDay: 8, daysWorkedPerFte: 5, crossSkillProficiency: 0.9, globalStartingHC: null },
         hiring: { cap: 18, buffer: 0.1, activeStrategy: "S1" },
+        // §14.1: strategies live in config; built-ins S1–S4 are always present.
+        // Users append custom entries ({name, baseType, bufferPct, excludedQueueIds,
+        // segments}) and schedules. The default queue set keeps the legacy
+        // `crossSkill` field; the §14.3 migration shim derives outbound `supports`
+        // from it at simulate time, so old and new configs behave identically.
+        strategies: BUILTIN_STRATEGIES.map((s) => ({ ...s })),
         seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS2["Flat"]] },
         queues: [
-          { id: v1, name: "Voice \u2014 Billing", type: "voice", dailyVolume: 2e3, aht: 300, profile: [...DEFAULT_PROFILE2], asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, fte: 63, agentCost: 32e3, crossSkill: [v2], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, wf: wf(), burn: burn() },
-          { id: v2, name: "Voice \u2014 Technical", type: "voice", dailyVolume: 900, aht: 420, profile: [...DEFAULT_PROFILE2], asaTarget: 45, maxAbandon: 0.06, patience: 100, shrinkage: 0.3, fte: 47, agentCost: 32e3, crossSkill: [], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, wf: wf(), burn: burn() },
-          { id: d1, name: "WhatsApp \u2014 Service", type: "digital", dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE2], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, wf: wf(), burn: burn() },
-          { id: d2, name: "Chat \u2014 Sales", type: "digital", dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE2], concurrency: 2, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, wf: wf(), burn: burn() }
+          { id: v1, name: "Voice \u2014 Billing", type: "voice", dailyVolume: 2e3, aht: 300, profile: [...DEFAULT_PROFILE2], asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, fte: 63, agentCost: 32e3, crossSkill: [v2], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+          { id: v2, name: "Voice \u2014 Technical", type: "voice", dailyVolume: 900, aht: 420, profile: [...DEFAULT_PROFILE2], asaTarget: 45, maxAbandon: 0.06, patience: 100, shrinkage: 0.3, fte: 47, agentCost: 32e3, crossSkill: [], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+          { id: d1, name: "WhatsApp \u2014 Service", type: "digital", dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE2], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+          { id: d2, name: "Chat \u2014 Sales", type: "digital", dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE2], concurrency: 2, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() }
         ],
         serviceTeams: [{ id: "st_1", name: "Flex pool", size: 12, premiumPct: 0.2, proficiency: 0.8, triggerOccupancy: 0.9, maxHoursPerWeek: 20, agentCost: 32e3, coversQueues: [v1, v2] }],
         costs: { managerCost: 48e3, managerRatio: 12 },
@@ -803,7 +981,15 @@ var require_engine = __commonJS({
       norm,
       sum,
       uid: uid3,
-      stretchCurve
+      stretchCurve,
+      // Revision 1 (SPEC §14)
+      BUILTIN_STRATEGIES,
+      strategyById,
+      strategyAt,
+      strategyAllManual,
+      effectiveSupports,
+      supportersOf,
+      resolveStartingHC
     };
   }
 });

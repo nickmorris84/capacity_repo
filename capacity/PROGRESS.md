@@ -271,8 +271,102 @@ the real-browser saved-run compare confirms S1 vs S2 now differ correctly.
 
 Deliverables: dist/capacity-sim.jsx and dist/capacity-sim.html (committed).
 
+## P6a — Revision 1 engine: ✅ COMPLETE (P1 battery unchanged + 19 new R1 tests green)
+
+Gate tally after P6a: **P1 20 · R1 19 · P2 12 · P3 9 · P4 11 · P5/§13 20 = 91 tests, 0
+failures.** `npm test` runs engine → r1 → ui → strategies → documents → harness.
+tests/engine.test.js is byte-identical to P1 — that was the regression gate.
+
+SPEC §14 appended verbatim and committed first (`R1: spec amendment`); it is the
+source of truth for P6a (engine, this session) and P6b (UI restructure, next).
+
+14.1 Strategy model (engine/engine.js):
+- `cfg.strategies` array; BUILTIN_STRATEGIES S1–S4 always resolvable even for
+  configs that predate the array (P5 run files load fine). Custom entries:
+  {name, baseType meet|buffer|backfill|manual|schedule, bufferPct (buffer
+  strategies fall back to cfg.hiring.buffer when absent — S2 unchanged),
+  excludedQueueIds, segments}.
+- `strategyAt(cfg, idOrObj, week)` resolves the strategy IN FORCE at a week:
+  schedules pick the last segment whose 1-based fromWeek has started, nested
+  schedules resolve recursively with a cycle guard (falls back to meet).
+  `decideHiring` resolves per decision week, so a pivot changes only future
+  requisitions — cohorts already in the pipeline continue. The weekly cap is
+  Infinity only in weeks whose in-force baseType is manual; the tipping-point
+  finding is skipped only when the strategy is manual in EVERY week
+  (strategyAllManual), preserving the old S4 behaviour exactly.
+
+14.2 Supported queues: `resourcing: "resourced" | "supported"`. Supported ⇒
+startingHC forced 0 (even with an explicit fte), zero wants under every
+baseType including manual, excluded from the global-HC spread, served only via
+support routes + service teams. Weekly record carries `resourcing`; per-queue
+findings badge "(supported)" with a route-focused breach message.
+
+14.3 Support routing: outbound `supports: [{queueId, priority, maxSharePct?}]`
+replaces recipient-centric crossSkill. Day-loop allocator is donor-centric and
+tiered: within a tier the donor's spare splits proportionally to recipients'
+remaining deficits, bounded per recipient by need and by maxSharePct × the
+donor's INITIAL spare that day; cap-forfeited share redistributes within the
+tier; tier leftovers flow down. Donors only ever give from spare (never below
+their own allocation-time requirement). Migration shim in `effectiveSupports`:
+crossSkill arrays auto-convert (priority = array position + 1, maxSharePct
+100) unless the donor already declares that route; empty arrays convert to
+nothing, so the legacy tests' off-switch still works. `supportersOf` derives
+the inbound supported-by list. makeDefaultConfig deliberately KEEPS crossSkill
+(shim proves itself on the default config); P6b flips defaults when the editor
+writes supports.
+
+14.4 `engine.globalStartingHC`: blanks (fte == null) share (global − Σ
+explicit) weighted by volume × AHT ÷ concurrency via resolveStartingHC;
+explicit HC always wins; no global ⇒ blanks resolve 0.
+
+14.5 Scenarios: growth gains stopWeek (elapsed-growth clamp — multiplier flat
+after it); new types growthManual {weeklyPct sparse map, absolute weeks,
+overrides the compounding growth component for that week only — other weeks
+compound as if untouched} and freezeManual {weeks[] absolute, no reqs raised
+those weeks}, both additional; existing types untouched. Both new types keep
+scenarioFor's growth component separate from launch/p1/forecastError
+multipliers, so precedence (§2) is preserved — P1 test 7 still green.
+
+14.6 Reporting: weekly per-queue record adds startingHC, active (trained +
+ramping, excluding trainees), resourcing; totals add active. summary gains
+`hiring`: per queue and Voice/Digital/Overall {volume, required (end reqFte),
+hiring (Σ reqs raised), pipelineEnd, training, active (end), churnCount (Σ
+leavers), churnPct (churn ÷ average active over the horizon)} — the test
+reconciles every aggregate against the weekly records.
+
+New battery (tests/r1.test.js, 19 tests): migration shim (default config,
+explicit-wins, empty-off-switch); hand-computed tier allocation (10h spare →
+6/3 then remainder 1; 40% cap → 4/3/3; priorities 1&2 with 60%/100% caps →
+6/4) on an exact-arithmetic all-digital rig (ceiling 1, prof 1, 8h heads — no
+Erlang fuzz); supported queues (zero reqs/pipeline/paid/startingHC under all
+four strategies, donor floor at allocation-time requirement, recipient hours =
+min(need, spare) incl. starved-donor 0); custom buffer 0.2 settles ≈ req × 1.2
+with cfg buffer 0.1 ignored; excludedQueueIds zero reqs while the sibling
+hires; schedule S3→S1 (weeks 0–9 allocTrace identical to pure S3, pivot-week
+want spike, totals strictly S3 < schedule < S1 — the upper gap is small by
+design since later hires decay less, so the assertion is strict ordering);
+schedule cycle guard; global-HC spread (explicit 50 untouched, blanks 40/40
+incl. a concurrency-2 digital weight, sums to global, flows into weekly
+startingHC/paid; supported fte excluded from the pool); growth stopWeek flat
+∀k; growthManual override-week-only semantics (with and without a compounding
+growth active); freezeManual weeks raise zero (trace want 0) with neighbours
+unaffected; weekly-field spot checks (63 startingHC, active = paid − training,
+attrInEffect ≈ 4%/mo) and hiring-summary reconciliation.
+
+Engine-behaviour note for P6b: donation happens before the voice redial fixed
+point, so a donor that gives ALL its spare can show cover slightly < 1 against
+the redial-inflated weekly reqHours — the floor guarantee is against the
+allocation-time requirement (two R1 tests document this). dist/ was
+regenerated by the harness gate and committed (deliverables track source).
+
+P6b (UI restructure, next session): 14.6 label changes (Active/Req, Coverage),
+14.7 Runs→Snapshots rename + one shared comparison surface, 14.8 per-tab
+print action + package reachability, editors for strategies/schedules,
+supported-queue + supports editor replacing the crossSkill toggles, global
+starting HC field, new scenario types in the editor, hiring-summary table.
+
 ## Build & run
-- `npm test` — all five phase gates.
+- `npm test` — all seven gates (engine, r1, ui, strategies, documents, harness).
 - `npm run build:html` — regenerate dist/ deliverables from source.
 - Open dist/capacity-sim.html in any browser (offline) or paste dist/capacity-sim.jsx
   into a React artifact host.
