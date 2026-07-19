@@ -168,3 +168,28 @@ New tests, hand-computed where marked:
 * Risk-support fields: weekly record carries otHours, otStreakWeeks, borrowedSharePct, trainingDebt; spot-check a hand-built case (a queue meeting 30% of requirement from a pool shows borrowedSharePct ≈ 30).
 * Horizon bounds: engine clamps horizonWeeks to [24, 78]; default config is 52.
 * Matrix: 5×5 at 52 weeks completes < 8 s; single live sim < 400 ms at 52 weeks (budget updated from 26-week era).
+
+## SPEC §24 — Revision 3
+
+§24.1 Knock-on, simplified. Per queue exactly two figures: Repeat contacts % (failed contacts that retry this queue) and Converts to calls % with a target call queue (default: the brand's primary voice queue). Same engine mechanics as repeat/spill; migration maps old values 1:1 and must reproduce legacy numbers exactly.
+
+§24.2 Sharing, decentralised. Pool entities are DELETED. Each queue declares: share % of its spare + shares-with list (any queues, any brand). Offered spare = sharePct × (capacity − own requirement); recipients in deficit draw pro-rata by deficit, no priorities; donors may reclaim training (rung-3 mechanics, own debt) to honour sharing when recipients are in deficit; donor never below own requirement. Migration decomposes existing pools into per-queue declarations preserving behaviour.
+
+§24.3 Hiring cap hierarchy. Settings holds a caps matrix per brand × channel (required), plus OPTIONAL per-brand ceilings and an OPTIONAL total ceiling. Effective limit = the tightest applicable. Allocator: marginal-churn allocation within each segment cap as today; if a brand or total ceiling then binds, trim grants across segments starting from the lowest marginal. Trace names which level bound ("Brand A ceiling", "Total").
+
+§24.4 Strategy parameters editable. Built-ins carry editable params: S2 bufferPct; S3 forwardMonths (1–6, default 3). Custom strategies edit the same params. Schedules unchanged.
+
+§24.5 Digital subtypes. Digital queues carry subtype: Digital Customer (live interaction: concurrency, SLA in minutes) or Digital Workflow (backlog processing: no concurrency, handle time per item, SLA in hours, default 90% within 24h). A brand/channel may mix subtypes across its queues — the subtype is chosen per queue.
+
+§24.6 Volume model. Volumes are a weekly series anchored to a week-1 calendar date set in Settings. Entry per queue OR inherited from brand/channel with editable shares (queue opt-out requires its own series): (a) paste a CSV weekly list (52+), or (b) enter one weekly figure and run the seasonality wizard, which generates the series (base × seasonal multipliers from the start date) — UI carries a one-line explanation of exactly that. Either way the series remains fully editable.
+
+§24.7 Monthly costs. Agent cost is input per month everywhere; engine converts (×12 ÷ 52 for weekly); financial outputs report monthly and annual.
+
+§24.8 Group-scoped scenarios. Scope lives on the scenario GROUP (targets: brands / channels / queues); factors inside inherit it.
+
+§24.9 Simulation lifecycle. New simulation = Duplicate current config | Start from defaults | Start truly blank (no brands, no queues; UI shows a build-from-nothing empty state).
+
+§24.10 Settings. Week-1 date; the caps matrix; Business-box data support (per-queue SLA target + simulated RAG).
+
+### §24 gate tests (hand-computed where marked)
+Legacy knock-on reproduced exactly post-migration; sharing — donor spare 10h at 60% share, recipients deficits 6:3 draw 6h split 4:2 (hand); cap trimming — segment grants then a binding total ceiling trims lowest-marginal first (hand); S3 forwardMonths=1 vs 6 changes req timing in the right direction; workflow subtype — 24h SLA maths on a hand-built backlog case; series anchoring — seasonality wizard week 1 uses the Settings date's month; monthly→weekly cost conversion exact; blank config simulates without crashing (empty world = empty results, no NaN). Plus the ENTIRE existing battery, unmodified.
