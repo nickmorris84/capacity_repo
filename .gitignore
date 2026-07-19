@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+
+# Build output is generated, but the two P5 deliverables are committed.
+dist/*
+!dist/capacity-sim.html
+!dist/capacity-sim.jsx

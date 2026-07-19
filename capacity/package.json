@@ -3,7 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js",
-    "build:html": "echo 'placeholder until P5' && exit 1"
+    "test": "node tests/engine.test.js && node tests/r1.test.js && node tests/r2.test.js && node tests/r1ui.test.js && node tests/harness.test.js",
+    "test:engine": "node tests/engine.test.js",
+    "test:r1": "node tests/r1.test.js",
+    "test:r2": "node tests/r2.test.js",
+    "test:r1ui": "node tests/r1ui.test.js",
+    "test:harness": "node tests/harness.test.js",
+    "build:html": "node scripts/build.js",
+    "build": "node scripts/build.js"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "recharts": "^3.9.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1"
   }
 }
