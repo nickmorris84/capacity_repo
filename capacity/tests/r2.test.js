@@ -219,6 +219,17 @@ t("target draws exactly the 105 h cap; donor cover 175/245; donor SLA goes hones
   ok(l0.sl < 0.8 && l0.status !== "green", "donor RAG honest: sl " + l0.sl.toFixed(3) + " status " + l0.status);
   eq(t0.borrowedSharePct, 105 / 420, 1e-6, "target borrowedSharePct = 0.25");
 });
+t("targets 'priority-above' pulls to higher-priority queues across brands (§17 — no brand qualifier)", () => {
+  const cfg = rigCfg({ settings: { ot: { weeklyCeiling: 0 } } });
+  // Donor in b1 at priority 5; a higher-priority (1) deficit target sits in b2.
+  dq(cfg, "l", 35, { fte: 5, priority: 5, resourcing: "leveraged", leverage: { capHoursPerWeek: 105, targets: "priority-above" } });
+  dq(cfg, "t", 60, { brandId: "b2", fte: 5, priority: 1 });
+  const sim = E.simulate(cfg);
+  // priority-above is global (like the explicit-list form), so the cross-brand
+  // higher-priority target draws the full weekly cap — identical to test 8.
+  eq(wq(sim, 0, "t").leveragedIn, 105, 1e-6, "cross-brand priority-above target draws the cap");
+  eq(wq(sim, 0, "l").cover, 175 / 245, 1e-6, "donor sacrifices below requirement");
+});
 
 /* ---------------- 9. §21 service teams → leveraged support queues ---------------- */
 console.log("\n[9] Migration — service teams deleted, reborn as leveraged support queues");
@@ -300,7 +311,7 @@ function within1pc(legacy, uni, label) {
   const a = legacy.summary.allIn, b = uni.summary.allIn;
   if (Math.abs(a) > 1) ok(Math.abs(b / a - 1) < 0.01, `${label} allIn ${b.toFixed(0)} vs ${a.toFixed(0)}`);
 }
-for (const type of ["growth", "launch", "p1", "forecastError", "attritionShock", "hiringFreeze", "reducedTraining"]) {
+for (const type of ["growth", "launch", "p1", "forecastError", "attritionShock", "reducedTraining"]) {
   t(`legacy ${type} ≈ unified migration (all weeks, ≤1%)`, () => {
     const { legacy, uni } = pairFor(type);
     within1pc(legacy, uni, type);
@@ -310,9 +321,34 @@ t("legacy growthManual ≈ unified manualSeries with growth override (≤1%)", (
   const { legacy, uni } = pairFor("growthManual", () => ({ id: "sc_gm", type: "growthManual", name: "manual growth", enabled: false, startWeek: 0, queueIds: "all", p: { weeklyPct: { 5: 0.1, 6: -0.05, 20: 0.2 } } }));
   within1pc(legacy, uni, "growthManual");
 });
-t("legacy freezeManual ≈ unified manualSeries freeze (≤1%)", () => {
-  const { legacy, uni } = pairFor("freezeManual", () => ({ id: "sc_fm", type: "freezeManual", name: "manual freeze", enabled: false, startWeek: 0, queueIds: "all", p: { weeks: [3, 4, 5, 6] } }));
-  within1pc(legacy, uni, "freezeManual");
+
+/* The hiring-freeze family barely moves volume/all-in on the default config, so
+   a volume-only parity check passes vacuously (a no-op migration would too).
+   These effects live in the HIRING stream, so we compare the weekly reqsRaised
+   pattern instead, with an anti-vacuity guard: the freeze must actually zero
+   hiring in its window versus a no-scenario baseline before we assert the
+   migration reproduces it. */
+function freezeMigration(type, mkScenario, frozenWeeks, label) {
+  const build = (migrate, enable) => {
+    const c = E.makeDefaultConfig();
+    if (mkScenario) c.scenarios.push(mkScenario());
+    c.scenarios.forEach((s) => (s.enabled = enable && s.type === type));
+    if (migrate) c.scenarios = c.scenarios.map((s) => E.migrateScenarioToUnified(s, c));
+    return E.simulate(c, { strategy: "S1" });
+  };
+  const reqs = (sim, w) => sim.config.queues.reduce((a, q) => a + (sim.weeks[w].queues[q.id].reqsRaised || 0), 0);
+  const baseline = build(false, false), legacy = build(false, true), uni = build(true, true);
+  const baseHires = frozenWeeks.reduce((a, w) => a + reqs(baseline, w), 0);
+  const legacyHires = frozenWeeks.reduce((a, w) => a + reqs(legacy, w), 0);
+  ok(baseHires > 1, `${label}: baseline hires in the freeze window (${baseHires.toFixed(1)}) so the test is non-vacuous`);
+  ok(legacyHires < baseHires * 0.05, `${label}: freeze zeroes hiring in its window (${legacyHires.toFixed(2)} << baseline ${baseHires.toFixed(1)})`);
+  for (let w = 0; w < legacy.weeks.length; w++) eq(reqs(uni, w), reqs(legacy, w), 1e-6, `${label} wk${w} reqsRaised (migration reproduces the freeze)`);
+}
+t("legacy hiringFreeze ≈ unified people.hiringFreeze (weekly hiring pattern, non-vacuous)", () => {
+  freezeMigration("hiringFreeze", null, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], "hiringFreeze");
+});
+t("legacy freezeManual ≈ unified manualSeries freeze (weekly hiring pattern, non-vacuous)", () => {
+  freezeMigration("freezeManual", () => ({ id: "sc_fm", type: "freezeManual", name: "manual freeze", enabled: false, startWeek: 0, queueIds: "all", p: { weeks: [3, 4, 5, 6] } }), [3, 4, 5, 6], "freezeManual");
 });
 t("day-granular p1 manualSeries hits only its days", () => {
   const { legacy, uni } = pairFor("p1");

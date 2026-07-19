@@ -1067,8 +1067,10 @@ function simulate(cfg, opts = {}) {
         if (sL.levLeft <= 1e-9 || hrs[L.id] <= 1e-9) continue;
         let targets;
         if (lev.targets === "priority-above") {
+          // §17: "anything-above-in-priority" — priorities are global, and the
+          // explicit-list form pulls cross-brand, so this is not brand-scoped.
           const myPri = L.priority != null ? L.priority : 999;
-          targets = cfg.queues.filter((x) => x.id !== L.id && x.brandId === L.brandId && (x.priority != null ? x.priority : 999) < myPri);
+          targets = cfg.queues.filter((x) => x.id !== L.id && (x.priority != null ? x.priority : 999) < myPri);
         } else targets = (Array.isArray(lev.targets) ? lev.targets : [lev.targets]).map((id) => cfg.queues.find((x) => x.id === id)).filter(Boolean);
         const recs = targets.filter((x) => deficit[x.id] > 1e-9).map((x) => ({ qid: x.id, need: deficit[x.id] / prof, taken: 0 }));
         if (!recs.length) continue;
