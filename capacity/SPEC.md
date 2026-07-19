@@ -116,3 +116,55 @@ Ask up to 5 clarifying questions only if something materially affects architectu
 14.7 Views vs snapshots. Runs are renamed Snapshots: frozen results for before/after comparison and sharing. Views remain live scenario lenses on the current model. One shared comparison surface; one line of UI copy stating the distinction.
 
 14.8 Print and package. The global context bar carries a "Print / PDF this page" action on every tab (per-tab print stylesheet; charts render at fixed widths in print). The Summary tab's own button prints the Summary layout. The full Excel package (workbook per SPEC §9: Summary, Strategy comparison, Findings & risks, Parameters, Volumes, one tab per queue) remains exportable and importable after the restructure, reachable from both Settings and Snapshots.
+
+## SPEC §15 — Concept model
+Brand → groups queues; carries exactly ONE parameter block: its training profile (§16). Channel templates (voice / digital / support): full parameter sets inherited by queues at section level. Queue: identity (name, brand, channel), volumes, resourcing mode (dedicated | leveraged | unmanned), priority number, dependency list, section overrides. Pool: explicit cross-brand/cross-channel sharing group {name, members: [{queueId, sharePct}]}. Scenario group: named set of scenarios — the matrix rows; groups REPLACE views everywhere. Snapshot: frozen run. Volume profile: complexity mix {segments: [{label, sharePct, aht, skill(dormant)}]}; blended AHT = Σ share×aht feeds the existing Erlang engine unchanged.
+
+## SPEC §16 — Parameter architecture ("where globals live")
+Three layers + one exception. Resolution: queue override → channel template → Settings default. Brand training profile inserts ONLY for training params: queue override → brand training profile → Settings default.
+
+* Settings (physics): OT rules (max 2 h/day/agent, weekly ceiling default 10h, premium ×1.5), training defaults (weeks, learning curve, training-shrinkage % default 5 of the 30 shrinkage points), training-debt constants (accumulation, recovery, max AHT penalty +8%, max attrition ×1.5), knock-on defaults per channel (repeat %, spill % and default spill target), burnout constants, churn economics, hiring cap, currency, simulation window: default 52 weeks, editable, minimum 24, maximum 78 (24 floors it because the 10-week hire-to-productive pipeline plus ramp needs room to matter), libraries: seasonality presets, intraday presets, volume profiles.
+* Channel template: SLAs, AHT, arrival pattern, workforce (attrition, base shrinkage), knock-on overrides, seasonality — each a section a queue inherits or overrides whole.
+* Brand: training profile {trainingWeeks, learningCurve, trainingShrinkagePct} only. New cohorts train per their queue's brand.
+* Audit contract: the Data tab (and a dropdown per queue card) shows resolved assumptions over time: per week — volume after profile/seasonality/scenarios, blended AHT in effect, SLA in effect, attrition in effect, training shrinkage in effect, OT used, active scenarios by tag. If it isn't visible there, it may not exist as a parameter.
+
+## SPEC §17 — Supply ladder & resourcing
+Per queue, capacity is assembled strictly in this order; each rung exhausts before the next:
+
+1. Own regular hours (HC × productive hours, base shrinkage applied).
+2. Own overtime — hard cap 2 h/agent/day AND the weekly ceiling; OT hours cost premium and feed the burnout index.
+3. Training reclaim — convert up to trainingShrinkagePct back to service hours; reclaimed share accrues training debt (index 0–100): AHT multiplier up to +8% and attrition multiplier up to ×1.5 at full debt; decays when training restored. Scenario-controllable (§19 "people" parameter).
+4. Intra-brand recycling (automatic): any same-brand queue's genuine spare (above its own requirement) flows to same-brand service and unmanned queues in deficit, ordered by the receiving queues' priority numbers, proportional within a priority, honouring dependency lists.
+5. Pool draw: pools aggregate members' spare; members under joint pool demand may additionally reclaim training (rung-3 mechanics, own debt) to feed the pool; never below own requirement. Allocation across pool recipients: no priorities — concurrent deficits share pro-rata (deterministic FCFS). Pools serve across brands and channels.
+6. Leveraged pull (sacrifice): leveraged queues surrender capacity up to their cap to their declared targets (single queue, list, or anything-above-in-priority) even when it hurts them — their backlog grows, their SLA RAGs honestly. Unmanned queues: zero staff, real SLA + RAG + "unmanned" badge, served only via rungs 4–5. Dedicated queues never donate. Service teams are DELETED as a concept — migrate each to a leveraged support-channel queue.
+
+## SPEC §18 — Volumes & profiles
+Volume entry per brand: EITHER per-queue volumes (as today) OR a brand volume split by editable proportional shares across its queues. Precedence chain becomes: (brand-share | per-queue | CSV weekly) → volume profile (blended AHT) → seasonality (system × queue) → scenarios → endogenous knock-on. Knock-on generalised: every queue carries {repeatPct, spillPct, spillTargetQueue} (channel defaults in Settings; migration: voice redial 30%→repeat, digital deflection 40%→spill). Scenarios may shift a queue's profile shares over time; shares auto-normalise; ≤6 segments.
+
+## SPEC §19 — Unified scenarios, groups, matrix
+One scenario shape replaces all bespoke types: {name, tag: growth|launch|digitization|p1|custom, parameter: volume | aht | sla | profileShares | people(headcountStep | attritionDelta | hiringFreeze | trainingShrinkage), mechanism: step | growthRate | manualSeries, granularity: day|week|month, startWeek, stopWeek, scope: template|brand|queue list}. Old scenarios migrate to equivalents (P1 incident = day-granular volume manualSeries; reduced training = people.trainingShrinkage + aht step). Groups bundle scenarios; built-ins "Plan of record" and "No scenarios". Decision matrix: rows = groups, columns = hiring strategies, BOTH in definition order — never reordered by selection or results. Cell = RAG + all-in £ + flags (weeks red, tipping ⚠, cap ⚠). Computed on demand ("Run matrix"), cached, greys with a "stale — re-run" banner on any config change; the SELECTED cell (group × strategy) is the global context pair rendered live on every tab.
+
+## SPEC §20 — Presentation
+Weekly engine, monthly presentation rollups in Summary tables and the PDF. Summary rollup: Total → Brand → Voice/Digital/Support → Queue. Finance box gains OT cost; hiring summary gains OT required + OT cost + training debt peak. Context bar (every tab, in this order): Strategy selector · Scenario-group selector · Snapshot selector — these three drive every number rendered below. Snapshot semantics: selecting a snapshot renders its frozen data across all tabs with a visible "viewing snapshot — read-only" banner and editors disabled; selecting "Live" returns to the current model. Plus Print/PDF-this-page. Excel package gains sheets: Brands, Pools, Profiles, Groups; Parameters + Volumes remain importable.
+
+## SPEC §20a — Risk framework (extensive, parameterised)
+The Summary risk register is a first-class output covering every risk family the engine can detect, each row: risk, driver, queue/brand, week it lands, severity (£ and/or SLA), suggested lever. Families: SLA breach runs; hiring-cap infeasibility; tipping point (and proximity within a settable margin); burnout peaks; training-debt peaks; sustained-overtime dependence (OT used ≥ X consecutive weeks); leveraged-donor damage (a leveraged queue driven red by its own pulls); unmanned starvation (unmanned queue below a floor coverage for ≥ N weeks); knock-on spiral (repeat+spill share of volume above a threshold); over-capacity carrying cost with time-to-rectify; borrowed-capacity dependence (any queue meeting > X% of requirement from pools/leverage — a resilience risk even when green). Settings gains a "Risk parameters" section holding every threshold above (amber and red bands per family, editable). The register is computed from thresholds at render time — changing a threshold re-scores risks instantly without re-simulating. Engine support: the weekly per-queue record must expose otHours, otStreakWeeks, borrowedSharePct (pool + leveraged + recycled inflow ÷ required hours), and trainingDebt so the UI can threshold them.
+
+## SPEC §21 — Migration (P7a ships these shims, tested)
+Default brand "Brand 1" adopts all existing queues; service teams → leveraged support queues (size→HC, premium retained as cost note, trigger→cap heuristic); views→groups 1:1; old scenario types → unified equivalents preserving numeric behaviour; crossSkill/supports carry into dependency lists unchanged.
+
+## SPEC §22 — P7a engine gates (ALL existing tests stay green — hard regression gate)
+New tests, hand-computed where marked:
+
+* OT: capacity uplift = min(2×daysWorked, weeklyCeiling)×agents exactly (hand); OT hours cost premium; OT feeds burnout.
+* Training reclaim: rung order proven (a config where OT alone insufficient → reclaim engages only after OT cap); debt accumulates ∝ reclaimed share, decays on restore; AHT multiplier and attrition multiplier scale with debt (spot values); scenario people.trainingShrinkage forces the same path.
+* Brand training: two brands, different trainingWeeks — cohorts graduate on their brand's schedule (hand-checked landing weeks).
+* Recycling: same-brand spare reaches an unmanned queue before any pool; donor never below requirement (hand).
+* Pool: two recipients deficits 6:3 share pool 2:1 (hand); member training-feed capped at trainingShrinkagePct; cross-brand draw works; no priority ordering applied.
+* Profiles: blended AHT = Σ share×aht (hand); scenario shifting shares moves required FTE in the right direction and magnitude.
+* Brand volume split: shares normalise; per-queue explicit volumes win.
+* Unified scenarios: each migrated legacy scenario reproduces its old numeric effect within 1%; day-granular manualSeries hits only its days.
+* Knock-on generalisation: legacy redial/deflection numbers reproduced exactly via repeat/spill.
+* Risk-support fields: weekly record carries otHours, otStreakWeeks, borrowedSharePct, trainingDebt; spot-check a hand-built case (a queue meeting 30% of requirement from a pool shows borrowedSharePct ≈ 30).
+* Horizon bounds: engine clamps horizonWeeks to [24, 78]; default config is 52.
+* Matrix: 5×5 at 52 weeks completes < 8 s; single live sim < 400 ms at 52 weeks (budget updated from 26-week era).
