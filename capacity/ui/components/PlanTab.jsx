@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Ribbon } from "./Ribbon.jsx";
 import { Card } from "./primitives.jsx";
 import { HolisticPanel } from "./HolisticPanel.jsx";
+import { HierTable } from "./HierTable.jsx";
 import { CoverageChart, HeadcountChart, VolumeChart, CostChart, IdleChurnChart, BurnoutChart } from "./charts.jsx";
 import { money, pct, num, secs } from "../format.js";
 
@@ -53,38 +54,36 @@ function QueueCard({ q, s }) {
   );
 }
 
-// §14.6 hiring summary — per queue and Voice / Digital / Overall.
+// §14.6 / §20 hiring summary — Brand → Voice / Digital / Support → queue, with
+// channel and brand subtotal rows via the shared hierarchy table.
+function hiringMetric(sim, q) {
+  const h = sim.summary.hiring;
+  const r = (h && h.queues[q.id]) || { volume: 0, required: 0, hiring: 0, training: 0, active: 0, churnCount: 0 };
+  const series = sim.weeks.map((w) => w.queues[q.id]);
+  const avgActive = series.reduce((a, s) => a + (s.active != null ? s.active : (s.trained || 0) + (s.ramp || 0)), 0) / Math.max(1, series.length);
+  return { volume: r.volume, required: r.required, hiring: r.hiring, training: r.training, active: r.active, churnCount: r.churnCount, avgActive };
+}
+function sumHiring(list) {
+  return list.reduce((t, m) => ({
+    volume: t.volume + m.volume, required: t.required + m.required, hiring: t.hiring + m.hiring,
+    training: t.training + m.training, active: t.active + m.active, churnCount: t.churnCount + m.churnCount, avgActive: t.avgActive + m.avgActive,
+  }), { volume: 0, required: 0, hiring: 0, training: 0, active: 0, churnCount: 0, avgActive: 0 });
+}
 function HiringSummary({ sim, cur }) {
   const h = sim.summary.hiring;
   if (!h) return null;
-  const q = sim.config.queues;
-  const row = (label, r, cls) => (
-    <tr key={label} className={cls}>
-      <td style={{ textAlign: "left", fontWeight: cls ? 700 : 600 }}>{label}</td>
-      <td>{num(r.volume, 0)}</td>
-      <td>{num(r.required, 1)}</td>
-      <td>{num(r.hiring, 1)}</td>
-      <td>{num(r.training, 1)}</td>
-      <td>{num(r.active, 1)}</td>
-      <td>{num(r.churnCount, 1)}</td>
-      <td>{pct(r.churnPct, 1)}</td>
-    </tr>
-  );
+  const columns = [
+    { key: "volume", label: "Volume", fmt: (m) => num(m.volume, 0) },
+    { key: "required", label: "Required", fmt: (m) => num(m.required, 1) },
+    { key: "hiring", label: "Hiring", fmt: (m) => num(m.hiring, 1) },
+    { key: "training", label: "Training", fmt: (m) => num(m.training, 1) },
+    { key: "active", label: "Active", fmt: (m) => num(m.active, 1) },
+    { key: "churnCount", label: "Churn #", fmt: (m) => num(m.churnCount, 1) },
+    { key: "churnPct", label: "Churn %", fmt: (m) => pct(m.avgActive > 1e-9 ? m.churnCount / m.avgActive : 0, 1) },
+  ];
   return (
-    <Card title="Hiring summary" hint="Volume, required HC, hiring (requisitions raised over the horizon), training and active heads, and agent churn — per queue and rolled up for Voice, Digital and Overall.">
-      <div className="tbl-wrap">
-        <table className="data" data-testid="hiring-summary">
-          <thead>
-            <tr><th>Scope</th><th>Volume</th><th>Required</th><th>Hiring</th><th>Training</th><th>Active</th><th>Churn #</th><th>Churn %</th></tr>
-          </thead>
-          <tbody>
-            {q.map((qq) => row(qq.name + (qq.resourcing === "supported" ? " (supported)" : ""), h.queues[qq.id], ""))}
-            {row("Voice", h.groups.voice, "grp")}
-            {row("Digital", h.groups.digital, "grp")}
-            {row("Overall", h.groups.overall, "grp total")}
-          </tbody>
-        </table>
-      </div>
+    <Card title="Hiring summary" hint="Volume, required HC, hiring (requisitions raised over the horizon), training and active heads, and agent churn — Brand → Voice / Digital / Support → queue with channel and brand subtotal rows.">
+      <HierTable config={sim.config} testid="hiring-summary" firstLabel="Scope" columns={columns} metric={(q) => hiringMetric(sim, q)} aggregate={sumHiring} />
     </Card>
   );
 }

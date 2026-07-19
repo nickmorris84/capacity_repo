@@ -159,10 +159,57 @@ export function HolisticPanel({ sim }) {
         </table>
       </div>
 
+      <WeeklyTable sim={sim} active={active} />
+
       <CapsContext sim={sim} />
 
       {showTrace && <AllocationTrace sim={sim} />}
     </Card>
+  );
+}
+
+// §24 (R3c) weekly breakdown — one row per week, the same key metrics summed
+// across the queues currently included by the chip filter. Toggling a chip above
+// recomputes every week's row (it reads the same `active` Set).
+function WeeklyTable({ sim, active }) {
+  const cfg = sim.config;
+  const cur = cfg.engine.currency;
+  const ids = cfg.queues.map((q) => q.id).filter((id) => active.has(id));
+  const rows = sim.weeks.map((w, i) => {
+    let reqFte = 0, hires = 0, act = 0, attrition = 0, agent = 0, ot = 0, cust = 0;
+    for (const id of ids) {
+      const s = w.queues[id];
+      reqFte += s.reqFte || 0; hires += s.reqsRaised || 0;
+      act += s.active != null ? s.active : (s.trained || 0) + (s.ramp || 0);
+      attrition += s.leavers || 0; agent += s.cost || 0; ot += s.otCost || 0; cust += s.churnCost || 0;
+    }
+    return { week: i + 1, reqFte, hires, act, attrition, agent, ot, cust };
+  });
+  return (
+    <div className="tbl-wrap" style={{ marginTop: 14, maxHeight: 360 }}>
+      <table className="data" data-testid="holo-weekly-table">
+        <thead>
+          <tr>
+            <th>Week</th><th>Capacity req.</th><th>Hires</th><th>Active</th><th>Attrition #</th>
+            <th>Agent £</th><th>OT £</th><th>Customer £</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.week} data-testid="holo-weekly-row">
+              <td style={{ textAlign: "left", fontWeight: 600 }}>{r.week}</td>
+              <td data-testid={r.week === 1 ? "holo-wk1-cap" : undefined}>{num(r.reqFte, 1)}</td>
+              <td>{num(r.hires, 1)}</td>
+              <td>{num(r.act, 1)}</td>
+              <td>{num(r.attrition, 1)}</td>
+              <td>{money(cur, r.agent)}</td>
+              <td>{money(cur, r.ot)}</td>
+              <td>{money(cur, r.cust)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

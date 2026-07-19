@@ -1927,7 +1927,7 @@ import { createRoot } from "react-dom/client";
 
 // ui/App.jsx
 var import_engine10 = __toESM(require_engine());
-import { useState as useState17, useMemo as useMemo3, useEffect as useEffect4, useRef as useRef4, useCallback as useCallback4 } from "react";
+import { useState as useState18, useMemo as useMemo3, useEffect as useEffect4, useRef as useRef4, useCallback as useCallback4 } from "react";
 
 // ui/sim-set.js
 var import_engine = __toESM(require_engine());
@@ -2038,11 +2038,12 @@ var CACHE_MAX = 128;
 var BUDGET = 8;
 var keyFor = (hash, sid, gid) => hash + "|" + sid + "|" + gid;
 function simHash(config) {
-  const { settings, ...rest } = config;
+  const { settings, channelDefs, ...rest } = config;
   let s = settings;
-  if (settings && settings.risk) {
+  if (settings && (settings.risk || settings.dataColours)) {
     s = { ...settings };
     delete s.risk;
+    delete s.dataColours;
   }
   return JSON.stringify({ ...rest, settings: s });
 }
@@ -2208,6 +2209,19 @@ var STRATEGY_DEFAULTS = {
 };
 var blankChannel = () => ({ knockOn: { repeatPct: null, spillPct: null, spillTargetQueue: null } });
 var defaultChannels = () => ({ voice: blankChannel(), digital: blankChannel(), support: blankChannel() });
+var CHANNEL_PRESETS = {
+  voice: { label: "Voice (Erlang)", kind: "voice", group: "voice", template: { type: "voice", subtype: null, asaTarget: 30, maxAbandon: 0.05, patience: 90 } },
+  digitalCustomer: { label: "Digital Customer (live)", kind: "digitalCustomer", group: "digital", template: { type: "digital", subtype: "customer", concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8 } },
+  digitalWorkflow: { label: "Digital Workflow (backlog)", kind: "digitalWorkflow", group: "digital", template: { type: "digital", subtype: "workflow", workflowSlaHours: 24, workflowSlaPct: 0.9 } },
+  serviceWorkflow: { label: "Service Workflow (support)", kind: "serviceWorkflow", group: "support", template: { type: "digital", subtype: "workflow", workflowSlaHours: 120, workflowSlaPct: 0.95, slaUnit: "days" } }
+};
+var CHANNEL_PRESET_LIST = Object.entries(CHANNEL_PRESETS).map(([k, v]) => ({ value: k, label: v.label }));
+var defaultChannelDefs = () => [
+  { id: "ch_voice", name: "Voice", kind: "voice", group: "voice", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.voice.template)) },
+  { id: "ch_digcust", name: "Digital Customer", kind: "digitalCustomer", group: "digital", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.digitalCustomer.template)) },
+  { id: "ch_digwf", name: "Digital Workflow", kind: "digitalWorkflow", group: "digital", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.digitalWorkflow.template)) },
+  { id: "ch_svcwf", name: "Service Workflow", kind: "serviceWorkflow", group: "support", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.serviceWorkflow.template)) }
+];
 function migrateConfig(config) {
   const map = (0, import_engine2.effectiveSupports)(config);
   const brands = config.brands && config.brands.length ? config.brands : config.queues && config.queues.length ? [{ id: "b1", name: "Brand 1", training: null, dailyVolume: null, weeklyVolumes: null }] : [];
@@ -2225,6 +2239,7 @@ function migrateConfig(config) {
   const out = { ...config, queues, brands };
   out.pools = Array.isArray(config.pools) ? config.pools : [];
   out.channels = config.channels || defaultChannels();
+  out.channelDefs = Array.isArray(config.channelDefs) && config.channelDefs.length ? config.channelDefs : defaultChannelDefs();
   if (!Array.isArray(out.groups) || !out.groups.length) {
     const fromViews = (config.views || []).map((v) => ({ id: v.id.replace(/^v_/, "g_"), name: v.name, builtin: !!v.builtin, scenarioIds: Array.isArray(v.scenarioIds) ? [...v.scenarioIds] : void 0 }));
     out.groups = fromViews.length ? fromViews : [{ id: "g_por", name: "Plan of record", builtin: true }, { id: "g_none", name: "No scenarios", builtin: true, scenarioIds: [] }];
@@ -2264,6 +2279,8 @@ function migrateR3(cfg) {
       convertPct: kn.spillPct,
       convertTarget: kn.spillTargetQueue != null ? kn.spillTargetQueue : kn.spillPct > 0 ? null : primary && primary.id !== q.id ? primary.id : null
     };
+    const subtype = q.type === "digital" ? q.subtype || "customer" : q.subtype;
+    const channelId = q.channelId || (q.channel === "support" ? "ch_svcwf" : q.type === "voice" || q.channel === "voice" ? "ch_voice" : subtype === "workflow" ? "ch_digwf" : "ch_digcust");
     return {
       ...q,
       knock,
@@ -2271,7 +2288,8 @@ function migrateR3(cfg) {
       spillPct: knock.convertPct,
       spillTargetQueue: knock.convertTarget,
       sharing: q.sharing !== void 0 ? q.sharing : shareOf[q.id] || null,
-      subtype: q.type === "digital" ? q.subtype || "customer" : q.subtype,
+      subtype,
+      channelId,
       workflowSlaHours: q.workflowSlaHours != null ? q.workflowSlaHours : 24,
       workflowSlaPct: q.workflowSlaPct != null ? q.workflowSlaPct : 0.9,
       agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? q.agentCost / 12 : null,
@@ -2290,6 +2308,27 @@ function migrateR3(cfg) {
   };
   if (!out.settings.calendar) out.settings = { ...out.settings, calendar: { weekOneDate: null } };
   return out;
+}
+function resolvePresets(cfg, seasPresets, arrPresets) {
+  const seas = cfg.seasonality || {};
+  let system = seas.system;
+  if (seas.systemPresetId) {
+    const p = (seasPresets || []).find((x) => x.id === seas.systemPresetId);
+    if (p && Array.isArray(p.months)) system = p.months;
+  }
+  const queues = cfg.queues.map((q) => {
+    let nq = q;
+    if (q.seasonalPresetId && q.overrides && q.overrides.seasonality) {
+      const p = (seasPresets || []).find((x) => x.id === q.seasonalPresetId);
+      if (p && Array.isArray(p.months)) nq = { ...nq, seasonal: p.months };
+    }
+    if (q.arrivalPresetId) {
+      const p = (arrPresets || []).find((x) => x.id === q.arrivalPresetId);
+      if (p && Array.isArray(p.curve)) nq = { ...nq, profile: p.curve };
+    }
+    return nq;
+  });
+  return { ...cfg, seasonality: { ...seas, system }, queues };
 }
 function mergeSettings(base, over) {
   if (over == null) return base;
@@ -2594,6 +2633,35 @@ function useConfigOps(setConfig) {
     pools: (c.pools || []).map((p) => p.id === pid ? { ...p, members: (p.members || []).map((m) => m.queueId === qid ? { ...m, sharePct } : m) } : p)
   })), [setConfig]);
   const patchChannel = useCallback((ch, path, value) => setConfig((c) => ({ ...c, channels: setPath(c.channels || { voice: {}, digital: {}, support: {} }, [ch, ...path], value) })), [setConfig]);
+  const addChannel = useCallback((name, presetKind) => {
+    const preset = CHANNEL_PRESETS[presetKind] || CHANNEL_PRESETS.voice;
+    const id = "ch_" + (0, import_engine2.uid)();
+    setConfig((c) => ({ ...c, channelDefs: [...c.channelDefs || [], { id, name: name || preset.label, kind: preset.kind, group: preset.group, builtin: false, template: JSON.parse(JSON.stringify(preset.template)) }] }));
+    return id;
+  }, [setConfig]);
+  const patchChannelDef = useCallback((id, path, value) => setConfig((c) => ({ ...c, channelDefs: (c.channelDefs || []).map((d) => d.id === id ? setPath(d, path, value) : d) })), [setConfig]);
+  const deleteChannelDef = useCallback((id) => setConfig((c) => ({
+    ...c,
+    channelDefs: (c.channelDefs || []).filter((d) => d.id !== id),
+    queues: c.queues.map((q) => q.channelId === id ? { ...q, channelId: null } : q)
+  })), [setConfig]);
+  const attachQueueChannel = useCallback((qid, defId) => setConfig((c) => {
+    const def = (c.channelDefs || []).find((d) => d.id === defId);
+    if (!def) return c;
+    const t = def.template || {};
+    return {
+      ...c,
+      queues: c.queues.map((q) => {
+        if (q.id !== qid) return q;
+        const nq = { ...q, channelId: def.id, channel: def.group, type: t.type || q.type };
+        if (t.subtype !== void 0) nq.subtype = t.subtype;
+        ["asaTarget", "maxAbandon", "patience", "concurrency", "digitalSlaMinutes", "digitalSlaPct", "workflowSlaHours", "workflowSlaPct"].forEach((k) => {
+          if (t[k] != null) nq[k] = t[k];
+        });
+        return nq;
+      })
+    };
+  }), [setConfig]);
   const setOverride = useCallback((qid, section, on) => setConfig((c) => ({
     ...c,
     queues: c.queues.map((q) => q.id === qid ? { ...q, overrides: { ...q.overrides || {}, [section]: on } } : q)
@@ -2664,7 +2732,9 @@ function useConfigOps(setConfig) {
     ...c,
     queues: c.queues.map((q) => {
       if (q.id !== qid) return q;
-      const arr = Array.isArray(q.weeklyVolumes) ? q.weeklyVolumes.slice() : [];
+      let arr;
+      if (Array.isArray(q.weeklyVolumes)) arr = q.weeklyVolumes.slice();
+      else arr = new Array(c.engine.horizonWeeks).fill(q.dailyVolume != null ? q.dailyVolume : 0);
       arr[week] = value;
       return { ...q, weeklyVolumes: arr, dailyVolume: null };
     })
@@ -2734,6 +2804,10 @@ function useConfigOps(setConfig) {
     patchPoolMember,
     patchChannel,
     setOverride,
+    addChannel,
+    patchChannelDef,
+    deleteChannelDef,
+    attachQueueChannel,
     setResourcing,
     addSupport,
     patchSupport,
@@ -2761,7 +2835,7 @@ function useConfigOps(setConfig) {
     toggleGroupScopeTarget,
     addFactor,
     setQueueSubtype
-  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
+  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, addChannel, patchChannelDef, deleteChannelDef, attachQueueChannel, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
 }
 
 // ui/presets.js
@@ -3227,6 +3301,63 @@ function Chart({ title, hint, height = 250, children }) {
   ] });
 }
 
+// ui/components/HierTable.jsx
+import { Fragment as Fragment2 } from "react";
+import { jsx as jsx4, jsxs as jsxs3 } from "react/jsx-runtime";
+function HierTable({ config, testid, columns, metric, aggregate, firstLabel = "Queue" }) {
+  const rows = hierarchy(config);
+  const allLeaf = [];
+  const cellsFor = (m) => columns.map((c) => /* @__PURE__ */ jsx4("td", { className: c.cls ? c.cls(m) : void 0, style: c.align ? { textAlign: c.align } : void 0, children: c.fmt(m) }, c.key));
+  return /* @__PURE__ */ jsx4("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs3("table", { className: "data", "data-testid": testid, children: [
+    /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
+      /* @__PURE__ */ jsx4("th", { children: firstLabel }),
+      columns.map((c) => /* @__PURE__ */ jsx4("th", { children: c.label }, c.key))
+    ] }) }),
+    /* @__PURE__ */ jsxs3("tbody", { children: [
+      rows.map((row) => {
+        const brandLeaf = [];
+        const brandBody = row.channels.map((ch) => {
+          const ms = ch.queues.map((q) => ({ q, m: metric(q) }));
+          ms.forEach((x) => {
+            brandLeaf.push(x.m);
+            allLeaf.push(x.m);
+          });
+          return /* @__PURE__ */ jsxs3(Fragment2, { children: [
+            ms.map(({ q, m }) => /* @__PURE__ */ jsxs3("tr", { children: [
+              /* @__PURE__ */ jsxs3("td", { style: { textAlign: "left", fontWeight: 600 }, children: [
+                q.name,
+                q.resourcing && q.resourcing !== "dedicated" && q.resourcing !== "resourced" ? ` (${q.resourcing})` : ""
+              ] }),
+              cellsFor(m)
+            ] }, q.id)),
+            /* @__PURE__ */ jsxs3("tr", { className: "grp sub-chan", "data-testid": `hier-chan-${row.brand.id}-${ch.key}`, children: [
+              /* @__PURE__ */ jsxs3("td", { style: { textAlign: "left" }, children: [
+                ch.label,
+                " subtotal"
+              ] }),
+              cellsFor(aggregate(ms.map((x) => x.m)))
+            ] })
+          ] }, ch.key);
+        });
+        return /* @__PURE__ */ jsxs3(Fragment2, { children: [
+          brandBody,
+          /* @__PURE__ */ jsxs3("tr", { className: "grp sub-brand", "data-testid": `hier-brand-${row.brand.id}`, children: [
+            /* @__PURE__ */ jsxs3("td", { style: { textAlign: "left" }, children: [
+              row.brand.name,
+              " \u2014 total"
+            ] }),
+            cellsFor(aggregate(brandLeaf))
+          ] })
+        ] }, row.brand.id);
+      }),
+      /* @__PURE__ */ jsxs3("tr", { className: "grp total", children: [
+        /* @__PURE__ */ jsx4("td", { style: { textAlign: "left" }, children: "Total" }),
+        cellsFor(aggregate(allLeaf))
+      ] })
+    ] })
+  ] }) });
+}
+
 // ui/reporting.js
 var import_engine6 = __toESM(require_engine());
 function buildWeeklyRows(sim, queue, config) {
@@ -3239,6 +3370,9 @@ function buildWeeklyRows(sim, queue, config) {
     return {
       week: i + 1,
       base: s.baseVolume,
+      // §24.6 the genuine per-week volume INPUT (editable in the Data tab): the
+      // queue's weekly series value if present, else its single daily figure.
+      volInput: Array.isArray(queue.weeklyVolumes) && queue.weeklyVolumes[i] != null ? queue.weeklyVolumes[i] : queue.dailyVolume != null ? queue.dailyVolume : null,
       seasonalMult: (0, import_engine6.seasonalMult)(i, config, queue),
       deflected: s.deflected || 0,
       redial: s.redial || 0,
@@ -3294,32 +3428,29 @@ function assumptionsColumns(queue, cur = "\xA3") {
     { key: "scenarioTags", label: "Active scenarios", fmt: (v) => v || "\u2014" }
   ];
 }
-function buildQueueSummary(sim, config) {
-  const rows = [];
-  const mk = () => ({ volume: 0, required: 0, active: 0, coverNum: 0, coverDen: 0, weeksRed: 0, churn: 0 });
-  const voice = mk(), digital = mk(), total = mk();
-  for (const q of config.queues) {
-    const series = sim.weeks.map((w) => w.queues[q.id]);
-    const last = series[series.length - 1];
-    const volume = series.reduce((a, s) => a + s.volume, 0);
-    const required = last.reqFte;
-    const active = last.active != null ? last.active : last.trained + last.ramp;
-    const cover = series.reduce((a, s) => a + s.cover, 0) / Math.max(1, series.length);
-    const weeksRed = series.filter((s) => s.status === "red").length;
-    const churn = series.reduce((a, s) => a + s.churnCost, 0);
-    rows.push({ id: q.id, name: q.name, type: q.type, resourcing: q.resourcing || "resourced", volume, required, active, cover, weeksRed, churn });
-    for (const g of [q.type === "voice" ? voice : digital, total]) {
-      g.volume += volume;
-      g.required += required;
-      g.active += active;
-      g.coverNum += cover;
-      g.coverDen += 1;
-      g.weeksRed += weeksRed;
-      g.churn += churn;
-    }
-  }
-  const fin = (g, name) => ({ id: name, name, subtotal: true, volume: g.volume, required: g.required, active: g.active, cover: g.coverDen ? g.coverNum / g.coverDen : 0, weeksRed: g.weeksRed, churn: g.churn });
-  return { rows, voice: fin(voice, "Voice subtotal"), digital: fin(digital, "Digital subtotal"), total: fin(total, "Total") };
+function queueSummaryMetric(sim, q) {
+  const series = sim.weeks.map((w) => w.queues[q.id]);
+  const last = series[series.length - 1] || {};
+  return {
+    volume: series.reduce((a, s) => a + s.volume, 0),
+    required: last.reqFte || 0,
+    active: last.active != null ? last.active : (last.trained || 0) + (last.ramp || 0),
+    coverSum: series.reduce((a, s) => a + s.cover, 0),
+    coverN: Math.max(1, series.length),
+    weeksRed: series.filter((s) => s.status === "red").length,
+    churn: series.reduce((a, s) => a + s.churnCost, 0)
+  };
+}
+function sumQueueSummary(list) {
+  return list.reduce((t, m) => ({
+    volume: t.volume + m.volume,
+    required: t.required + m.required,
+    active: t.active + m.active,
+    coverSum: t.coverSum + m.coverSum,
+    coverN: t.coverN + m.coverN,
+    weeksRed: t.weeksRed + m.weeksRed,
+    churn: t.churn + m.churn
+  }), { volume: 0, required: 0, active: 0, coverSum: 0, coverN: 0, weeksRed: 0, churn: 0 });
 }
 function columnsFor(queue, cur = "\xA3") {
   const P0 = (v) => pct(v, 0);
@@ -3343,6 +3474,8 @@ function columnsFor(queue, cur = "\xA3") {
   return [
     { key: "week", label: "Week", group: "Week", fmt: (v) => String(v) },
     { key: "base", label: "Base vol", group: "Demand", fmt: N0 },
+    // Editable input column (§24.6): writes back to the queue's weekly series.
+    { key: "volInput", label: "Vol input", group: "Demand", fmt: N0, input: "volume" },
     { key: "seasonalMult", label: "Seasonal \xD7", group: "Demand", fmt: (v) => v.toFixed(2) },
     { key: "deflected", label: "Deflected", group: "Demand", fmt: N0 },
     { key: "redial", label: "Redial", group: "Demand", fmt: N0 },
@@ -3622,12 +3755,12 @@ function buildRiskRegister(sim, config) {
 }
 
 // ui/components/SummaryTab.jsx
-import { jsx as jsx4, jsxs as jsxs3 } from "react/jsx-runtime";
-var Stat = ({ l, v, sub }) => /* @__PURE__ */ jsxs3("div", { className: "stat", children: [
-  /* @__PURE__ */ jsx4("div", { className: "l", children: l }),
-  /* @__PURE__ */ jsxs3("div", { className: "v", children: [
+import { jsx as jsx5, jsxs as jsxs4 } from "react/jsx-runtime";
+var Stat = ({ l, v, sub }) => /* @__PURE__ */ jsxs4("div", { className: "stat", children: [
+  /* @__PURE__ */ jsx5("div", { className: "l", children: l }),
+  /* @__PURE__ */ jsxs4("div", { className: "v", children: [
     v,
-    sub ? /* @__PURE__ */ jsxs3("small", { children: [
+    sub ? /* @__PURE__ */ jsxs4("small", { children: [
       " ",
       sub
     ] }) : null
@@ -3637,27 +3770,27 @@ function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell
   const cur = config.engine.currency;
   const groups = groupList(config);
   const strategies = strategyList(config);
-  return /* @__PURE__ */ jsxs3(Card, { title: "Decision matrix", sub: "groups \xD7 strategies", hint: "Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.", children: [
-    matrixStale && /* @__PURE__ */ jsxs3("div", { className: "mx-stale", "data-testid": "matrix-stale", children: [
-      /* @__PURE__ */ jsx4("span", { children: matrix ? "Config changed \u2014 the matrix is stale." : "Matrix not yet computed." }),
-      /* @__PURE__ */ jsx4("button", { type: "button", className: "btn sm primary", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Run matrix" })
+  return /* @__PURE__ */ jsxs4(Card, { title: "Decision matrix", sub: "groups \xD7 strategies", hint: "Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.", children: [
+    matrixStale && /* @__PURE__ */ jsxs4("div", { className: "mx-stale", "data-testid": "matrix-stale", children: [
+      /* @__PURE__ */ jsx5("span", { children: matrix ? "Config changed \u2014 the matrix is stale." : "Matrix not yet computed." }),
+      /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm primary", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Run matrix" })
     ] }),
-    !matrixStale && /* @__PURE__ */ jsxs3("div", { className: "btnbar", style: { marginBottom: 8 }, children: [
-      /* @__PURE__ */ jsx4("button", { type: "button", className: "btn sm", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Re-run matrix" }),
-      /* @__PURE__ */ jsx4("span", { className: "note", style: { padding: "6px 10px" }, children: "Cached. Click any cell to select the (group \xD7 strategy) context." })
+    !matrixStale && /* @__PURE__ */ jsxs4("div", { className: "btnbar", style: { marginBottom: 8 }, children: [
+      /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Re-run matrix" }),
+      /* @__PURE__ */ jsx5("span", { className: "note", style: { padding: "6px 10px" }, children: "Cached. Click any cell to select the (group \xD7 strategy) context." })
     ] }),
-    /* @__PURE__ */ jsx4("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs3("table", { className: "matrix", "data-testid": "decision-matrix", children: [
-      /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-        /* @__PURE__ */ jsx4("th", { className: "row-h" }),
-        strategies.map((s) => /* @__PURE__ */ jsx4("th", { "data-testid": "mx-col-" + s.id, children: s.name }, s.id))
+    /* @__PURE__ */ jsx5("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs4("table", { className: "matrix", "data-testid": "decision-matrix", children: [
+      /* @__PURE__ */ jsx5("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
+        /* @__PURE__ */ jsx5("th", { className: "row-h" }),
+        strategies.map((s) => /* @__PURE__ */ jsx5("th", { "data-testid": "mx-col-" + s.id, children: s.name }, s.id))
       ] }) }),
-      /* @__PURE__ */ jsx4("tbody", { children: groups.map((g) => /* @__PURE__ */ jsxs3("tr", { children: [
-        /* @__PURE__ */ jsx4("th", { className: "row-h", "data-testid": "mx-row-" + g.id, children: g.name }),
+      /* @__PURE__ */ jsx5("tbody", { children: groups.map((g) => /* @__PURE__ */ jsxs4("tr", { children: [
+        /* @__PURE__ */ jsx5("th", { className: "row-h", "data-testid": "mx-row-" + g.id, children: g.name }),
         strategies.map((s) => {
           const cell = matrix && matrix.cells[g.id] && matrix.cells[g.id][s.id];
           const sel = g.id === activeGroupId && s.id === activeStrategy;
           const flags = cell ? [cell.redWeeks ? `${cell.redWeeks} red` : null, cell.tipping ? "\u26A0 tip" : null, cell.capInfeasible ? "\u26A0 cap" : null].filter(Boolean).join(" \xB7 ") : "";
-          return /* @__PURE__ */ jsx4("td", { style: { padding: 0 }, children: /* @__PURE__ */ jsxs3(
+          return /* @__PURE__ */ jsx5("td", { style: { padding: 0 }, children: /* @__PURE__ */ jsxs4(
             "button",
             {
               type: "button",
@@ -3666,8 +3799,8 @@ function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell
               "data-testid": "mx-" + g.id + "-" + s.id,
               "aria-pressed": sel,
               children: [
-                /* @__PURE__ */ jsx4("div", { className: "mx-all", children: cell ? money(cur, cell.allIn) : "\u2014" }),
-                /* @__PURE__ */ jsx4("div", { className: "mx-flags", children: cell ? flags || "holds" : "not run" })
+                /* @__PURE__ */ jsx5("div", { className: "mx-all", children: cell ? money(cur, cell.allIn) : "\u2014" }),
+                /* @__PURE__ */ jsx5("div", { className: "mx-flags", children: cell ? flags || "holds" : "not run" })
               ]
             }
           ) }, s.id);
@@ -3678,37 +3811,15 @@ function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell
 }
 function QueueSummaryTable({ sim, config }) {
   const cur = config.engine.currency;
-  const qs = buildQueueSummary(sim, config);
-  const row = (r, cls) => /* @__PURE__ */ jsxs3("tr", { className: cls, children: [
-    /* @__PURE__ */ jsxs3("td", { style: { textAlign: "left", fontWeight: cls ? 700 : 600 }, children: [
-      r.name,
-      r.resourcing && r.resourcing !== "dedicated" && r.resourcing !== "resourced" ? ` (${r.resourcing})` : ""
-    ] }),
-    /* @__PURE__ */ jsx4("td", { children: num(r.volume, 0) }),
-    /* @__PURE__ */ jsx4("td", { children: num(r.required, 1) }),
-    /* @__PURE__ */ jsx4("td", { children: num(r.active, 1) }),
-    /* @__PURE__ */ jsx4("td", { children: pct(r.cover) }),
-    /* @__PURE__ */ jsx4("td", { className: r.weeksRed ? "st-red" : "st-green", children: r.weeksRed }),
-    /* @__PURE__ */ jsx4("td", { children: money(cur, r.churn) })
-  ] }, r.id);
-  return /* @__PURE__ */ jsx4("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs3("table", { className: "data", "data-testid": "queue-summary", children: [
-    /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-      /* @__PURE__ */ jsx4("th", { children: "Queue" }),
-      /* @__PURE__ */ jsx4("th", { children: "Volume" }),
-      /* @__PURE__ */ jsx4("th", { children: "Required" }),
-      /* @__PURE__ */ jsx4("th", { children: "Active" }),
-      /* @__PURE__ */ jsx4("th", { children: "Coverage" }),
-      /* @__PURE__ */ jsx4("th", { children: "Weeks red" }),
-      /* @__PURE__ */ jsx4("th", { children: "Churn \xA3" })
-    ] }) }),
-    /* @__PURE__ */ jsxs3("tbody", { children: [
-      qs.rows.filter((r) => r.type === "voice").map((r) => row(r, "")),
-      qs.rows.some((r) => r.type === "voice") && row(qs.voice, "grp"),
-      qs.rows.filter((r) => r.type === "digital").map((r) => row(r, "")),
-      qs.rows.some((r) => r.type === "digital") && row(qs.digital, "grp"),
-      row(qs.total, "grp total")
-    ] })
-  ] }) });
+  const columns = [
+    { key: "volume", label: "Volume", fmt: (m) => num(m.volume, 0) },
+    { key: "required", label: "Required", fmt: (m) => num(m.required, 1) },
+    { key: "active", label: "Active", fmt: (m) => num(m.active, 1) },
+    { key: "cover", label: "Coverage", fmt: (m) => pct(m.coverN ? m.coverSum / m.coverN : 0) },
+    { key: "weeksRed", label: "Weeks red", fmt: (m) => num(m.weeksRed, 0), cls: (m) => m.weeksRed ? "st-red" : "st-green" },
+    { key: "churn", label: "Churn \xA3", fmt: (m) => money(cur, m.churn) }
+  ];
+  return /* @__PURE__ */ jsx5(HierTable, { config, testid: "queue-summary", columns, metric: (q) => queueSummaryMetric(sim, q), aggregate: sumQueueSummary });
 }
 function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
   const cur = config.engine.currency;
@@ -3725,105 +3836,105 @@ function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId
   });
   const setSortKey = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : key === "risk" ? 1 : -1 }));
   const arrow = (key) => sort.key === key ? sort.dir < 0 ? " \u2193" : " \u2191" : "";
-  return /* @__PURE__ */ jsxs3("div", { className: "grid summary-print", style: { gap: 16 }, "data-testid": "summary-panel", children: [
-    /* @__PURE__ */ jsx4("div", { className: "btnbar", children: /* @__PURE__ */ jsxs3("span", { className: "note", style: { padding: "6px 10px" }, children: [
+  return /* @__PURE__ */ jsxs4("div", { className: "grid summary-print", style: { gap: 16 }, "data-testid": "summary-panel", children: [
+    /* @__PURE__ */ jsx5("div", { className: "btnbar", children: /* @__PURE__ */ jsxs4("span", { className: "note", style: { padding: "6px 10px" }, children: [
       "Leadership one-pager \u2014 ",
       resolveStrategyName(config, activeStrategy),
       " \xB7 group ",
       groupName(config, activeGroupId),
       ". Print or save to PDF from the context bar above."
     ] }) }),
-    /* @__PURE__ */ jsx4(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }),
-    /* @__PURE__ */ jsxs3(Card, { title: "Verdict & key findings", children: [
-      /* @__PURE__ */ jsx4("p", { style: { margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }, children: verdict.paragraph }),
-      /* @__PURE__ */ jsxs3("div", { className: "findings", children: [
-        sim.summary.findings.map((fd, i) => /* @__PURE__ */ jsxs3("div", { className: "finding " + fd.tone, children: [
-          /* @__PURE__ */ jsx4("span", { className: "pip" }),
-          /* @__PURE__ */ jsx4("span", { children: fd.text })
+    /* @__PURE__ */ jsx5(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }),
+    /* @__PURE__ */ jsxs4(Card, { title: "Verdict & key findings", children: [
+      /* @__PURE__ */ jsx5("p", { style: { margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }, children: verdict.paragraph }),
+      /* @__PURE__ */ jsxs4("div", { className: "findings", children: [
+        sim.summary.findings.map((fd, i) => /* @__PURE__ */ jsxs4("div", { className: "finding " + fd.tone, children: [
+          /* @__PURE__ */ jsx5("span", { className: "pip" }),
+          /* @__PURE__ */ jsx5("span", { children: fd.text })
         ] }, i)),
-        sim.summary.findings.length === 0 && /* @__PURE__ */ jsx4("div", { className: "empty", children: "The plan holds across the horizon." })
+        sim.summary.findings.length === 0 && /* @__PURE__ */ jsx5("div", { className: "empty", children: "The plan holds across the horizon." })
       ] })
     ] }),
-    /* @__PURE__ */ jsx4(Card, { title: "Queue summary", sub: "under the active strategy", hint: "Per queue with Voice, Digital and Total subtotals.", children: /* @__PURE__ */ jsx4(QueueSummaryTable, { sim, config }) }),
-    /* @__PURE__ */ jsxs3("div", { className: "grid cols-2", children: [
-      /* @__PURE__ */ jsx4(Card, { title: "Finance", children: /* @__PURE__ */ jsxs3("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
-        /* @__PURE__ */ jsx4(Stat, { l: "Run cost", v: money(cur, f.runCost) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "OT cost", v: money(cur, sim.weeks.reduce((a, w) => a + (w.totals.otCost || 0), 0)) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Churn cost", v: money(cur, f.churn) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Idle pay", v: money(cur, f.idle) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "All-in", v: money(cur, f.allIn) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Cost / contact", v: moneyFull(cur, f.costPerContact) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Break-even week", v: f.breakEven ?? "\u2013" })
+    /* @__PURE__ */ jsx5(Card, { title: "Queue summary", sub: "under the active strategy", hint: "Brand \u2192 Voice / Digital / Support \u2192 queue, with channel and brand subtotal rows.", children: /* @__PURE__ */ jsx5(QueueSummaryTable, { sim, config }) }),
+    /* @__PURE__ */ jsxs4("div", { className: "grid cols-2", children: [
+      /* @__PURE__ */ jsx5(Card, { title: "Finance", children: /* @__PURE__ */ jsxs4("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
+        /* @__PURE__ */ jsx5(Stat, { l: "Run cost", v: money(cur, f.runCost) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "OT cost", v: money(cur, sim.weeks.reduce((a, w) => a + (w.totals.otCost || 0), 0)) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Churn cost", v: money(cur, f.churn) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Idle pay", v: money(cur, f.idle) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "All-in", v: money(cur, f.allIn) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Cost / contact", v: moneyFull(cur, f.costPerContact) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Break-even week", v: f.breakEven ?? "\u2013" })
       ] }) }),
-      /* @__PURE__ */ jsx4(Card, { title: "HR", children: /* @__PURE__ */ jsxs3("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
-        /* @__PURE__ */ jsx4(Stat, { l: "Total reqs raised", v: num(hr.totalReqs, 0) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Global cap", v: hr.cap, sub: "/wk" }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Avg leavers", v: num(hr.avgLeavers, 1), sub: "/wk" }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Tipping margin", v: num(hr.tippingMargin, 1), sub: hr.tippingPoint ? "\xB7 tipped" : "/wk" }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Peak burnout", v: num(hr.peakBurn, 0) + "/100" }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Peak training debt", v: num(Math.max(0, ...config.queues.map((q) => Math.max(0, ...sim.weeks.map((w) => w.queues[q.id].trainingDebt || 0)))), 0) + "/100" })
+      /* @__PURE__ */ jsx5(Card, { title: "HR", children: /* @__PURE__ */ jsxs4("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
+        /* @__PURE__ */ jsx5(Stat, { l: "Total reqs raised", v: num(hr.totalReqs, 0) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Global cap", v: hr.cap, sub: "/wk" }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Avg leavers", v: num(hr.avgLeavers, 1), sub: "/wk" }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Tipping margin", v: num(hr.tippingMargin, 1), sub: hr.tippingPoint ? "\xB7 tipped" : "/wk" }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Peak burnout", v: num(hr.peakBurn, 0) + "/100" }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Peak training debt", v: num(Math.max(0, ...config.queues.map((q) => Math.max(0, ...sim.weeks.map((w) => w.queues[q.id].trainingDebt || 0)))), 0) + "/100" })
       ] }) }),
-      /* @__PURE__ */ jsxs3(Card, { title: "Business", hint: "Per-queue SLA target vs simulated attainment, RAG'd (\xA724.10), plus incident readiness.", children: [
-        /* @__PURE__ */ jsx4(Stat, { l: "Cap infeasible", v: bz.capInfeasible ? "yes" : "no" }),
-        /* @__PURE__ */ jsx4("div", { className: "tbl-wrap", style: { marginTop: 10 }, children: /* @__PURE__ */ jsxs3("table", { className: "data", "data-testid": "business-box", children: [
-          /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-            /* @__PURE__ */ jsx4("th", { children: "Queue" }),
-            /* @__PURE__ */ jsx4("th", { children: "SLA target" }),
-            /* @__PURE__ */ jsx4("th", { children: "Attainment" }),
-            /* @__PURE__ */ jsx4("th", { children: "RAG" })
+      /* @__PURE__ */ jsxs4(Card, { title: "Business", hint: "Per-queue SLA target vs simulated attainment, RAG'd (\xA724.10), plus incident readiness.", children: [
+        /* @__PURE__ */ jsx5(Stat, { l: "Cap infeasible", v: bz.capInfeasible ? "yes" : "no" }),
+        /* @__PURE__ */ jsx5("div", { className: "tbl-wrap", style: { marginTop: 10 }, children: /* @__PURE__ */ jsxs4("table", { className: "data", "data-testid": "business-box", children: [
+          /* @__PURE__ */ jsx5("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
+            /* @__PURE__ */ jsx5("th", { children: "Queue" }),
+            /* @__PURE__ */ jsx5("th", { children: "SLA target" }),
+            /* @__PURE__ */ jsx5("th", { children: "Attainment" }),
+            /* @__PURE__ */ jsx5("th", { children: "RAG" })
           ] }) }),
-          /* @__PURE__ */ jsx4("tbody", { children: config.queues.map((q) => {
+          /* @__PURE__ */ jsx5("tbody", { children: config.queues.map((q) => {
             const pq = (sim.summary.perQueue || {})[q.id] || {};
             const target = pq.slaTarget != null ? pq.slaTarget : q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9;
             const att = pq.slaAttainment != null ? pq.slaAttainment : null;
             const rag = pq.slaRag || (att == null ? null : att >= target ? "green" : att >= target * 0.9 ? "amber" : "red");
-            return /* @__PURE__ */ jsxs3("tr", { children: [
-              /* @__PURE__ */ jsx4("td", { style: { textAlign: "left", fontWeight: 600 }, children: q.name }),
-              /* @__PURE__ */ jsx4("td", { children: pct(target) }),
-              /* @__PURE__ */ jsx4("td", { children: att == null ? "\u2013" : pct(att) }),
-              /* @__PURE__ */ jsx4("td", { children: /* @__PURE__ */ jsx4("span", { className: "badge " + (rag || "amber"), "data-testid": "biz-rag-" + q.id, children: rag || "\u2013" }) })
+            return /* @__PURE__ */ jsxs4("tr", { children: [
+              /* @__PURE__ */ jsx5("td", { style: { textAlign: "left", fontWeight: 600 }, children: q.name }),
+              /* @__PURE__ */ jsx5("td", { children: pct(target) }),
+              /* @__PURE__ */ jsx5("td", { children: att == null ? "\u2013" : pct(att) }),
+              /* @__PURE__ */ jsx5("td", { children: /* @__PURE__ */ jsx5("span", { className: "badge " + (rag || "amber"), "data-testid": "biz-rag-" + q.id, children: rag || "\u2013" }) })
             ] }, q.id);
           }) })
         ] }) })
       ] }),
-      /* @__PURE__ */ jsx4(Card, { title: "CX", hint: "Customer experience economics.", children: /* @__PURE__ */ jsxs3("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
-        /* @__PURE__ */ jsx4(Stat, { l: "Customers lost", v: num(bz.customersLost, 0) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Churn cost", v: money(cur, f.churn) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Deflected \u2192 voice", v: num(bz.totalDeflected, 0) }),
-        /* @__PURE__ */ jsx4(Stat, { l: "Repeat-contact uplift", v: "\xD7" + num(config.cx.repeatUplift, 2) })
+      /* @__PURE__ */ jsx5(Card, { title: "CX", hint: "Customer experience economics.", children: /* @__PURE__ */ jsxs4("div", { className: "stat-row", style: { flexDirection: "column", gap: 12 }, children: [
+        /* @__PURE__ */ jsx5(Stat, { l: "Customers lost", v: num(bz.customersLost, 0) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Churn cost", v: money(cur, f.churn) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Deflected \u2192 voice", v: num(bz.totalDeflected, 0) }),
+        /* @__PURE__ */ jsx5(Stat, { l: "Repeat-contact uplift", v: "\xD7" + num(config.cx.repeatUplift, 2) })
       ] }) })
     ] }),
-    /* @__PURE__ */ jsx4(Card, { title: "Risk register", sub: `${risks.length} risk(s) \xB7 thresholds in Settings`, children: /* @__PURE__ */ jsx4("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs3("table", { className: "data", "data-testid": "risk-table", children: [
-      /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-        /* @__PURE__ */ jsxs3("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("risk"), children: [
+    /* @__PURE__ */ jsx5(Card, { title: "Risk register", sub: `${risks.length} risk(s) \xB7 thresholds in Settings`, children: /* @__PURE__ */ jsx5("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs4("table", { className: "data", "data-testid": "risk-table", children: [
+      /* @__PURE__ */ jsx5("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
+        /* @__PURE__ */ jsxs4("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("risk"), children: [
           "Risk",
           arrow("risk")
         ] }),
-        /* @__PURE__ */ jsx4("th", { children: "Driver" }),
-        /* @__PURE__ */ jsxs3("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("week"), children: [
+        /* @__PURE__ */ jsx5("th", { children: "Driver" }),
+        /* @__PURE__ */ jsxs4("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("week"), children: [
           "Week",
           arrow("week")
         ] }),
-        /* @__PURE__ */ jsxs3("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("severityValue"), children: [
+        /* @__PURE__ */ jsxs4("th", { style: { cursor: "pointer" }, onClick: () => setSortKey("severityValue"), children: [
           "Severity",
           arrow("severityValue")
         ] }),
-        /* @__PURE__ */ jsx4("th", { children: "SLA impact" }),
-        /* @__PURE__ */ jsx4("th", { children: "Suggested lever" })
+        /* @__PURE__ */ jsx5("th", { children: "SLA impact" }),
+        /* @__PURE__ */ jsx5("th", { children: "Suggested lever" })
       ] }) }),
-      /* @__PURE__ */ jsxs3("tbody", { children: [
-        sortedRisks.map((r, i) => /* @__PURE__ */ jsxs3("tr", { children: [
-          /* @__PURE__ */ jsxs3("td", { style: { textAlign: "left", fontWeight: 600 }, children: [
-            r.band && /* @__PURE__ */ jsx4("span", { className: "badge " + r.band, style: { marginRight: 6 }, children: r.band }),
+      /* @__PURE__ */ jsxs4("tbody", { children: [
+        sortedRisks.map((r, i) => /* @__PURE__ */ jsxs4("tr", { children: [
+          /* @__PURE__ */ jsxs4("td", { style: { textAlign: "left", fontWeight: 600 }, children: [
+            r.band && /* @__PURE__ */ jsx5("span", { className: "badge " + r.band, style: { marginRight: 6 }, children: r.band }),
             r.risk
           ] }),
-          /* @__PURE__ */ jsx4("td", { style: { textAlign: "left", whiteSpace: "normal", maxWidth: 280 }, children: r.driver }),
-          /* @__PURE__ */ jsx4("td", { children: r.week ?? "\u2013" }),
-          /* @__PURE__ */ jsx4("td", { children: r.severityMoney != null ? money(cur, r.severityMoney) : "\u2014" }),
-          /* @__PURE__ */ jsx4("td", { style: { textAlign: "left" }, children: r.sla || "\u2013" }),
-          /* @__PURE__ */ jsx4("td", { style: { textAlign: "left", whiteSpace: "normal", maxWidth: 240 }, children: r.lever })
+          /* @__PURE__ */ jsx5("td", { style: { textAlign: "left", whiteSpace: "normal", maxWidth: 280 }, children: r.driver }),
+          /* @__PURE__ */ jsx5("td", { children: r.week ?? "\u2013" }),
+          /* @__PURE__ */ jsx5("td", { children: r.severityMoney != null ? money(cur, r.severityMoney) : "\u2014" }),
+          /* @__PURE__ */ jsx5("td", { style: { textAlign: "left" }, children: r.sla || "\u2013" }),
+          /* @__PURE__ */ jsx5("td", { style: { textAlign: "left", whiteSpace: "normal", maxWidth: 240 }, children: r.lever })
         ] }, i)),
-        sortedRisks.length === 0 && /* @__PURE__ */ jsx4("tr", { children: /* @__PURE__ */ jsx4("td", { colSpan: 6, className: "empty", children: "No material risks \u2014 the plan holds across the horizon." }) })
+        sortedRisks.length === 0 && /* @__PURE__ */ jsx5("tr", { children: /* @__PURE__ */ jsx5("td", { colSpan: 6, className: "empty", children: "No material risks \u2014 the plan holds across the horizon." }) })
       ] })
     ] }) }) })
   ] });
@@ -3832,7 +3943,7 @@ function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId
 // ui/components/StrategiesTab.jsx
 import { useState as useState5 } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
-import { jsx as jsx5, jsxs as jsxs4 } from "react/jsx-runtime";
+import { jsx as jsx6, jsxs as jsxs5 } from "react/jsx-runtime";
 var SERIES = ["#0e7c86", "#d98a0b", "#5a54c9", "#c0417a", "#2f8f4e", "#b0602a", "#3a7bd5", "#8a51b0"];
 var METRICS = [
   { id: "allin", label: "All-in cost", cost: true },
@@ -3898,37 +4009,37 @@ function Comparison({ sims, stratIds, config }) {
     else val = sim.weeks.reduce((a, wk) => a + weekValue(wk, metric, scope, config), 0) / sim.weeks.length;
     return { id, val };
   });
-  return /* @__PURE__ */ jsxs4(
+  return /* @__PURE__ */ jsxs5(
     Card,
     {
       title: "Detailed comparison",
       hint: "Compare strategies on a chosen metric and scope. Cost metrics are cumulative over the horizon; coverage is the active-vs-required ratio.",
-      right: /* @__PURE__ */ jsxs4("div", { className: "rowflex", children: [
-        /* @__PURE__ */ jsx5("select", { className: "inp", style: { width: 150 }, value: metric, onChange: (e) => setMetric(e.target.value), "data-testid": "cmp-metric", "aria-label": "Metric", children: METRICS.map((x) => /* @__PURE__ */ jsx5("option", { value: x.id, children: x.label }, x.id)) }),
-        /* @__PURE__ */ jsx5("select", { className: "inp", style: { width: 150 }, value: scope, onChange: (e) => setScope(e.target.value), "data-testid": "cmp-scope", "aria-label": "Scope", children: scopeOpts.map((o) => /* @__PURE__ */ jsx5("option", { value: o.value, children: o.label }, o.value)) })
+      right: /* @__PURE__ */ jsxs5("div", { className: "rowflex", children: [
+        /* @__PURE__ */ jsx6("select", { className: "inp", style: { width: 150 }, value: metric, onChange: (e) => setMetric(e.target.value), "data-testid": "cmp-metric", "aria-label": "Metric", children: METRICS.map((x) => /* @__PURE__ */ jsx6("option", { value: x.id, children: x.label }, x.id)) }),
+        /* @__PURE__ */ jsx6("select", { className: "inp", style: { width: 150 }, value: scope, onChange: (e) => setScope(e.target.value), "data-testid": "cmp-scope", "aria-label": "Scope", children: scopeOpts.map((o) => /* @__PURE__ */ jsx6("option", { value: o.value, children: o.label }, o.value)) })
       ] }),
       children: [
-        /* @__PURE__ */ jsx5("div", { "data-testid": "cmp-chart", "data-series": live.length, children: /* @__PURE__ */ jsx5(Chart, { title: "", height: 280, children: (w, h) => /* @__PURE__ */ jsxs4(LineChart, { width: w, height: h, data, margin: { top: 8, right: 16, left: 8, bottom: 4 }, children: [
-          /* @__PURE__ */ jsx5(CartesianGrid, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-          /* @__PURE__ */ jsx5(XAxis, { dataKey: "wk", tick: { fontSize: 11 }, interval: "preserveStartEnd", minTickGap: 18 }),
-          /* @__PURE__ */ jsx5(YAxis, { tick: { fontSize: 11 }, width: 54, tickFormatter: fmtY }),
-          /* @__PURE__ */ jsx5(Tooltip, { formatter: fmtY }),
-          /* @__PURE__ */ jsx5(Legend, { wrapperStyle: { fontSize: 11 } }),
-          live.map((id, i) => /* @__PURE__ */ jsx5(Line, { type: "monotone", dataKey: id, name: resolveStrategyName(config, id), stroke: SERIES[i % SERIES.length], dot: false, strokeWidth: 2, isAnimationActive: false }, id))
+        /* @__PURE__ */ jsx6("div", { "data-testid": "cmp-chart", "data-series": live.length, children: /* @__PURE__ */ jsx6(Chart, { title: "", height: 280, children: (w, h) => /* @__PURE__ */ jsxs5(LineChart, { width: w, height: h, data, margin: { top: 8, right: 16, left: 8, bottom: 4 }, children: [
+          /* @__PURE__ */ jsx6(CartesianGrid, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+          /* @__PURE__ */ jsx6(XAxis, { dataKey: "wk", tick: { fontSize: 11 }, interval: "preserveStartEnd", minTickGap: 18 }),
+          /* @__PURE__ */ jsx6(YAxis, { tick: { fontSize: 11 }, width: 54, tickFormatter: fmtY }),
+          /* @__PURE__ */ jsx6(Tooltip, { formatter: fmtY }),
+          /* @__PURE__ */ jsx6(Legend, { wrapperStyle: { fontSize: 11 } }),
+          live.map((id, i) => /* @__PURE__ */ jsx6(Line, { type: "monotone", dataKey: id, name: resolveStrategyName(config, id), stroke: SERIES[i % SERIES.length], dot: false, strokeWidth: 2, isAnimationActive: false }, id))
         ] }) }) }),
-        /* @__PURE__ */ jsx5("div", { className: "tbl-wrap", style: { marginTop: 12 }, children: /* @__PURE__ */ jsxs4("table", { className: "data", "data-testid": "cmp-table", children: [
-          /* @__PURE__ */ jsx5("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
-            /* @__PURE__ */ jsx5("th", { children: "Strategy" }),
-            /* @__PURE__ */ jsxs4("th", { children: [
+        /* @__PURE__ */ jsx6("div", { className: "tbl-wrap", style: { marginTop: 12 }, children: /* @__PURE__ */ jsxs5("table", { className: "data", "data-testid": "cmp-table", children: [
+          /* @__PURE__ */ jsx6("thead", { children: /* @__PURE__ */ jsxs5("tr", { children: [
+            /* @__PURE__ */ jsx6("th", { children: "Strategy" }),
+            /* @__PURE__ */ jsxs5("th", { children: [
               m.label,
               " (",
               m.cost ? "total" : "avg",
               ")"
             ] })
           ] }) }),
-          /* @__PURE__ */ jsx5("tbody", { children: summary.map((s) => /* @__PURE__ */ jsxs4("tr", { children: [
-            /* @__PURE__ */ jsx5("td", { style: { textAlign: "left" }, children: resolveStrategyName(config, s.id) }),
-            /* @__PURE__ */ jsx5("td", { children: m.cost ? money(cur, s.val) : pct(s.val) })
+          /* @__PURE__ */ jsx6("tbody", { children: summary.map((s) => /* @__PURE__ */ jsxs5("tr", { children: [
+            /* @__PURE__ */ jsx6("td", { style: { textAlign: "left" }, children: resolveStrategyName(config, s.id) }),
+            /* @__PURE__ */ jsx6("td", { children: m.cost ? money(cur, s.val) : pct(s.val) })
           ] }, s.id)) })
         ] }) })
       ]
@@ -3940,51 +4051,51 @@ function StrategyEditor({ config, ops, activeStrategyId }) {
   const [schedName, setSchedName] = useState5("");
   const list = strategyList(config);
   const active = strategyObj(config, activeStrategyId);
-  return /* @__PURE__ */ jsxs4(
+  return /* @__PURE__ */ jsxs5(
     Card,
     {
       title: "Strategies",
       hint: "Built-ins S1\u2013S4 plus your own. Custom strategies parameterise a base type; schedules pivot between strategies at set weeks.",
-      right: /* @__PURE__ */ jsx5("div", { className: "rowflex", children: /* @__PURE__ */ jsxs4("select", { className: "inp", style: { width: 160 }, value: newType, onChange: (e) => {
+      right: /* @__PURE__ */ jsx6("div", { className: "rowflex", children: /* @__PURE__ */ jsxs5("select", { className: "inp", style: { width: 160 }, value: newType, onChange: (e) => {
         if (e.target.value) {
           ops.addStrategy(e.target.value);
           setNewType("");
         }
       }, "data-testid": "add-strategy", "aria-label": "Add strategy", children: [
-        /* @__PURE__ */ jsx5("option", { value: "", children: "+ Add strategy\u2026" }),
-        /* @__PURE__ */ jsx5("option", { value: "meet", children: "Meet requirement" }),
-        /* @__PURE__ */ jsx5("option", { value: "buffer", children: "Buffer above" }),
-        /* @__PURE__ */ jsx5("option", { value: "backfill", children: "Forward backfill" }),
-        /* @__PURE__ */ jsx5("option", { value: "manual", children: "Manual plan" }),
-        /* @__PURE__ */ jsx5("option", { value: "schedule", children: "Schedule" })
+        /* @__PURE__ */ jsx6("option", { value: "", children: "+ Add strategy\u2026" }),
+        /* @__PURE__ */ jsx6("option", { value: "meet", children: "Meet requirement" }),
+        /* @__PURE__ */ jsx6("option", { value: "buffer", children: "Buffer above" }),
+        /* @__PURE__ */ jsx6("option", { value: "backfill", children: "Forward backfill" }),
+        /* @__PURE__ */ jsx6("option", { value: "manual", children: "Manual plan" }),
+        /* @__PURE__ */ jsx6("option", { value: "schedule", children: "Schedule" })
       ] }) }),
       children: [
-        isSchedule(active) && /* @__PURE__ */ jsxs4("div", { className: "rowflex", style: { marginBottom: 12 }, children: [
-          /* @__PURE__ */ jsx5("input", { type: "text", className: "inp", style: { maxWidth: 220 }, placeholder: "name this schedule", value: schedName, onChange: (e) => setSchedName(e.target.value), "data-testid": "save-schedule-name" }),
-          /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm", disabled: !schedName.trim(), onClick: () => {
+        isSchedule(active) && /* @__PURE__ */ jsxs5("div", { className: "rowflex", style: { marginBottom: 12 }, children: [
+          /* @__PURE__ */ jsx6("input", { type: "text", className: "inp", style: { maxWidth: 220 }, placeholder: "name this schedule", value: schedName, onChange: (e) => setSchedName(e.target.value), "data-testid": "save-schedule-name" }),
+          /* @__PURE__ */ jsx6("button", { type: "button", className: "btn sm", disabled: !schedName.trim(), onClick: () => {
             ops.saveScheduleAsStrategy(schedName.trim(), active.segments || []);
             setSchedName("");
           }, "data-testid": "save-schedule", children: "Save current schedule as strategy" })
         ] }),
-        /* @__PURE__ */ jsx5("div", { className: "rows", children: list.map((s) => /* @__PURE__ */ jsxs4("details", { className: "erow", children: [
-          /* @__PURE__ */ jsxs4("summary", { children: [
-            /* @__PURE__ */ jsx5("span", { className: "chev", children: "\u25B6" }),
-            /* @__PURE__ */ jsx5("strong", { children: s.name }),
-            /* @__PURE__ */ jsx5("span", { className: "pill", children: s.baseType }),
-            s.builtin && /* @__PURE__ */ jsx5("span", { className: "pill", children: "built-in" }),
-            s.id === activeStrategyId && /* @__PURE__ */ jsx5("span", { className: "tag soft", children: "active" }),
-            /* @__PURE__ */ jsx5("span", { className: "spacer" }),
-            /* @__PURE__ */ jsxs4("span", { className: "btnbar", onClick: (e) => e.preventDefault(), children: [
-              /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm", onClick: () => ops.duplicateStrategy(s.id), children: "Duplicate" }),
-              !s.builtin && /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteStrategy(s.id), children: "Delete" })
+        /* @__PURE__ */ jsx6("div", { className: "rows", children: list.map((s) => /* @__PURE__ */ jsxs5("details", { className: "erow", children: [
+          /* @__PURE__ */ jsxs5("summary", { children: [
+            /* @__PURE__ */ jsx6("span", { className: "chev", children: "\u25B6" }),
+            /* @__PURE__ */ jsx6("strong", { children: s.name }),
+            /* @__PURE__ */ jsx6("span", { className: "pill", children: s.baseType }),
+            s.builtin && /* @__PURE__ */ jsx6("span", { className: "pill", children: "built-in" }),
+            s.id === activeStrategyId && /* @__PURE__ */ jsx6("span", { className: "tag soft", children: "active" }),
+            /* @__PURE__ */ jsx6("span", { className: "spacer" }),
+            /* @__PURE__ */ jsxs5("span", { className: "btnbar", onClick: (e) => e.preventDefault(), children: [
+              /* @__PURE__ */ jsx6("button", { type: "button", className: "btn sm", onClick: () => ops.duplicateStrategy(s.id), children: "Duplicate" }),
+              !s.builtin && /* @__PURE__ */ jsx6("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteStrategy(s.id), children: "Delete" })
             ] })
           ] }),
-          /* @__PURE__ */ jsxs4("div", { className: "erow-b", children: [
-            /* @__PURE__ */ jsx5("p", { className: "note", children: strategyBlurb(s) }),
-            s.baseType === "manual" && /* @__PURE__ */ jsx5("p", { className: "note", "data-testid": "strat-manual-note-" + s.id, children: "Manual (S4): simulates exactly the hiring plan you enter on each queue, and ignores the hiring cap." }),
-            /* @__PURE__ */ jsxs4("div", { className: "fieldrow", children: [
-              !s.builtin && /* @__PURE__ */ jsx5(TextField, { label: "Name", value: s.name, onChange: (v) => ops.patchStrategy(s.id, ["name"], v) }),
-              s.baseType === "buffer" && /* @__PURE__ */ jsx5(
+          /* @__PURE__ */ jsxs5("div", { className: "erow-b", children: [
+            /* @__PURE__ */ jsx6("p", { className: "note", children: strategyBlurb(s) }),
+            s.baseType === "manual" && /* @__PURE__ */ jsx6("p", { className: "note", "data-testid": "strat-manual-note-" + s.id, children: "Manual (S4): simulates exactly the hiring plan you enter on each queue, and ignores the hiring cap." }),
+            /* @__PURE__ */ jsxs5("div", { className: "fieldrow", children: [
+              !s.builtin && /* @__PURE__ */ jsx6(TextField, { label: "Name", value: s.name, onChange: (v) => ops.patchStrategy(s.id, ["name"], v) }),
+              s.baseType === "buffer" && /* @__PURE__ */ jsx6(
                 NumField,
                 {
                   label: "Buffer",
@@ -3995,7 +4106,7 @@ function StrategyEditor({ config, ops, activeStrategyId }) {
                   hint: "Target = requirement \xD7 (1 + buffer). Editable per strategy."
                 }
               ),
-              s.baseType === "backfill" && /* @__PURE__ */ jsx5(
+              s.baseType === "backfill" && /* @__PURE__ */ jsx6(
                 NumField,
                 {
                   label: "Forward months",
@@ -4008,35 +4119,35 @@ function StrategyEditor({ config, ops, activeStrategyId }) {
                 }
               )
             ] }),
-            ["meet", "buffer", "backfill", "manual"].includes(s.baseType) && /* @__PURE__ */ jsxs4("div", { children: [
-              /* @__PURE__ */ jsxs4("div", { className: "lab", style: { marginBottom: 6, display: "flex", gap: 6 }, children: [
+            ["meet", "buffer", "backfill", "manual"].includes(s.baseType) && /* @__PURE__ */ jsxs5("div", { children: [
+              /* @__PURE__ */ jsxs5("div", { className: "lab", style: { marginBottom: 6, display: "flex", gap: 6 }, children: [
                 "Excluded queues ",
-                /* @__PURE__ */ jsx5(Hint, { text: "Queues this strategy raises no requisitions for." })
+                /* @__PURE__ */ jsx6(Hint, { text: "Queues this strategy raises no requisitions for." })
               ] }),
-              /* @__PURE__ */ jsx5("div", { className: "rowflex", children: config.queues.map((q) => {
+              /* @__PURE__ */ jsx6("div", { className: "rowflex", children: config.queues.map((q) => {
                 const on = (s.excludedQueueIds || []).includes(q.id);
-                return /* @__PURE__ */ jsxs4("label", { className: "switch", children: [
-                  /* @__PURE__ */ jsx5("input", { type: "checkbox", checked: on, onChange: (e) => {
+                return /* @__PURE__ */ jsxs5("label", { className: "switch", children: [
+                  /* @__PURE__ */ jsx6("input", { type: "checkbox", checked: on, onChange: (e) => {
                     const cur = s.excludedQueueIds || [];
                     ops.patchStrategy(s.id, ["excludedQueueIds"], e.target.checked ? [...cur, q.id] : cur.filter((x) => x !== q.id));
                   } }),
-                  /* @__PURE__ */ jsx5("span", { className: "track", "aria-hidden": "true" }),
-                  /* @__PURE__ */ jsx5("span", { children: q.name })
+                  /* @__PURE__ */ jsx6("span", { className: "track", "aria-hidden": "true" }),
+                  /* @__PURE__ */ jsx6("span", { children: q.name })
                 ] }, q.id);
               }) })
             ] }),
-            s.baseType === "schedule" && /* @__PURE__ */ jsxs4("div", { children: [
-              /* @__PURE__ */ jsxs4("div", { className: "lab", style: { marginBottom: 6 }, children: [
+            s.baseType === "schedule" && /* @__PURE__ */ jsxs5("div", { children: [
+              /* @__PURE__ */ jsxs5("div", { className: "lab", style: { marginBottom: 6 }, children: [
                 "Segments \u2014 ",
                 scheduleSummary(config, s) || "empty"
               ] }),
-              (s.segments || []).map((seg, i) => /* @__PURE__ */ jsxs4("div", { className: "rowflex", style: { marginBottom: 6 }, children: [
-                /* @__PURE__ */ jsx5("span", { style: { fontSize: 12, color: "var(--muted)" }, children: "from wk" }),
-                /* @__PURE__ */ jsx5("input", { type: "number", className: "inp", style: { width: 70 }, min: 1, value: seg.fromWeek, onChange: (e) => ops.patchSegment(s.id, i, "fromWeek", Math.max(1, Number(e.target.value) || 1)) }),
-                /* @__PURE__ */ jsx5("select", { className: "inp", style: { flex: 1, maxWidth: 220 }, value: seg.strategyId, onChange: (e) => ops.patchSegment(s.id, i, "strategyId", e.target.value), children: list.filter((x) => x.id !== s.id).map((x) => /* @__PURE__ */ jsx5("option", { value: x.id, children: x.name }, x.id)) }),
-                /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteSegment(s.id, i), children: "Remove" })
+              (s.segments || []).map((seg, i) => /* @__PURE__ */ jsxs5("div", { className: "rowflex", style: { marginBottom: 6 }, children: [
+                /* @__PURE__ */ jsx6("span", { style: { fontSize: 12, color: "var(--muted)" }, children: "from wk" }),
+                /* @__PURE__ */ jsx6("input", { type: "number", className: "inp", style: { width: 70 }, min: 1, value: seg.fromWeek, onChange: (e) => ops.patchSegment(s.id, i, "fromWeek", Math.max(1, Number(e.target.value) || 1)) }),
+                /* @__PURE__ */ jsx6("select", { className: "inp", style: { flex: 1, maxWidth: 220 }, value: seg.strategyId, onChange: (e) => ops.patchSegment(s.id, i, "strategyId", e.target.value), children: list.filter((x) => x.id !== s.id).map((x) => /* @__PURE__ */ jsx6("option", { value: x.id, children: x.name }, x.id)) }),
+                /* @__PURE__ */ jsx6("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteSegment(s.id, i), children: "Remove" })
               ] }, i)),
-              /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm", onClick: () => ops.addSegment(s.id), children: "+ Segment" })
+              /* @__PURE__ */ jsx6("button", { type: "button", className: "btn sm", onClick: () => ops.addSegment(s.id), children: "+ Segment" })
             ] })
           ] })
         ] }, s.id)) })
@@ -4045,9 +4156,9 @@ function StrategyEditor({ config, ops, activeStrategyId }) {
   );
 }
 function StrategiesTab({ simSet, config, activeStrategy, ops }) {
-  return /* @__PURE__ */ jsxs4("div", { className: "grid", style: { gap: 16 }, "data-testid": "strategies-panel", children: [
-    /* @__PURE__ */ jsx5(StrategyEditor, { config, ops, activeStrategyId: activeStrategy }),
-    /* @__PURE__ */ jsx5(Comparison, { sims: simSet.sims, stratIds: simSet.stratIds, config })
+  return /* @__PURE__ */ jsxs5("div", { className: "grid", style: { gap: 16 }, "data-testid": "strategies-panel", children: [
+    /* @__PURE__ */ jsx6(StrategyEditor, { config, ops, activeStrategyId: activeStrategy }),
+    /* @__PURE__ */ jsx6(Comparison, { sims: simSet.sims, stratIds: simSet.stratIds, config })
   ] });
 }
 
@@ -4055,7 +4166,7 @@ function StrategiesTab({ simSet, config, activeStrategy, ops }) {
 import { useState as useState7 } from "react";
 
 // ui/components/Ribbon.jsx
-import { jsx as jsx6, jsxs as jsxs5 } from "react/jsx-runtime";
+import { jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";
 function Ribbon({ sim, selectedWeek, onScrub }) {
   const cfg = sim.config;
   const activeSet = new Set(sim.viewIds || []);
@@ -4065,18 +4176,18 @@ function Ribbon({ sim, selectedWeek, onScrub }) {
     (eventWeeks[s.startWeek] = eventWeeks[s.startWeek] || []).push(s);
   }
   const weeks = sim.weeks;
-  return /* @__PURE__ */ jsxs5("div", { children: [
-    /* @__PURE__ */ jsx6("div", { className: "ribbon-wrap", children: /* @__PURE__ */ jsxs5("table", { className: "ribbon", children: [
-      /* @__PURE__ */ jsx6("thead", { children: /* @__PURE__ */ jsxs5("tr", { children: [
-        /* @__PURE__ */ jsx6("th", {}),
-        weeks.map((w) => /* @__PURE__ */ jsx6("th", { className: "wk", children: w.week % 4 === 0 || w.week === weeks.length - 1 ? w.week + 1 : "" }, w.week))
+  return /* @__PURE__ */ jsxs6("div", { children: [
+    /* @__PURE__ */ jsx7("div", { className: "ribbon-wrap", children: /* @__PURE__ */ jsxs6("table", { className: "ribbon", children: [
+      /* @__PURE__ */ jsx7("thead", { children: /* @__PURE__ */ jsxs6("tr", { children: [
+        /* @__PURE__ */ jsx7("th", {}),
+        weeks.map((w) => /* @__PURE__ */ jsx7("th", { className: "wk", children: w.week % 4 === 0 || w.week === weeks.length - 1 ? w.week + 1 : "" }, w.week))
       ] }) }),
-      /* @__PURE__ */ jsx6("tbody", { children: cfg.queues.map((q) => /* @__PURE__ */ jsxs5("tr", { children: [
-        /* @__PURE__ */ jsx6("th", { scope: "row", children: q.name }),
+      /* @__PURE__ */ jsx7("tbody", { children: cfg.queues.map((q) => /* @__PURE__ */ jsxs6("tr", { children: [
+        /* @__PURE__ */ jsx7("th", { scope: "row", children: q.name }),
         weeks.map((w) => {
           const st = w.queues[q.id].status;
           const marked = !!eventWeeks[w.week];
-          return /* @__PURE__ */ jsx6("td", { style: { padding: 0 }, children: /* @__PURE__ */ jsx6(
+          return /* @__PURE__ */ jsx7("td", { style: { padding: 0 }, children: /* @__PURE__ */ jsx7(
             "button",
             {
               type: "button",
@@ -4090,27 +4201,27 @@ function Ribbon({ sim, selectedWeek, onScrub }) {
         })
       ] }, q.id)) })
     ] }) }),
-    /* @__PURE__ */ jsxs5("div", { className: "ribbon-scrub", children: [
-      /* @__PURE__ */ jsxs5("span", { className: "legend", children: [
-        /* @__PURE__ */ jsxs5("span", { children: [
-          /* @__PURE__ */ jsx6("span", { className: "sw", style: { background: RAG.green } }),
+    /* @__PURE__ */ jsxs6("div", { className: "ribbon-scrub", children: [
+      /* @__PURE__ */ jsxs6("span", { className: "legend", children: [
+        /* @__PURE__ */ jsxs6("span", { children: [
+          /* @__PURE__ */ jsx7("span", { className: "sw", style: { background: RAG.green } }),
           "Meets SLA"
         ] }),
-        /* @__PURE__ */ jsxs5("span", { children: [
-          /* @__PURE__ */ jsx6("span", { className: "sw", style: { background: RAG.amber } }),
+        /* @__PURE__ */ jsxs6("span", { children: [
+          /* @__PURE__ */ jsx7("span", { className: "sw", style: { background: RAG.amber } }),
           "At risk"
         ] }),
-        /* @__PURE__ */ jsxs5("span", { children: [
-          /* @__PURE__ */ jsx6("span", { className: "sw", style: { background: RAG.red } }),
+        /* @__PURE__ */ jsxs6("span", { children: [
+          /* @__PURE__ */ jsx7("span", { className: "sw", style: { background: RAG.red } }),
           "Breach"
         ] }),
-        /* @__PURE__ */ jsxs5("span", { children: [
-          /* @__PURE__ */ jsx6("span", { className: "sw", style: { background: "var(--ink)" } }),
+        /* @__PURE__ */ jsxs6("span", { children: [
+          /* @__PURE__ */ jsx7("span", { className: "sw", style: { background: "var(--ink)" } }),
           "Scenario event"
         ] })
       ] }),
-      /* @__PURE__ */ jsx6("span", { className: "spacer" }),
-      Object.keys(eventWeeks).length > 0 && /* @__PURE__ */ jsx6("span", { className: "legend", children: Object.entries(eventWeeks).sort((a, b) => a[0] - b[0]).map(([wk, list]) => /* @__PURE__ */ jsxs5("span", { className: "pill", children: [
+      /* @__PURE__ */ jsx7("span", { className: "spacer" }),
+      Object.keys(eventWeeks).length > 0 && /* @__PURE__ */ jsx7("span", { className: "legend", children: Object.entries(eventWeeks).sort((a, b) => a[0] - b[0]).map(([wk, list]) => /* @__PURE__ */ jsxs6("span", { className: "pill", children: [
         "wk ",
         Number(wk) + 1,
         ": ",
@@ -4122,7 +4233,7 @@ function Ribbon({ sim, selectedWeek, onScrub }) {
 
 // ui/components/HolisticPanel.jsx
 import { useState as useState6 } from "react";
-import { jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";
+import { jsx as jsx8, jsxs as jsxs7 } from "react/jsx-runtime";
 function queueMetrics(sim, q) {
   const series = sim.weeks.map((w) => w.queues[q.id]);
   const last = series[series.length - 1];
@@ -4156,28 +4267,28 @@ function HierarchyBlocks({ sim }) {
   };
   const block = (label, sub, queues, key) => {
     const a = agg(queues);
-    return /* @__PURE__ */ jsxs6("div", { className: "holo-block", "data-testid": "holo-block-" + key, children: [
-      /* @__PURE__ */ jsxs6("div", { className: "holo-block-h", children: [
-        /* @__PURE__ */ jsx7("strong", { children: label }),
-        sub ? /* @__PURE__ */ jsx7("span", { className: "pill", children: sub }) : null
+    return /* @__PURE__ */ jsxs7("div", { className: "holo-block", "data-testid": "holo-block-" + key, children: [
+      /* @__PURE__ */ jsxs7("div", { className: "holo-block-h", children: [
+        /* @__PURE__ */ jsx8("strong", { children: label }),
+        sub ? /* @__PURE__ */ jsx8("span", { className: "pill", children: sub }) : null
       ] }),
-      /* @__PURE__ */ jsxs6("div", { className: "holo-mini", children: [
-        /* @__PURE__ */ jsxs6("div", { children: [
-          /* @__PURE__ */ jsx7("span", { className: "l", children: "Required" }),
-          /* @__PURE__ */ jsx7("span", { className: "v", children: num(a.req, 0) })
+      /* @__PURE__ */ jsxs7("div", { className: "holo-mini", children: [
+        /* @__PURE__ */ jsxs7("div", { children: [
+          /* @__PURE__ */ jsx8("span", { className: "l", children: "Required" }),
+          /* @__PURE__ */ jsx8("span", { className: "v", children: num(a.req, 0) })
         ] }),
-        /* @__PURE__ */ jsxs6("div", { children: [
-          /* @__PURE__ */ jsx7("span", { className: "l", children: "Active" }),
-          /* @__PURE__ */ jsx7("span", { className: "v", children: num(a.active, 0) })
+        /* @__PURE__ */ jsxs7("div", { children: [
+          /* @__PURE__ */ jsx8("span", { className: "l", children: "Active" }),
+          /* @__PURE__ */ jsx8("span", { className: "v", children: num(a.active, 0) })
         ] }),
-        /* @__PURE__ */ jsxs6("div", { children: [
-          /* @__PURE__ */ jsx7("span", { className: "l", children: "Pipeline" }),
-          /* @__PURE__ */ jsx7("span", { className: "v", children: num(a.pipe, 0) })
+        /* @__PURE__ */ jsxs7("div", { children: [
+          /* @__PURE__ */ jsx8("span", { className: "l", children: "Pipeline" }),
+          /* @__PURE__ */ jsx8("span", { className: "v", children: num(a.pipe, 0) })
         ] })
       ] })
     ] }, key);
   };
-  return /* @__PURE__ */ jsx7("div", { className: "holo-grid", "data-testid": "holo-hierarchy", children: rows.map((row) => [
+  return /* @__PURE__ */ jsx8("div", { className: "holo-grid", "data-testid": "holo-hierarchy", children: rows.map((row) => [
     block(row.brand.name, `${row.queues.length} queue(s)`, row.queues, row.brand.id),
     ...row.channels.map((c) => block(`${row.brand.name} \xB7 ${c.label}`, null, c.queues, row.brand.id + "-" + c.key))
   ]).flat() });
@@ -4190,7 +4301,7 @@ function CapsContext({ sim }) {
   const levels = /* @__PURE__ */ new Set();
   for (const t of binding) for (const l of t.boundBy || []) levels.add(l);
   const segEntries = Object.entries(caps.segments || {});
-  return /* @__PURE__ */ jsxs6("p", { className: "note", "data-testid": "holo-caps", style: { marginTop: 12 }, children: [
+  return /* @__PURE__ */ jsxs7("p", { className: "note", "data-testid": "holo-caps", style: { marginTop: 12 }, children: [
     "Hiring caps \u2014 total ",
     caps.total == null ? "\u221E" : caps.total + "/wk",
     segEntries.length ? `; ${segEntries.length} segment cap(s) set` : "; no segment caps",
@@ -4221,34 +4332,34 @@ function HolisticPanel({ sim }) {
     otMonthly: t.otMonthly + m.otMonthly,
     custMonthly: t.custMonthly + m.custMonthly
   }), { reqFte: 0, hires: 0, active: 0, attrition: 0, agentMonthly: 0, otMonthly: 0, custMonthly: 0 });
-  return /* @__PURE__ */ jsxs6(
+  return /* @__PURE__ */ jsxs7(
     Card,
     {
       title: "Holistic requirement panel",
       hint: "Required, active and pipeline headcount across the hierarchy, then an interactive per-queue table. Toggle a queue chip to include or exclude it \u2014 the capacity required and the totals recompute live.",
-      right: /* @__PURE__ */ jsx7("button", { type: "button", className: "btn sm", onClick: () => setShowTrace((s) => !s), "data-testid": "holo-toggle-trace", children: showTrace ? "Hide cap trace" : "Show cap trace" }),
+      right: /* @__PURE__ */ jsx8("button", { type: "button", className: "btn sm", onClick: () => setShowTrace((s) => !s), "data-testid": "holo-toggle-trace", children: showTrace ? "Hide cap trace" : "Show cap trace" }),
       children: [
-        /* @__PURE__ */ jsx7(HierarchyBlocks, { sim }),
-        /* @__PURE__ */ jsxs6("div", { className: "stat-row", style: { marginTop: 14 }, children: [
-          /* @__PURE__ */ jsxs6("div", { className: "stat", children: [
-            /* @__PURE__ */ jsx7("div", { className: "l", children: "Total capacity required (filtered)" }),
-            /* @__PURE__ */ jsxs6("div", { className: "v", "data-testid": "holo-capacity-required", children: [
+        /* @__PURE__ */ jsx8(HierarchyBlocks, { sim }),
+        /* @__PURE__ */ jsxs7("div", { className: "stat-row", style: { marginTop: 14 }, children: [
+          /* @__PURE__ */ jsxs7("div", { className: "stat", children: [
+            /* @__PURE__ */ jsx8("div", { className: "l", children: "Total capacity required (filtered)" }),
+            /* @__PURE__ */ jsxs7("div", { className: "v", "data-testid": "holo-capacity-required", children: [
               num(totals.reqFte, 0),
-              /* @__PURE__ */ jsx7("small", { children: " FTE" })
+              /* @__PURE__ */ jsx8("small", { children: " FTE" })
             ] })
           ] }),
-          /* @__PURE__ */ jsxs6("div", { className: "stat", children: [
-            /* @__PURE__ */ jsx7("div", { className: "l", children: "Queues included" }),
-            /* @__PURE__ */ jsxs6("div", { className: "v", "data-testid": "holo-active-count", children: [
+          /* @__PURE__ */ jsxs7("div", { className: "stat", children: [
+            /* @__PURE__ */ jsx8("div", { className: "l", children: "Queues included" }),
+            /* @__PURE__ */ jsxs7("div", { className: "v", "data-testid": "holo-active-count", children: [
               shown.length,
-              /* @__PURE__ */ jsxs6("small", { children: [
+              /* @__PURE__ */ jsxs7("small", { children: [
                 "/",
                 metrics.length
               ] })
             ] })
           ] })
         ] }),
-        /* @__PURE__ */ jsx7("div", { className: "rowflex", style: { marginTop: 10 }, "data-testid": "holo-chips", children: metrics.map((m) => /* @__PURE__ */ jsx7(
+        /* @__PURE__ */ jsx8("div", { className: "rowflex", style: { marginTop: 10 }, "data-testid": "holo-chips", children: metrics.map((m) => /* @__PURE__ */ jsx8(
           "button",
           {
             type: "button",
@@ -4260,50 +4371,92 @@ function HolisticPanel({ sim }) {
           },
           m.id
         )) }),
-        /* @__PURE__ */ jsx7("div", { className: "tbl-wrap", style: { marginTop: 12 }, children: /* @__PURE__ */ jsxs6("table", { className: "data", "data-testid": "holo-table", children: [
-          /* @__PURE__ */ jsx7("thead", { children: /* @__PURE__ */ jsxs6("tr", { children: [
-            /* @__PURE__ */ jsx7("th", { children: "Queue" }),
-            /* @__PURE__ */ jsx7("th", { children: "Capacity req." }),
-            /* @__PURE__ */ jsx7("th", { children: "Hires" }),
-            /* @__PURE__ */ jsx7("th", { children: "Active" }),
-            /* @__PURE__ */ jsx7("th", { children: "Attrition #" }),
-            /* @__PURE__ */ jsx7("th", { children: "Agent \xA3/mo" }),
-            /* @__PURE__ */ jsx7("th", { children: "OT \xA3/mo" }),
-            /* @__PURE__ */ jsx7("th", { children: "Customer \xA3/mo" })
+        /* @__PURE__ */ jsx8("div", { className: "tbl-wrap", style: { marginTop: 12 }, children: /* @__PURE__ */ jsxs7("table", { className: "data", "data-testid": "holo-table", children: [
+          /* @__PURE__ */ jsx8("thead", { children: /* @__PURE__ */ jsxs7("tr", { children: [
+            /* @__PURE__ */ jsx8("th", { children: "Queue" }),
+            /* @__PURE__ */ jsx8("th", { children: "Capacity req." }),
+            /* @__PURE__ */ jsx8("th", { children: "Hires" }),
+            /* @__PURE__ */ jsx8("th", { children: "Active" }),
+            /* @__PURE__ */ jsx8("th", { children: "Attrition #" }),
+            /* @__PURE__ */ jsx8("th", { children: "Agent \xA3/mo" }),
+            /* @__PURE__ */ jsx8("th", { children: "OT \xA3/mo" }),
+            /* @__PURE__ */ jsx8("th", { children: "Customer \xA3/mo" })
           ] }) }),
-          /* @__PURE__ */ jsxs6("tbody", { children: [
-            shown.map((m) => /* @__PURE__ */ jsxs6("tr", { children: [
-              /* @__PURE__ */ jsx7("td", { style: { textAlign: "left", fontWeight: 600 }, children: m.name }),
-              /* @__PURE__ */ jsx7("td", { children: num(m.reqFte, 1) }),
-              /* @__PURE__ */ jsx7("td", { children: num(m.hires, 1) }),
-              /* @__PURE__ */ jsx7("td", { children: num(m.active, 1) }),
-              /* @__PURE__ */ jsx7("td", { children: num(m.attrition, 1) }),
-              /* @__PURE__ */ jsx7("td", { children: money(cur, m.agentMonthly) }),
-              /* @__PURE__ */ jsx7("td", { children: money(cur, m.otMonthly) }),
-              /* @__PURE__ */ jsx7("td", { children: money(cur, m.custMonthly) })
+          /* @__PURE__ */ jsxs7("tbody", { children: [
+            shown.map((m) => /* @__PURE__ */ jsxs7("tr", { children: [
+              /* @__PURE__ */ jsx8("td", { style: { textAlign: "left", fontWeight: 600 }, children: m.name }),
+              /* @__PURE__ */ jsx8("td", { children: num(m.reqFte, 1) }),
+              /* @__PURE__ */ jsx8("td", { children: num(m.hires, 1) }),
+              /* @__PURE__ */ jsx8("td", { children: num(m.active, 1) }),
+              /* @__PURE__ */ jsx8("td", { children: num(m.attrition, 1) }),
+              /* @__PURE__ */ jsx8("td", { children: money(cur, m.agentMonthly) }),
+              /* @__PURE__ */ jsx8("td", { children: money(cur, m.otMonthly) }),
+              /* @__PURE__ */ jsx8("td", { children: money(cur, m.custMonthly) })
             ] }, m.id)),
-            shown.length === 0 && /* @__PURE__ */ jsx7("tr", { children: /* @__PURE__ */ jsx7("td", { colSpan: 8, className: "empty", children: "No queues selected \u2014 tap a chip to include one." }) }),
-            /* @__PURE__ */ jsxs6("tr", { className: "grp total", children: [
-              /* @__PURE__ */ jsxs6("td", { style: { textAlign: "left" }, children: [
+            shown.length === 0 && /* @__PURE__ */ jsx8("tr", { children: /* @__PURE__ */ jsx8("td", { colSpan: 8, className: "empty", children: "No queues selected \u2014 tap a chip to include one." }) }),
+            /* @__PURE__ */ jsxs7("tr", { className: "grp total", children: [
+              /* @__PURE__ */ jsxs7("td", { style: { textAlign: "left" }, children: [
                 "Totals (",
                 shown.length,
                 ")"
               ] }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-req", children: num(totals.reqFte, 1) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-hires", children: num(totals.hires, 1) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-active", children: num(totals.active, 1) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-attrition", children: num(totals.attrition, 1) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-agent", children: money(cur, totals.agentMonthly) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-ot", children: money(cur, totals.otMonthly) }),
-              /* @__PURE__ */ jsx7("td", { "data-testid": "holo-total-cust", children: money(cur, totals.custMonthly) })
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-req", children: num(totals.reqFte, 1) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-hires", children: num(totals.hires, 1) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-active", children: num(totals.active, 1) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-attrition", children: num(totals.attrition, 1) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-agent", children: money(cur, totals.agentMonthly) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-ot", children: money(cur, totals.otMonthly) }),
+              /* @__PURE__ */ jsx8("td", { "data-testid": "holo-total-cust", children: money(cur, totals.custMonthly) })
             ] })
           ] })
         ] }) }),
-        /* @__PURE__ */ jsx7(CapsContext, { sim }),
-        showTrace && /* @__PURE__ */ jsx7(AllocationTrace, { sim })
+        /* @__PURE__ */ jsx8(WeeklyTable, { sim, active }),
+        /* @__PURE__ */ jsx8(CapsContext, { sim }),
+        showTrace && /* @__PURE__ */ jsx8(AllocationTrace, { sim })
       ]
     }
   );
+}
+function WeeklyTable({ sim, active }) {
+  const cfg = sim.config;
+  const cur = cfg.engine.currency;
+  const ids = cfg.queues.map((q) => q.id).filter((id) => active.has(id));
+  const rows = sim.weeks.map((w, i) => {
+    let reqFte = 0, hires = 0, act = 0, attrition = 0, agent = 0, ot = 0, cust = 0;
+    for (const id of ids) {
+      const s = w.queues[id];
+      reqFte += s.reqFte || 0;
+      hires += s.reqsRaised || 0;
+      act += s.active != null ? s.active : (s.trained || 0) + (s.ramp || 0);
+      attrition += s.leavers || 0;
+      agent += s.cost || 0;
+      ot += s.otCost || 0;
+      cust += s.churnCost || 0;
+    }
+    return { week: i + 1, reqFte, hires, act, attrition, agent, ot, cust };
+  });
+  return /* @__PURE__ */ jsx8("div", { className: "tbl-wrap", style: { marginTop: 14, maxHeight: 360 }, children: /* @__PURE__ */ jsxs7("table", { className: "data", "data-testid": "holo-weekly-table", children: [
+    /* @__PURE__ */ jsx8("thead", { children: /* @__PURE__ */ jsxs7("tr", { children: [
+      /* @__PURE__ */ jsx8("th", { children: "Week" }),
+      /* @__PURE__ */ jsx8("th", { children: "Capacity req." }),
+      /* @__PURE__ */ jsx8("th", { children: "Hires" }),
+      /* @__PURE__ */ jsx8("th", { children: "Active" }),
+      /* @__PURE__ */ jsx8("th", { children: "Attrition #" }),
+      /* @__PURE__ */ jsx8("th", { children: "Agent \xA3" }),
+      /* @__PURE__ */ jsx8("th", { children: "OT \xA3" }),
+      /* @__PURE__ */ jsx8("th", { children: "Customer \xA3" })
+    ] }) }),
+    /* @__PURE__ */ jsx8("tbody", { children: rows.map((r) => /* @__PURE__ */ jsxs7("tr", { "data-testid": "holo-weekly-row", children: [
+      /* @__PURE__ */ jsx8("td", { style: { textAlign: "left", fontWeight: 600 }, children: r.week }),
+      /* @__PURE__ */ jsx8("td", { "data-testid": r.week === 1 ? "holo-wk1-cap" : void 0, children: num(r.reqFte, 1) }),
+      /* @__PURE__ */ jsx8("td", { children: num(r.hires, 1) }),
+      /* @__PURE__ */ jsx8("td", { children: num(r.act, 1) }),
+      /* @__PURE__ */ jsx8("td", { children: num(r.attrition, 1) }),
+      /* @__PURE__ */ jsx8("td", { children: money(cur, r.agent) }),
+      /* @__PURE__ */ jsx8("td", { children: money(cur, r.ot) }),
+      /* @__PURE__ */ jsx8("td", { children: money(cur, r.cust) })
+    ] }, r.week)) })
+  ] }) });
 }
 function AllocationTrace({ sim }) {
   const cfg = sim.config;
@@ -4312,32 +4465,32 @@ function AllocationTrace({ sim }) {
   const binding = trace.filter((t) => t.binding);
   const rows = binding.length ? binding : trace.slice(0, 8);
   const qName = (id) => (cfg.queues.find((q) => q.id === id) || { name: id }).name;
-  return /* @__PURE__ */ jsx7("div", { className: "tbl-wrap", style: { marginTop: 12, maxHeight: 340 }, children: /* @__PURE__ */ jsxs6("table", { className: "data", "data-testid": "holo-trace", children: [
-    /* @__PURE__ */ jsx7("thead", { children: /* @__PURE__ */ jsxs6("tr", { children: [
-      /* @__PURE__ */ jsx7("th", { children: "Week" }),
-      /* @__PURE__ */ jsx7("th", { children: "Cap" }),
-      /* @__PURE__ */ jsx7("th", { children: "Wanted" }),
-      cfg.queues.map((q) => /* @__PURE__ */ jsx7("th", { children: q.name }, q.id)),
-      /* @__PURE__ */ jsx7("th", { children: "Bound by" })
+  return /* @__PURE__ */ jsx8("div", { className: "tbl-wrap", style: { marginTop: 12, maxHeight: 340 }, children: /* @__PURE__ */ jsxs7("table", { className: "data", "data-testid": "holo-trace", children: [
+    /* @__PURE__ */ jsx8("thead", { children: /* @__PURE__ */ jsxs7("tr", { children: [
+      /* @__PURE__ */ jsx8("th", { children: "Week" }),
+      /* @__PURE__ */ jsx8("th", { children: "Cap" }),
+      /* @__PURE__ */ jsx8("th", { children: "Wanted" }),
+      cfg.queues.map((q) => /* @__PURE__ */ jsx8("th", { children: q.name }, q.id)),
+      /* @__PURE__ */ jsx8("th", { children: "Bound by" })
     ] }) }),
-    /* @__PURE__ */ jsxs6("tbody", { children: [
-      rows.map((t) => /* @__PURE__ */ jsxs6("tr", { style: t.binding ? { background: "var(--red-s)" } : void 0, children: [
-        /* @__PURE__ */ jsx7("td", { children: t.week + 1 }),
-        /* @__PURE__ */ jsx7("td", { children: t.cap == null ? "\u221E" : t.cap }),
-        /* @__PURE__ */ jsxs6("td", { children: [
+    /* @__PURE__ */ jsxs7("tbody", { children: [
+      rows.map((t) => /* @__PURE__ */ jsxs7("tr", { style: t.binding ? { background: "var(--red-s)" } : void 0, children: [
+        /* @__PURE__ */ jsx8("td", { children: t.week + 1 }),
+        /* @__PURE__ */ jsx8("td", { children: t.cap == null ? "\u221E" : t.cap }),
+        /* @__PURE__ */ jsxs7("td", { children: [
           num(t.want, 0),
           t.binding ? " \u26A0" : ""
         ] }),
         cfg.queues.map((q) => {
           const g = t.grants[q.id] || 0, d = t.denied[q.id] || 0;
-          return /* @__PURE__ */ jsxs6("td", { className: d > 0.05 ? "st-red" : void 0, children: [
+          return /* @__PURE__ */ jsxs7("td", { className: d > 0.05 ? "st-red" : void 0, children: [
             g > 0.05 ? num(g, 0) : "\u2013",
             d > 0.05 ? ` (\u2212${num(d, 0)})` : ""
           ] }, q.id);
         }),
-        /* @__PURE__ */ jsx7("td", { style: { textAlign: "left" }, children: (t.boundBy || []).join(", ") || (t.binding ? "Total" : "\u2013") })
+        /* @__PURE__ */ jsx8("td", { style: { textAlign: "left" }, children: (t.boundBy || []).join(", ") || (t.binding ? "Total" : "\u2013") })
       ] }, t.week)),
-      rows.length === 0 && /* @__PURE__ */ jsx7("tr", { children: /* @__PURE__ */ jsx7("td", { colSpan: 4 + cfg.queues.length, className: "empty", children: "No allocation activity." }) })
+      rows.length === 0 && /* @__PURE__ */ jsx8("tr", { children: /* @__PURE__ */ jsx8("td", { colSpan: 4 + cfg.queues.length, className: "empty", children: "No allocation activity." }) })
     ] })
   ] }) });
 }
@@ -4357,14 +4510,14 @@ import {
   Legend as Legend2,
   ReferenceLine
 } from "recharts";
-import { jsx as jsx8, jsxs as jsxs7 } from "react/jsx-runtime";
+import { jsx as jsx9, jsxs as jsxs8 } from "react/jsx-runtime";
 var SERIES2 = ["#0e7c86", "#d98a0b", "#5a54c9", "#c0417a", "#2f8f4e", "#b0602a", "#3a7bd5", "#8a51b0"];
 var AX = { fontSize: 11 };
 var common = { margin: { top: 8, right: 14, left: 4, bottom: 4 } };
 var wkX = { dataKey: "wk", tick: AX, interval: "preserveStartEnd", minTickGap: 18 };
 function markLine(selectedWeek) {
   if (selectedWeek == null) return null;
-  return /* @__PURE__ */ jsx8(ReferenceLine, { x: selectedWeek + 1, stroke: "#0f1720", strokeDasharray: "3 3", strokeOpacity: 0.5 });
+  return /* @__PURE__ */ jsx9(ReferenceLine, { x: selectedWeek + 1, stroke: "#0f1720", strokeDasharray: "3 3", strokeOpacity: 0.5 });
 }
 function CoverageChart({ sim, selectedWeek }) {
   const cfg = sim.config;
@@ -4373,15 +4526,15 @@ function CoverageChart({ sim, selectedWeek }) {
     for (const q of cfg.queues) row[q.id] = +(w.queues[q.id].cover * 100).toFixed(1);
     return row;
   });
-  return /* @__PURE__ */ jsx8(Chart, { title: "Coverage", hint: "Available productive hours \xF7 required hours, laid along the requirement curve. 100% means SLA is met in every interval; below is a uniform shortfall.", children: (w, h) => /* @__PURE__ */ jsxs7(LineChart2, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 40, domain: [0, "auto"], tickFormatter: (v) => v + "%" }),
-    /* @__PURE__ */ jsx8(Tooltip2, { formatter: (v) => v + "%" }),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    /* @__PURE__ */ jsx8(ReferenceLine, { y: 100, stroke: "#1f9d55", strokeDasharray: "4 2" }),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Coverage", hint: "Available productive hours \xF7 required hours, laid along the requirement curve. 100% means SLA is met in every interval; below is a uniform shortfall.", children: (w, h) => /* @__PURE__ */ jsxs8(LineChart2, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 40, domain: [0, "auto"], tickFormatter: (v) => v + "%" }),
+    /* @__PURE__ */ jsx9(Tooltip2, { formatter: (v) => v + "%" }),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    /* @__PURE__ */ jsx9(ReferenceLine, { y: 100, stroke: "#1f9d55", strokeDasharray: "4 2" }),
     markLine(selectedWeek),
-    cfg.queues.map((q, i) => /* @__PURE__ */ jsx8(Line2, { type: "monotone", dataKey: q.id, name: q.name, stroke: SERIES2[i % SERIES2.length], dot: false, strokeWidth: 2, isAnimationActive: false }, q.id))
+    cfg.queues.map((q, i) => /* @__PURE__ */ jsx9(Line2, { type: "monotone", dataKey: q.id, name: q.name, stroke: SERIES2[i % SERIES2.length], dot: false, strokeWidth: 2, isAnimationActive: false }, q.id))
   ] }) });
 }
 function HeadcountChart({ sim, selectedWeek }) {
@@ -4392,16 +4545,16 @@ function HeadcountChart({ sim, selectedWeek }) {
     training: +w.totals.inTraining.toFixed(1),
     required: +w.totals.reqFte.toFixed(1)
   }));
-  return /* @__PURE__ */ jsx8(Chart, { title: "Headcount \u2014 trained / ramping / training vs required", hint: "Paid heads split by readiness. Trainees cost full salary but deliver zero; ramping agents deliver their learning-curve share. The line is required FTE.", children: (w, h) => /* @__PURE__ */ jsxs7(ComposedChart, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 40 }),
-    /* @__PURE__ */ jsx8(Tooltip2, {}),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    /* @__PURE__ */ jsx8(Area, { type: "monotone", dataKey: "trained", stackId: "hc", stroke: "#0e7c86", fill: "#0e7c86", fillOpacity: 0.75, isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Area, { type: "monotone", dataKey: "ramping", stackId: "hc", stroke: "#12a3b0", fill: "#57c3cc", fillOpacity: 0.7, isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Area, { type: "monotone", dataKey: "training", stackId: "hc", stroke: "#d98a0b", fill: "#f0c774", fillOpacity: 0.7, isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Line2, { type: "monotone", dataKey: "required", stroke: "#0f1720", strokeWidth: 2, dot: false, isAnimationActive: false }),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Headcount \u2014 trained / ramping / training vs required", hint: "Paid heads split by readiness. Trainees cost full salary but deliver zero; ramping agents deliver their learning-curve share. The line is required FTE.", children: (w, h) => /* @__PURE__ */ jsxs8(ComposedChart, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 40 }),
+    /* @__PURE__ */ jsx9(Tooltip2, {}),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    /* @__PURE__ */ jsx9(Area, { type: "monotone", dataKey: "trained", stackId: "hc", stroke: "#0e7c86", fill: "#0e7c86", fillOpacity: 0.75, isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Area, { type: "monotone", dataKey: "ramping", stackId: "hc", stroke: "#12a3b0", fill: "#57c3cc", fillOpacity: 0.7, isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Area, { type: "monotone", dataKey: "training", stackId: "hc", stroke: "#d98a0b", fill: "#f0c774", fillOpacity: 0.7, isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Line2, { type: "monotone", dataKey: "required", stroke: "#0f1720", strokeWidth: 2, dot: false, isAnimationActive: false }),
     markLine(selectedWeek)
   ] }) });
 }
@@ -4417,15 +4570,15 @@ function VolumeChart({ sim, selectedWeek }) {
     }
     return { wk: w.week + 1, base: Math.round(base), deflected: Math.round(deflected), redial: Math.round(redial) };
   });
-  return /* @__PURE__ */ jsx8(Chart, { title: "Volume composition", hint: "Exogenous base volume (after seasonality and scenarios) plus endogenous load: digital\u2192voice deflection and abandoned-caller redials.", children: (w, h) => /* @__PURE__ */ jsxs7(BarChart, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => v >= 1e3 ? (v / 1e3).toFixed(0) + "k" : v }),
-    /* @__PURE__ */ jsx8(Tooltip2, {}),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "base", name: "Base", stackId: "v", fill: "#0e7c86", isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "deflected", name: "Deflected", stackId: "v", fill: "#5a54c9", isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "redial", name: "Redial", stackId: "v", fill: "#d98a0b", isAnimationActive: false }),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Volume composition", hint: "Exogenous base volume (after seasonality and scenarios) plus endogenous load: digital\u2192voice deflection and abandoned-caller redials.", children: (w, h) => /* @__PURE__ */ jsxs8(BarChart, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => v >= 1e3 ? (v / 1e3).toFixed(0) + "k" : v }),
+    /* @__PURE__ */ jsx9(Tooltip2, {}),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "base", name: "Base", stackId: "v", fill: "#0e7c86", isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "deflected", name: "Deflected", stackId: "v", fill: "#5a54c9", isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "redial", name: "Redial", stackId: "v", fill: "#d98a0b", isAnimationActive: false }),
     markLine(selectedWeek)
   ] }) });
 }
@@ -4438,16 +4591,16 @@ function CostChart({ sim, selectedWeek }) {
     managers: Math.round(w.totals.managerCost),
     service: Math.round(w.totals.serviceCost || 0)
   }));
-  return /* @__PURE__ */ jsx8(Chart, { title: "Cost breakdown", hint: "Weekly run cost by component: productive salary, trainee salary, management overhead, and service-team premium hours.", children: (w, h) => /* @__PURE__ */ jsxs7(BarChart, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx8(Tooltip2, { formatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "productive", name: "Productive", stackId: "c", fill: "#0e7c86", isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "training", name: "Training", stackId: "c", fill: "#d98a0b", isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "managers", name: "Managers", stackId: "c", fill: "#5a54c9", isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Bar, { dataKey: "service", name: "Service team", stackId: "c", fill: "#2f8f4e", isAnimationActive: false }),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Cost breakdown", hint: "Weekly run cost by component: productive salary, trainee salary, management overhead, and service-team premium hours.", children: (w, h) => /* @__PURE__ */ jsxs8(BarChart, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx9(Tooltip2, { formatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "productive", name: "Productive", stackId: "c", fill: "#0e7c86", isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "training", name: "Training", stackId: "c", fill: "#d98a0b", isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "managers", name: "Managers", stackId: "c", fill: "#5a54c9", isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Bar, { dataKey: "service", name: "Service team", stackId: "c", fill: "#2f8f4e", isAnimationActive: false }),
     markLine(selectedWeek)
   ] }) });
 }
@@ -4467,15 +4620,15 @@ function IdleChurnChart({ sim, selectedWeek }) {
       break;
     }
   }
-  return /* @__PURE__ */ jsx8(Chart, { title: "Idle pay vs churn cost", hint: "Over-staffing wastes salary; under-staffing loses customers. The break-even week is where the two curves cross \u2014 the cheapest place to sit.", children: (w, h) => /* @__PURE__ */ jsxs7(LineChart2, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx8(Tooltip2, { formatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    /* @__PURE__ */ jsx8(Line2, { type: "monotone", dataKey: "idle", name: "Idle pay", stroke: "#3a7bd5", strokeWidth: 2, dot: false, isAnimationActive: false }),
-    /* @__PURE__ */ jsx8(Line2, { type: "monotone", dataKey: "churn", name: "Churn cost", stroke: "#c0417a", strokeWidth: 2, dot: false, isAnimationActive: false }),
-    cross != null && /* @__PURE__ */ jsx8(ReferenceLine, { x: cross, stroke: "#1f9d55", label: { value: "break-even", fontSize: 10, fill: "#1f9d55", position: "top" } }),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Idle pay vs churn cost", hint: "Over-staffing wastes salary; under-staffing loses customers. The break-even week is where the two curves cross \u2014 the cheapest place to sit.", children: (w, h) => /* @__PURE__ */ jsxs8(LineChart2, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 48, tickFormatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx9(Tooltip2, { formatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    /* @__PURE__ */ jsx9(Line2, { type: "monotone", dataKey: "idle", name: "Idle pay", stroke: "#3a7bd5", strokeWidth: 2, dot: false, isAnimationActive: false }),
+    /* @__PURE__ */ jsx9(Line2, { type: "monotone", dataKey: "churn", name: "Churn cost", stroke: "#c0417a", strokeWidth: 2, dot: false, isAnimationActive: false }),
+    cross != null && /* @__PURE__ */ jsx9(ReferenceLine, { x: cross, stroke: "#1f9d55", label: { value: "break-even", fontSize: 10, fill: "#1f9d55", position: "top" } }),
     markLine(selectedWeek)
   ] }) });
 }
@@ -4486,73 +4639,73 @@ function BurnoutChart({ sim, selectedWeek }) {
     for (const q of cfg.queues) row[q.id] = Math.round(w.queues[q.id].burnout);
     return row;
   });
-  return /* @__PURE__ */ jsx8(Chart, { title: "Burnout index", hint: "Accumulates while occupancy exceeds the threshold, multiplying attrition and adding absence shrinkage; recovers when occupancy eases.", children: (w, h) => /* @__PURE__ */ jsxs7(LineChart2, { width: w, height: h, data, ...common, children: [
-    /* @__PURE__ */ jsx8(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx8(XAxis2, { ...wkX }),
-    /* @__PURE__ */ jsx8(YAxis2, { tick: AX, width: 36, domain: [0, 100] }),
-    /* @__PURE__ */ jsx8(Tooltip2, {}),
-    /* @__PURE__ */ jsx8(Legend2, { wrapperStyle: { fontSize: 11 } }),
-    cfg.queues.map((q, i) => /* @__PURE__ */ jsx8(Line2, { type: "monotone", dataKey: q.id, name: q.name, stroke: SERIES2[i % SERIES2.length], dot: false, strokeWidth: 2, isAnimationActive: false }, q.id)),
+  return /* @__PURE__ */ jsx9(Chart, { title: "Burnout index", hint: "Accumulates while occupancy exceeds the threshold, multiplying attrition and adding absence shrinkage; recovers when occupancy eases.", children: (w, h) => /* @__PURE__ */ jsxs8(LineChart2, { width: w, height: h, data, ...common, children: [
+    /* @__PURE__ */ jsx9(CartesianGrid2, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx9(XAxis2, { ...wkX }),
+    /* @__PURE__ */ jsx9(YAxis2, { tick: AX, width: 36, domain: [0, 100] }),
+    /* @__PURE__ */ jsx9(Tooltip2, {}),
+    /* @__PURE__ */ jsx9(Legend2, { wrapperStyle: { fontSize: 11 } }),
+    cfg.queues.map((q, i) => /* @__PURE__ */ jsx9(Line2, { type: "monotone", dataKey: q.id, name: q.name, stroke: SERIES2[i % SERIES2.length], dot: false, strokeWidth: 2, isAnimationActive: false }, q.id)),
     markLine(selectedWeek)
   ] }) });
 }
 
 // ui/components/PlanTab.jsx
-import { Fragment as Fragment2, jsx as jsx9, jsxs as jsxs8 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx10, jsxs as jsxs9 } from "react/jsx-runtime";
 function Findings({ findings }) {
-  if (!findings || !findings.length) return /* @__PURE__ */ jsx9("div", { className: "empty", children: "No findings \u2014 the plan holds across the horizon." });
-  return /* @__PURE__ */ jsx9("div", { className: "findings", children: findings.map((f, i) => /* @__PURE__ */ jsxs8("div", { className: "finding " + f.tone, children: [
-    /* @__PURE__ */ jsx9("span", { className: "pip" }),
-    /* @__PURE__ */ jsx9("span", { children: f.text })
+  if (!findings || !findings.length) return /* @__PURE__ */ jsx10("div", { className: "empty", children: "No findings \u2014 the plan holds across the horizon." });
+  return /* @__PURE__ */ jsx10("div", { className: "findings", children: findings.map((f, i) => /* @__PURE__ */ jsxs9("div", { className: "finding " + f.tone, children: [
+    /* @__PURE__ */ jsx10("span", { className: "pip" }),
+    /* @__PURE__ */ jsx10("span", { children: f.text })
   ] }, i)) });
 }
 function QueueCard({ q, s }) {
   const voice = q.type === "voice";
-  return /* @__PURE__ */ jsxs8("div", { className: "qcard " + s.status, children: [
-    /* @__PURE__ */ jsxs8("div", { className: "qn", children: [
-      /* @__PURE__ */ jsx9("span", { children: q.name }),
-      /* @__PURE__ */ jsx9("span", { className: "spacer" }),
-      q.resourcing === "supported" && /* @__PURE__ */ jsx9("span", { className: "badge amber", title: void 0, children: "supported" }),
-      /* @__PURE__ */ jsx9("span", { className: "qtype", children: q.type })
+  return /* @__PURE__ */ jsxs9("div", { className: "qcard " + s.status, children: [
+    /* @__PURE__ */ jsxs9("div", { className: "qn", children: [
+      /* @__PURE__ */ jsx10("span", { children: q.name }),
+      /* @__PURE__ */ jsx10("span", { className: "spacer" }),
+      q.resourcing === "supported" && /* @__PURE__ */ jsx10("span", { className: "badge amber", title: void 0, children: "supported" }),
+      /* @__PURE__ */ jsx10("span", { className: "qtype", children: q.type })
     ] }),
-    /* @__PURE__ */ jsxs8("div", { className: "kpis", children: [
-      /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-        /* @__PURE__ */ jsx9("div", { className: "l", children: "Volume" }),
-        /* @__PURE__ */ jsx9("div", { className: "v", children: num(s.volume, 0) })
+    /* @__PURE__ */ jsxs9("div", { className: "kpis", children: [
+      /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+        /* @__PURE__ */ jsx10("div", { className: "l", children: "Volume" }),
+        /* @__PURE__ */ jsx10("div", { className: "v", children: num(s.volume, 0) })
       ] }),
-      /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-        /* @__PURE__ */ jsx9("div", { className: "l", children: "Coverage" }),
-        /* @__PURE__ */ jsx9("div", { className: "v", children: pct(s.cover) })
+      /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+        /* @__PURE__ */ jsx10("div", { className: "l", children: "Coverage" }),
+        /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.cover) })
       ] }),
-      voice ? /* @__PURE__ */ jsxs8(Fragment2, { children: [
-        /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-          /* @__PURE__ */ jsx9("div", { className: "l", children: "ASA" }),
-          /* @__PURE__ */ jsx9("div", { className: "v", children: secs(s.asa) })
+      voice ? /* @__PURE__ */ jsxs9(Fragment3, { children: [
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "ASA" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: secs(s.asa) })
         ] }),
-        /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-          /* @__PURE__ */ jsx9("div", { className: "l", children: "Abandon" }),
-          /* @__PURE__ */ jsx9("div", { className: "v", children: pct(s.abandon, 1) })
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "Abandon" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.abandon, 1) })
         ] })
-      ] }) : /* @__PURE__ */ jsxs8(Fragment2, { children: [
-        /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-          /* @__PURE__ */ jsx9("div", { className: "l", children: "Response" }),
-          /* @__PURE__ */ jsxs8("div", { className: "v", children: [
+      ] }) : /* @__PURE__ */ jsxs9(Fragment3, { children: [
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "Response" }),
+          /* @__PURE__ */ jsxs9("div", { className: "v", children: [
             num(s.respMin, 1),
             "m"
           ] })
         ] }),
-        /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-          /* @__PURE__ */ jsx9("div", { className: "l", children: "In SLA" }),
-          /* @__PURE__ */ jsx9("div", { className: "v", children: pct(s.sl) })
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "In SLA" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.sl) })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-        /* @__PURE__ */ jsx9("div", { className: "l", children: "Occupancy" }),
-        /* @__PURE__ */ jsx9("div", { className: "v", children: pct(s.occ) })
+      /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+        /* @__PURE__ */ jsx10("div", { className: "l", children: "Occupancy" }),
+        /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.occ) })
       ] }),
-      /* @__PURE__ */ jsxs8("div", { className: "kpi", children: [
-        /* @__PURE__ */ jsx9("div", { className: "l", children: "Active / req" }),
-        /* @__PURE__ */ jsxs8("div", { className: "v", children: [
+      /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+        /* @__PURE__ */ jsx10("div", { className: "l", children: "Active / req" }),
+        /* @__PURE__ */ jsxs9("div", { className: "v", children: [
           num(s.active != null ? s.active : s.trained + s.ramp, 0),
           "/",
           num(s.reqFte, 0)
@@ -4561,38 +4714,37 @@ function QueueCard({ q, s }) {
     ] })
   ] });
 }
+function hiringMetric(sim, q) {
+  const h = sim.summary.hiring;
+  const r = h && h.queues[q.id] || { volume: 0, required: 0, hiring: 0, training: 0, active: 0, churnCount: 0 };
+  const series = sim.weeks.map((w) => w.queues[q.id]);
+  const avgActive = series.reduce((a, s) => a + (s.active != null ? s.active : (s.trained || 0) + (s.ramp || 0)), 0) / Math.max(1, series.length);
+  return { volume: r.volume, required: r.required, hiring: r.hiring, training: r.training, active: r.active, churnCount: r.churnCount, avgActive };
+}
+function sumHiring(list) {
+  return list.reduce((t, m) => ({
+    volume: t.volume + m.volume,
+    required: t.required + m.required,
+    hiring: t.hiring + m.hiring,
+    training: t.training + m.training,
+    active: t.active + m.active,
+    churnCount: t.churnCount + m.churnCount,
+    avgActive: t.avgActive + m.avgActive
+  }), { volume: 0, required: 0, hiring: 0, training: 0, active: 0, churnCount: 0, avgActive: 0 });
+}
 function HiringSummary({ sim, cur }) {
   const h = sim.summary.hiring;
   if (!h) return null;
-  const q = sim.config.queues;
-  const row = (label, r, cls) => /* @__PURE__ */ jsxs8("tr", { className: cls, children: [
-    /* @__PURE__ */ jsx9("td", { style: { textAlign: "left", fontWeight: cls ? 700 : 600 }, children: label }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.volume, 0) }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.required, 1) }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.hiring, 1) }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.training, 1) }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.active, 1) }),
-    /* @__PURE__ */ jsx9("td", { children: num(r.churnCount, 1) }),
-    /* @__PURE__ */ jsx9("td", { children: pct(r.churnPct, 1) })
-  ] }, label);
-  return /* @__PURE__ */ jsx9(Card, { title: "Hiring summary", hint: "Volume, required HC, hiring (requisitions raised over the horizon), training and active heads, and agent churn \u2014 per queue and rolled up for Voice, Digital and Overall.", children: /* @__PURE__ */ jsx9("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs8("table", { className: "data", "data-testid": "hiring-summary", children: [
-    /* @__PURE__ */ jsx9("thead", { children: /* @__PURE__ */ jsxs8("tr", { children: [
-      /* @__PURE__ */ jsx9("th", { children: "Scope" }),
-      /* @__PURE__ */ jsx9("th", { children: "Volume" }),
-      /* @__PURE__ */ jsx9("th", { children: "Required" }),
-      /* @__PURE__ */ jsx9("th", { children: "Hiring" }),
-      /* @__PURE__ */ jsx9("th", { children: "Training" }),
-      /* @__PURE__ */ jsx9("th", { children: "Active" }),
-      /* @__PURE__ */ jsx9("th", { children: "Churn #" }),
-      /* @__PURE__ */ jsx9("th", { children: "Churn %" })
-    ] }) }),
-    /* @__PURE__ */ jsxs8("tbody", { children: [
-      q.map((qq) => row(qq.name + (qq.resourcing === "supported" ? " (supported)" : ""), h.queues[qq.id], "")),
-      row("Voice", h.groups.voice, "grp"),
-      row("Digital", h.groups.digital, "grp"),
-      row("Overall", h.groups.overall, "grp total")
-    ] })
-  ] }) }) });
+  const columns = [
+    { key: "volume", label: "Volume", fmt: (m) => num(m.volume, 0) },
+    { key: "required", label: "Required", fmt: (m) => num(m.required, 1) },
+    { key: "hiring", label: "Hiring", fmt: (m) => num(m.hiring, 1) },
+    { key: "training", label: "Training", fmt: (m) => num(m.training, 1) },
+    { key: "active", label: "Active", fmt: (m) => num(m.active, 1) },
+    { key: "churnCount", label: "Churn #", fmt: (m) => num(m.churnCount, 1) },
+    { key: "churnPct", label: "Churn %", fmt: (m) => pct(m.avgActive > 1e-9 ? m.churnCount / m.avgActive : 0, 1) }
+  ];
+  return /* @__PURE__ */ jsx10(Card, { title: "Hiring summary", hint: "Volume, required HC, hiring (requisitions raised over the horizon), training and active heads, and agent churn \u2014 Brand \u2192 Voice / Digital / Support \u2192 queue with channel and brand subtotal rows.", children: /* @__PURE__ */ jsx10(HierTable, { config: sim.config, testid: "hiring-summary", firstLabel: "Scope", columns, metric: (q) => hiringMetric(sim, q), aggregate: sumHiring }) });
 }
 function PlanTab({ sim, viewLabel }) {
   const cfg = sim.config;
@@ -4601,7 +4753,7 @@ function PlanTab({ sim, viewLabel }) {
   const week = sim.weeks[wk];
   const sm = sim.summary;
   const cur = cfg.engine.currency;
-  return /* @__PURE__ */ jsxs8(
+  return /* @__PURE__ */ jsxs9(
     "div",
     {
       className: "grid",
@@ -4610,56 +4762,56 @@ function PlanTab({ sim, viewLabel }) {
       "data-active-strategy": sm.strategy,
       "data-active-allin": Math.round(sm.allIn),
       children: [
-        /* @__PURE__ */ jsx9(Card, { title: "Findings", hint: "Auto-written from the active strategy. Red demands a decision; amber is a watch item.", children: /* @__PURE__ */ jsx9(Findings, { findings: sm.findings }) }),
-        /* @__PURE__ */ jsx9(
+        /* @__PURE__ */ jsx10(Card, { title: "Findings", hint: "Auto-written from the active strategy. Red demands a decision; amber is a watch item.", children: /* @__PURE__ */ jsx10(Findings, { findings: sm.findings }) }),
+        /* @__PURE__ */ jsx10(
           Card,
           {
             title: "RAG ribbon",
             sub: "week \xD7 queue \u2014 click any cell to scrub the dashboard",
             hint: "Each square is a queue-week's SLA verdict. Dots mark weeks where an enabled scenario fires.",
-            children: /* @__PURE__ */ jsx9(Ribbon, { sim, selectedWeek: wk, onScrub: setSelectedWeek })
+            children: /* @__PURE__ */ jsx10(Ribbon, { sim, selectedWeek: wk, onScrub: setSelectedWeek })
           }
         ),
-        /* @__PURE__ */ jsxs8(Card, { title: `Queue status \u2014 week ${wk + 1}`, sub: `${sm.strategy} active \xB7 view: ${viewLabel || "Plan of record"}`, children: [
-          /* @__PURE__ */ jsx9("div", { className: "qcards", children: cfg.queues.map((q) => /* @__PURE__ */ jsx9(QueueCard, { q, s: week.queues[q.id] }, q.id)) }),
-          /* @__PURE__ */ jsx9("hr", { className: "sep", style: { margin: "14px 0" } }),
-          /* @__PURE__ */ jsxs8("div", { className: "stat-row", children: [
-            /* @__PURE__ */ jsxs8("div", { className: "stat", children: [
-              /* @__PURE__ */ jsx9("div", { className: "l", children: "Week run cost" }),
-              /* @__PURE__ */ jsx9("div", { className: "v", children: money(cur, week.totals.totalCost) })
+        /* @__PURE__ */ jsxs9(Card, { title: `Queue status \u2014 week ${wk + 1}`, sub: `${sm.strategy} active \xB7 view: ${viewLabel || "Plan of record"}`, children: [
+          /* @__PURE__ */ jsx10("div", { className: "qcards", children: cfg.queues.map((q) => /* @__PURE__ */ jsx10(QueueCard, { q, s: week.queues[q.id] }, q.id)) }),
+          /* @__PURE__ */ jsx10("hr", { className: "sep", style: { margin: "14px 0" } }),
+          /* @__PURE__ */ jsxs9("div", { className: "stat-row", children: [
+            /* @__PURE__ */ jsxs9("div", { className: "stat", children: [
+              /* @__PURE__ */ jsx10("div", { className: "l", children: "Week run cost" }),
+              /* @__PURE__ */ jsx10("div", { className: "v", children: money(cur, week.totals.totalCost) })
             ] }),
-            /* @__PURE__ */ jsxs8("div", { className: "stat", children: [
-              /* @__PURE__ */ jsx9("div", { className: "l", children: "Week churn cost" }),
-              /* @__PURE__ */ jsx9("div", { className: "v", children: money(cur, week.totals.churnCost) })
+            /* @__PURE__ */ jsxs9("div", { className: "stat", children: [
+              /* @__PURE__ */ jsx10("div", { className: "l", children: "Week churn cost" }),
+              /* @__PURE__ */ jsx10("div", { className: "v", children: money(cur, week.totals.churnCost) })
             ] }),
-            /* @__PURE__ */ jsxs8("div", { className: "stat", children: [
-              /* @__PURE__ */ jsx9("div", { className: "l", children: "Active FTE" }),
-              /* @__PURE__ */ jsxs8("div", { className: "v", children: [
+            /* @__PURE__ */ jsxs9("div", { className: "stat", children: [
+              /* @__PURE__ */ jsx10("div", { className: "l", children: "Active FTE" }),
+              /* @__PURE__ */ jsxs9("div", { className: "v", children: [
                 num(week.totals.active != null ? week.totals.active : week.totals.paid, 0),
                 " ",
-                /* @__PURE__ */ jsxs8("small", { children: [
+                /* @__PURE__ */ jsxs9("small", { children: [
                   "/ ",
                   num(week.totals.reqFte, 0),
                   " req"
                 ] })
               ] })
             ] }),
-            /* @__PURE__ */ jsxs8("div", { className: "stat", children: [
-              /* @__PURE__ */ jsx9("div", { className: "l", children: "Horizon all-in" }),
-              /* @__PURE__ */ jsx9("div", { className: "v", children: money(cur, sm.allIn) })
+            /* @__PURE__ */ jsxs9("div", { className: "stat", children: [
+              /* @__PURE__ */ jsx10("div", { className: "l", children: "Horizon all-in" }),
+              /* @__PURE__ */ jsx10("div", { className: "v", children: money(cur, sm.allIn) })
             ] })
           ] })
         ] }),
-        /* @__PURE__ */ jsx9(HiringSummary, { sim, cur }),
-        /* @__PURE__ */ jsxs8("div", { className: "grid cols-2", children: [
-          /* @__PURE__ */ jsx9(CoverageChart, { sim, selectedWeek: wk }),
-          /* @__PURE__ */ jsx9(HeadcountChart, { sim, selectedWeek: wk }),
-          /* @__PURE__ */ jsx9(VolumeChart, { sim, selectedWeek: wk }),
-          /* @__PURE__ */ jsx9(CostChart, { sim, selectedWeek: wk }),
-          /* @__PURE__ */ jsx9(IdleChurnChart, { sim, selectedWeek: wk }),
-          /* @__PURE__ */ jsx9(BurnoutChart, { sim, selectedWeek: wk })
+        /* @__PURE__ */ jsx10(HiringSummary, { sim, cur }),
+        /* @__PURE__ */ jsxs9("div", { className: "grid cols-2", children: [
+          /* @__PURE__ */ jsx10(CoverageChart, { sim, selectedWeek: wk }),
+          /* @__PURE__ */ jsx10(HeadcountChart, { sim, selectedWeek: wk }),
+          /* @__PURE__ */ jsx10(VolumeChart, { sim, selectedWeek: wk }),
+          /* @__PURE__ */ jsx10(CostChart, { sim, selectedWeek: wk }),
+          /* @__PURE__ */ jsx10(IdleChurnChart, { sim, selectedWeek: wk }),
+          /* @__PURE__ */ jsx10(BurnoutChart, { sim, selectedWeek: wk })
         ] }),
-        /* @__PURE__ */ jsx9(HolisticPanel, { sim })
+        /* @__PURE__ */ jsx10(HolisticPanel, { sim })
       ]
     }
   );
@@ -4971,49 +5123,124 @@ function downloadText(filename, text, mime = "text/plain") {
 }
 
 // ui/components/DataTab.jsx
-import { jsx as jsx10, jsxs as jsxs9 } from "react/jsx-runtime";
-function DataTab({ sim, config, activeGroupId, onSelectGroup }) {
+import { Fragment as Fragment4, jsx as jsx11, jsxs as jsxs10 } from "react/jsx-runtime";
+var DEFAULT_GROUP_COLOURS = {
+  Week: "#7a828a",
+  Demand: "#0e7c86",
+  Service: "#3a7bd5",
+  People: "#5a54c9",
+  Supply: "#10966e",
+  Money: "#d98a0b",
+  Status: "#7a828a"
+};
+function hexToRgba(hex, a) {
+  const h = (hex || "#888888").replace("#", "");
+  const n = h.length === 3 ? h.split("").map((x) => x + x).join("") : h;
+  const r = parseInt(n.slice(0, 2), 16), g = parseInt(n.slice(2, 4), 16), b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r || 0},${g || 0},${b || 0},${a})`;
+}
+function DataTab({ sim, config, ops, activeGroupId, onSelectGroup }) {
   const [qid, setQid] = useState8(config.queues[0] ? config.queues[0].id : "");
   const [hidden, setHidden] = useState8(() => /* @__PURE__ */ new Set());
   const [mode, setMode] = useState8("outputs");
   const queue = config.queues.find((q) => q.id === qid) || config.queues[0];
-  if (!queue) return /* @__PURE__ */ jsx10("div", { className: "empty", children: "No queues configured." });
+  if (!queue) return /* @__PURE__ */ jsx11("div", { className: "empty", children: "No queues configured." });
   const cur = config.engine.currency;
   const rows = buildWeeklyRows(sim, queue, config);
   const outCols = columnsFor(queue, cur).filter((c) => !hidden.has(c.group));
   const asmCols = assumptionsColumns(queue, cur);
+  const colours = config.settings && config.settings.dataColours || {};
+  const colourOf = (g) => colours[g] || DEFAULT_GROUP_COLOURS[g] || "#7a828a";
+  const firstOfGroup = {};
+  let prevGroup = null;
+  for (const c of outCols) {
+    if (c.group !== prevGroup) {
+      firstOfGroup[c.key] = true;
+      prevGroup = c.group;
+    }
+  }
   const toggleGroup = (g) => setHidden((h) => {
     const n = new Set(h);
     n.has(g) ? n.delete(g) : n.add(g);
     return n;
   });
-  return /* @__PURE__ */ jsxs9("div", { className: "grid", style: { gap: 16 }, children: [
-    /* @__PURE__ */ jsxs9(Card, { title: "Per-queue data", hint: "Every weekly datapoint \u2014 outputs and the resolved assumptions in effect. Read-only: edit values in the editor tabs.", children: [
-      /* @__PURE__ */ jsxs9("div", { className: "fieldrow", style: { maxWidth: 720 }, children: [
-        /* @__PURE__ */ jsx10(SelectField, { label: "Queue", value: queue.id, onChange: setQid, options: config.queues.map((q) => ({ value: q.id, label: q.name })) }),
-        /* @__PURE__ */ jsx10(SelectField, { label: "Scenario group", value: activeGroupId, onChange: onSelectGroup, options: groupList(config).map((g) => ({ value: g.id, label: g.name })) }),
-        /* @__PURE__ */ jsx10(SelectField, { label: "View", value: mode, onChange: setMode, options: [{ value: "outputs", label: "Outputs" }, { value: "assumptions", label: "Assumptions over time" }] })
+  return /* @__PURE__ */ jsxs10("div", { className: "grid", style: { gap: 16 }, children: [
+    /* @__PURE__ */ jsxs10(Card, { title: "Per-queue data", hint: "Every weekly datapoint. Input columns (the weekly volume series) are editable here and re-simulate; computed outcome columns are read-only.", children: [
+      /* @__PURE__ */ jsxs10("div", { className: "fieldrow", style: { maxWidth: 720 }, children: [
+        /* @__PURE__ */ jsx11(SelectField, { label: "Queue", value: queue.id, onChange: setQid, options: config.queues.map((q) => ({ value: q.id, label: q.name })) }),
+        /* @__PURE__ */ jsx11(SelectField, { label: "Scenario group", value: activeGroupId, onChange: onSelectGroup, options: groupList(config).map((g) => ({ value: g.id, label: g.name })) }),
+        /* @__PURE__ */ jsx11(SelectField, { label: "View", value: mode, onChange: setMode, options: [{ value: "outputs", label: "Outputs" }, { value: "assumptions", label: "Assumptions over time" }] })
       ] }),
-      mode === "outputs" && /* @__PURE__ */ jsxs9("div", { className: "rowflex", style: { marginTop: 12 }, children: [
-        /* @__PURE__ */ jsxs9("span", { className: "lab", style: { display: "flex", alignItems: "center", gap: 6 }, children: [
-          "Column groups ",
-          /* @__PURE__ */ jsx10(Hint, { text: "Toggle groups of columns. All are on by default." })
+      mode === "outputs" && /* @__PURE__ */ jsxs10(Fragment4, { children: [
+        /* @__PURE__ */ jsxs10("div", { className: "rowflex", style: { marginTop: 12 }, children: [
+          /* @__PURE__ */ jsxs10("span", { className: "lab", style: { display: "flex", alignItems: "center", gap: 6 }, children: [
+            "Column groups ",
+            /* @__PURE__ */ jsx11(Hint, { text: "Toggle groups of columns. All are on by default." })
+          ] }),
+          COLUMN_GROUPS.filter((g) => g !== "Week").map((g) => /* @__PURE__ */ jsxs10("label", { className: "switch", children: [
+            /* @__PURE__ */ jsx11("input", { type: "checkbox", checked: !hidden.has(g), onChange: () => toggleGroup(g) }),
+            /* @__PURE__ */ jsx11("span", { className: "track", "aria-hidden": "true" }),
+            /* @__PURE__ */ jsx11("span", { children: g })
+          ] }, g)),
+          /* @__PURE__ */ jsx11("span", { className: "spacer" }),
+          /* @__PURE__ */ jsx11("button", { type: "button", className: "btn sm", onClick: () => downloadText(`${queue.name.replace(/\s+/g, "_")}_weekly.csv`, queueCSV(sim, queue, config), "text/csv"), children: "Export CSV" })
         ] }),
-        COLUMN_GROUPS.filter((g) => g !== "Week").map((g) => /* @__PURE__ */ jsxs9("label", { className: "switch", children: [
-          /* @__PURE__ */ jsx10("input", { type: "checkbox", checked: !hidden.has(g), onChange: () => toggleGroup(g) }),
-          /* @__PURE__ */ jsx10("span", { className: "track", "aria-hidden": "true" }),
-          /* @__PURE__ */ jsx10("span", { children: g })
-        ] }, g)),
-        /* @__PURE__ */ jsx10("span", { className: "spacer" }),
-        /* @__PURE__ */ jsx10("button", { type: "button", className: "btn sm", onClick: () => downloadText(`${queue.name.replace(/\s+/g, "_")}_weekly.csv`, queueCSV(sim, queue, config), "text/csv"), children: "Export CSV" })
+        /* @__PURE__ */ jsxs10("div", { className: "rowflex", style: { marginTop: 10, gap: 14 }, "data-testid": "data-colours", children: [
+          /* @__PURE__ */ jsxs10("span", { className: "lab", style: { display: "flex", alignItems: "center", gap: 6 }, children: [
+            "Segment colours ",
+            /* @__PURE__ */ jsx11(Hint, { text: "Pick a colour per column group. Saved with the config; the header underline and cell tint follow it." })
+          ] }),
+          COLUMN_GROUPS.filter((g) => g !== "Week").map((g) => /* @__PURE__ */ jsxs10("label", { className: "rowflex", style: { gap: 5 }, title: g, children: [
+            /* @__PURE__ */ jsx11(
+              "input",
+              {
+                type: "color",
+                value: colourOf(g),
+                "data-testid": "data-colour-" + g,
+                onChange: (e) => ops.patch(["settings", "dataColours", g], e.target.value),
+                "aria-label": g + " colour",
+                style: { width: 26, height: 22, padding: 0, border: "1px solid var(--line-2)", borderRadius: 5 }
+              }
+            ),
+            /* @__PURE__ */ jsx11("span", { style: { fontSize: 11, color: "var(--muted)" }, children: g })
+          ] }, g))
+        ] })
       ] })
     ] }),
-    mode === "outputs" ? /* @__PURE__ */ jsx10(Card, { title: `${queue.name} \u2014 weekly`, sub: `${rows.length} weeks \xB7 ${outCols.length} columns`, children: /* @__PURE__ */ jsx10("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs9("table", { className: "data grouped", "data-testid": "data-table", children: [
-      /* @__PURE__ */ jsx10("thead", { children: /* @__PURE__ */ jsx10("tr", { children: outCols.map((c) => /* @__PURE__ */ jsx10("th", { className: "grp-" + c.group.toLowerCase(), children: c.label }, c.key)) }) }),
-      /* @__PURE__ */ jsx10("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx10("tr", { children: outCols.map((c) => /* @__PURE__ */ jsx10("td", { className: "grp-" + c.group.toLowerCase() + (c.key === "status" ? " st-" + row.status : ""), children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
-    ] }) }) }) : /* @__PURE__ */ jsx10(Card, { title: `${queue.name} \u2014 assumptions in effect`, sub: "inputs in force", hint: "The resolved inputs the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage and the active scenario tags.", children: /* @__PURE__ */ jsx10("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs9("table", { className: "data", "data-testid": "assumptions-table", children: [
-      /* @__PURE__ */ jsx10("thead", { children: /* @__PURE__ */ jsx10("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx10("th", { children: c.label }, c.key)) }) }),
-      /* @__PURE__ */ jsx10("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx10("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx10("td", { style: c.key === "scenarioTags" ? { textAlign: "left" } : void 0, children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
+    mode === "outputs" ? /* @__PURE__ */ jsx11(Card, { title: `${queue.name} \u2014 weekly`, sub: `${rows.length} weeks \xB7 ${outCols.length} columns`, children: /* @__PURE__ */ jsx11("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs10("table", { className: "data grouped seg", "data-testid": "data-table", children: [
+      /* @__PURE__ */ jsx11("thead", { children: /* @__PURE__ */ jsx11("tr", { children: outCols.map((c) => /* @__PURE__ */ jsxs10(
+        "th",
+        {
+          className: "grp-" + c.group.toLowerCase() + (firstOfGroup[c.key] ? " seg-first" : "") + (c.input ? " col-input" : ""),
+          style: { borderBottom: "2px solid " + colourOf(c.group) },
+          children: [
+            c.label,
+            c.input ? " \u270E" : ""
+          ]
+        },
+        c.key
+      )) }) }),
+      /* @__PURE__ */ jsx11("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx11("tr", { children: outCols.map((c) => {
+        const tint = { background: hexToRgba(colourOf(c.group), 0.06) };
+        const base = "grp-" + c.group.toLowerCase() + (firstOfGroup[c.key] ? " seg-first" : "");
+        if (c.input === "volume") {
+          return /* @__PURE__ */ jsx11("td", { className: base + " col-input", style: tint, children: /* @__PURE__ */ jsx11(
+            "input",
+            {
+              type: "number",
+              className: "cell-inp",
+              value: row.volInput == null ? "" : Math.round(row.volInput),
+              "data-testid": "cell-vol-" + row.week,
+              onChange: (e) => ops.patchWeeklyVolume(queue.id, row.week - 1, e.target.value === "" ? 0 : Number(e.target.value)),
+              "aria-label": "Week " + row.week + " volume"
+            }
+          ) }, c.key);
+        }
+        return /* @__PURE__ */ jsx11("td", { className: base + " cell-ro" + (c.key === "status" ? " st-" + row.status : ""), style: tint, "data-ro": "1", "data-testid": c.key === "cover" ? "cell-cover-" + row.week : void 0, children: c.fmt(row[c.key]) }, c.key);
+      }) }, row.week)) })
+    ] }) }) }) : /* @__PURE__ */ jsx11(Card, { title: `${queue.name} \u2014 assumptions in effect`, sub: "inputs in force", hint: "The resolved inputs the engine used each week: volume after profile/seasonality/scenarios, blended AHT, SLA, attrition, training shrinkage and the active scenario tags.", children: /* @__PURE__ */ jsx11("div", { className: "tbl-wrap", style: { maxHeight: 560 }, children: /* @__PURE__ */ jsxs10("table", { className: "data", "data-testid": "assumptions-table", children: [
+      /* @__PURE__ */ jsx11("thead", { children: /* @__PURE__ */ jsx11("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx11("th", { children: c.label }, c.key)) }) }),
+      /* @__PURE__ */ jsx11("tbody", { children: rows.map((row) => /* @__PURE__ */ jsx11("tr", { children: asmCols.map((c) => /* @__PURE__ */ jsx11("td", { style: c.key === "scenarioTags" ? { textAlign: "left" } : void 0, children: c.fmt(row[c.key]) }, c.key)) }, row.week)) })
     ] }) }) })
   ] });
 }
@@ -5021,14 +5248,14 @@ function DataTab({ sim, config, activeGroupId, onSelectGroup }) {
 // ui/components/IntradayTab.jsx
 import { useState as useState9 } from "react";
 import { BarChart as BarChart2, Bar as Bar2, ComposedChart as ComposedChart2, Line as Line3, XAxis as XAxis3, YAxis as YAxis3, CartesianGrid as CartesianGrid3, Tooltip as Tooltip3, Legend as Legend3 } from "recharts";
-import { Fragment as Fragment3, jsx as jsx11, jsxs as jsxs10 } from "react/jsx-runtime";
+import { Fragment as Fragment5, jsx as jsx12, jsxs as jsxs11 } from "react/jsx-runtime";
 function IntradayTab({ sim }) {
   const cfg = sim.config;
   const eng = cfg.engine;
   const [qid, setQid] = useState9(cfg.queues[0] ? cfg.queues[0].id : "");
   const [wk, setWk] = useState9(0);
   const q = cfg.queues.find((x) => x.id === qid) || cfg.queues[0];
-  if (!q) return /* @__PURE__ */ jsx11("div", { className: "empty", children: "No queues configured." });
+  if (!q) return /* @__PURE__ */ jsx12("div", { className: "empty", children: "No queues configured." });
   const week = sim.weeks[Math.min(wk, sim.weeks.length - 1)];
   const day = week.intraday;
   const byInterval = day && day.res[q.id] && day.res[q.id].byInterval || [];
@@ -5039,9 +5266,9 @@ function IntradayTab({ sim }) {
     available: +iv.agents.toFixed(2),
     arrivals: Math.round(iv.arrivals)
   }));
-  return /* @__PURE__ */ jsxs10("div", { className: "grid", style: { gap: 16 }, children: [
-    /* @__PURE__ */ jsxs10(Card, { title: "Intraday view", sub: "first day of the selected week", hint: "Pick a queue, then click any week in the strip \u2014 coloured by that queue's SLA verdict \u2014 to load its first-day intraday profile.", children: [
-      /* @__PURE__ */ jsx11("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 12 }, children: /* @__PURE__ */ jsx11(
+  return /* @__PURE__ */ jsxs11("div", { className: "grid", style: { gap: 16 }, children: [
+    /* @__PURE__ */ jsxs11(Card, { title: "Intraday view", sub: "first day of the selected week", hint: "Pick a queue, then click any week in the strip \u2014 coloured by that queue's SLA verdict \u2014 to load its first-day intraday profile.", children: [
+      /* @__PURE__ */ jsx12("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 12 }, children: /* @__PURE__ */ jsx12(
         SelectField,
         {
           label: "Queue",
@@ -5050,15 +5277,15 @@ function IntradayTab({ sim }) {
           options: cfg.queues.map((x) => ({ value: x.id, label: x.name }))
         }
       ) }),
-      /* @__PURE__ */ jsxs10("div", { className: "lab", style: { marginBottom: 6 }, children: [
+      /* @__PURE__ */ jsxs11("div", { className: "lab", style: { marginBottom: 6 }, children: [
         "Weeks \u2014 ",
         q.name,
         " (click to load)"
       ] }),
-      /* @__PURE__ */ jsx11("div", { className: "week-strip", "data-testid": "week-strip", children: sim.weeks.map((w) => {
+      /* @__PURE__ */ jsx12("div", { className: "week-strip", "data-testid": "week-strip", children: sim.weeks.map((w) => {
         const st = w.queues[q.id].status;
         const sel = w.week === Math.min(wk, sim.weeks.length - 1);
-        return /* @__PURE__ */ jsx11(
+        return /* @__PURE__ */ jsx12(
           "button",
           {
             type: "button",
@@ -5073,53 +5300,53 @@ function IntradayTab({ sim }) {
         );
       }) })
     ] }),
-    /* @__PURE__ */ jsx11(Chart, { title: `Required vs available agents \u2014 ${q.name}`, hint: "Available agent-hours are laid along the requirement curve (engineering note E2), so quiet intervals still receive proportionally more agents. Bars are required; the line is available.", children: (w, h) => /* @__PURE__ */ jsxs10(ComposedChart2, { width: w, height: h, data, margin: { top: 8, right: 14, left: 4, bottom: 4 }, children: [
-      /* @__PURE__ */ jsx11(CartesianGrid3, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-      /* @__PURE__ */ jsx11(XAxis3, { dataKey: "t", tick: { fontSize: 10 }, interval: "preserveStartEnd", minTickGap: 16 }),
-      /* @__PURE__ */ jsx11(YAxis3, { tick: { fontSize: 11 }, width: 40 }),
-      /* @__PURE__ */ jsx11(Tooltip3, {}),
-      /* @__PURE__ */ jsx11(Legend3, { wrapperStyle: { fontSize: 11 } }),
-      /* @__PURE__ */ jsx11(Bar2, { dataKey: "required", name: "Required agents", fill: "#0e7c86", isAnimationActive: false }),
-      /* @__PURE__ */ jsx11(Line3, { type: "monotone", dataKey: "available", name: "Available agents", stroke: "#d98a0b", strokeWidth: 2, dot: false, isAnimationActive: false })
+    /* @__PURE__ */ jsx12(Chart, { title: `Required vs available agents \u2014 ${q.name}`, hint: "Available agent-hours are laid along the requirement curve (engineering note E2), so quiet intervals still receive proportionally more agents. Bars are required; the line is available.", children: (w, h) => /* @__PURE__ */ jsxs11(ComposedChart2, { width: w, height: h, data, margin: { top: 8, right: 14, left: 4, bottom: 4 }, children: [
+      /* @__PURE__ */ jsx12(CartesianGrid3, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+      /* @__PURE__ */ jsx12(XAxis3, { dataKey: "t", tick: { fontSize: 10 }, interval: "preserveStartEnd", minTickGap: 16 }),
+      /* @__PURE__ */ jsx12(YAxis3, { tick: { fontSize: 11 }, width: 40 }),
+      /* @__PURE__ */ jsx12(Tooltip3, {}),
+      /* @__PURE__ */ jsx12(Legend3, { wrapperStyle: { fontSize: 11 } }),
+      /* @__PURE__ */ jsx12(Bar2, { dataKey: "required", name: "Required agents", fill: "#0e7c86", isAnimationActive: false }),
+      /* @__PURE__ */ jsx12(Line3, { type: "monotone", dataKey: "available", name: "Available agents", stroke: "#d98a0b", strokeWidth: 2, dot: false, isAnimationActive: false })
     ] }) }),
-    /* @__PURE__ */ jsx11(Card, { title: "Interval detail", sub: `${q.name} \xB7 week ${Math.min(wk, sim.weeks.length - 1) + 1}`, children: /* @__PURE__ */ jsx11("div", { className: "tbl-wrap", style: { maxHeight: 460 }, children: /* @__PURE__ */ jsxs10("table", { className: "data", children: [
-      /* @__PURE__ */ jsx11("thead", { children: /* @__PURE__ */ jsxs10("tr", { children: [
-        /* @__PURE__ */ jsx11("th", { children: "Interval" }),
-        /* @__PURE__ */ jsx11("th", { children: "Arrivals" }),
-        /* @__PURE__ */ jsx11("th", { children: "Required" }),
-        /* @__PURE__ */ jsx11("th", { children: "Available" }),
-        voice ? /* @__PURE__ */ jsxs10(Fragment3, { children: [
-          /* @__PURE__ */ jsx11("th", { children: "ASA" }),
-          /* @__PURE__ */ jsx11("th", { children: "Abandon" }),
-          /* @__PURE__ */ jsx11("th", { children: "SL" })
-        ] }) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
-          /* @__PURE__ */ jsx11("th", { children: "Backlog" }),
-          /* @__PURE__ */ jsx11("th", { children: "Response" }),
-          /* @__PURE__ */ jsx11("th", { children: "Served" })
+    /* @__PURE__ */ jsx12(Card, { title: "Interval detail", sub: `${q.name} \xB7 week ${Math.min(wk, sim.weeks.length - 1) + 1}`, children: /* @__PURE__ */ jsx12("div", { className: "tbl-wrap", style: { maxHeight: 460 }, children: /* @__PURE__ */ jsxs11("table", { className: "data", children: [
+      /* @__PURE__ */ jsx12("thead", { children: /* @__PURE__ */ jsxs11("tr", { children: [
+        /* @__PURE__ */ jsx12("th", { children: "Interval" }),
+        /* @__PURE__ */ jsx12("th", { children: "Arrivals" }),
+        /* @__PURE__ */ jsx12("th", { children: "Required" }),
+        /* @__PURE__ */ jsx12("th", { children: "Available" }),
+        voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+          /* @__PURE__ */ jsx12("th", { children: "ASA" }),
+          /* @__PURE__ */ jsx12("th", { children: "Abandon" }),
+          /* @__PURE__ */ jsx12("th", { children: "SL" })
+        ] }) : /* @__PURE__ */ jsxs11(Fragment5, { children: [
+          /* @__PURE__ */ jsx12("th", { children: "Backlog" }),
+          /* @__PURE__ */ jsx12("th", { children: "Response" }),
+          /* @__PURE__ */ jsx12("th", { children: "Served" })
         ] }),
-        /* @__PURE__ */ jsx11("th", { children: "Occupancy" })
+        /* @__PURE__ */ jsx12("th", { children: "Occupancy" })
       ] }) }),
-      /* @__PURE__ */ jsxs10("tbody", { children: [
-        byInterval.map((iv) => /* @__PURE__ */ jsxs10("tr", { children: [
-          /* @__PURE__ */ jsx11("td", { children: intervalLabel(iv.i, eng) }),
-          /* @__PURE__ */ jsx11("td", { children: Math.round(iv.arrivals) }),
-          /* @__PURE__ */ jsx11("td", { children: num(iv.req, 1) }),
-          /* @__PURE__ */ jsx11("td", { children: num(iv.agents, 1) }),
-          voice ? /* @__PURE__ */ jsxs10(Fragment3, { children: [
-            /* @__PURE__ */ jsx11("td", { children: secs(iv.asa) }),
-            /* @__PURE__ */ jsx11("td", { children: pct(iv.abandon, 1) }),
-            /* @__PURE__ */ jsx11("td", { children: pct(iv.sl) })
-          ] }) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
-            /* @__PURE__ */ jsx11("td", { children: num(iv.backlog, 0) }),
-            /* @__PURE__ */ jsxs10("td", { children: [
+      /* @__PURE__ */ jsxs11("tbody", { children: [
+        byInterval.map((iv) => /* @__PURE__ */ jsxs11("tr", { children: [
+          /* @__PURE__ */ jsx12("td", { children: intervalLabel(iv.i, eng) }),
+          /* @__PURE__ */ jsx12("td", { children: Math.round(iv.arrivals) }),
+          /* @__PURE__ */ jsx12("td", { children: num(iv.req, 1) }),
+          /* @__PURE__ */ jsx12("td", { children: num(iv.agents, 1) }),
+          voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+            /* @__PURE__ */ jsx12("td", { children: secs(iv.asa) }),
+            /* @__PURE__ */ jsx12("td", { children: pct(iv.abandon, 1) }),
+            /* @__PURE__ */ jsx12("td", { children: pct(iv.sl) })
+          ] }) : /* @__PURE__ */ jsxs11(Fragment5, { children: [
+            /* @__PURE__ */ jsx12("td", { children: num(iv.backlog, 0) }),
+            /* @__PURE__ */ jsxs11("td", { children: [
               num(iv.resp || 0, 1),
               "m"
             ] }),
-            /* @__PURE__ */ jsx11("td", { children: num(iv.served || 0, 0) })
+            /* @__PURE__ */ jsx12("td", { children: num(iv.served || 0, 0) })
           ] }),
-          /* @__PURE__ */ jsx11("td", { children: pct(iv.occ) })
+          /* @__PURE__ */ jsx12("td", { children: pct(iv.occ) })
         ] }, iv.i)),
-        byInterval.length === 0 && /* @__PURE__ */ jsx11("tr", { children: /* @__PURE__ */ jsx11("td", { colSpan: 8, className: "empty", children: "No intraday detail for this selection." }) })
+        byInterval.length === 0 && /* @__PURE__ */ jsx12("tr", { children: /* @__PURE__ */ jsx12("td", { colSpan: 8, className: "empty", children: "No intraday detail for this selection." }) })
       ] })
     ] }) }) })
   ] });
@@ -5131,7 +5358,7 @@ import { LineChart as LineChart3, Line as Line4, XAxis as XAxis4, YAxis as YAxis
 
 // ui/components/FilesCard.jsx
 import { useState as useState10, useRef as useRef3 } from "react";
-import { jsx as jsx12, jsxs as jsxs11 } from "react/jsx-runtime";
+import { jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
 var readArrayBuffer = (file) => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(new Uint8Array(r.result));
@@ -5187,41 +5414,41 @@ function FilesCard({ sim, strategySims, config, activeStrategy, activeViewId, on
       say("Parameters CSV import failed: " + e.message, "err");
     }
   };
-  const Section = ({ label, hint, children }) => /* @__PURE__ */ jsxs11("div", { className: "files-row", children: [
-    /* @__PURE__ */ jsxs11("div", { className: "files-row-h", children: [
-      /* @__PURE__ */ jsx12("strong", { children: label }),
-      hint ? /* @__PURE__ */ jsx12("span", { className: "note", style: { background: "none", border: 0, padding: 0 }, children: hint }) : null
+  const Section = ({ label, hint, children }) => /* @__PURE__ */ jsxs12("div", { className: "files-row", children: [
+    /* @__PURE__ */ jsxs12("div", { className: "files-row-h", children: [
+      /* @__PURE__ */ jsx13("strong", { children: label }),
+      hint ? /* @__PURE__ */ jsx13("span", { className: "note", style: { background: "none", border: 0, padding: 0 }, children: hint }) : null
     ] }),
-    /* @__PURE__ */ jsx12("div", { className: "btnbar", children })
+    /* @__PURE__ */ jsx13("div", { className: "btnbar", children })
   ] });
-  return /* @__PURE__ */ jsxs11(Card, { title, hint: "One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.", children: [
-    /* @__PURE__ */ jsxs11("div", { className: "grid", style: { gap: 14 }, children: [
-      /* @__PURE__ */ jsxs11(Section, { label: "Excel package", hint: "One workbook carries every sheet; re-import reads only Parameters and Volumes.", children: [
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn primary", "data-testid": "export-workbook", onClick: onWorkbook, children: "Export workbook" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => wbInput.current && wbInput.current.click(), children: "Import workbook" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-params-csv", onClick: () => downloadText("parameters.csv", parametersCSV(config), "text/csv"), children: "Parameters CSV" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-volumes-csv", onClick: () => downloadText("volumes.csv", volumesCSV(config), "text/csv"), children: "Volumes CSV" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => csvInput.current && csvInput.current.click(), children: "Import parameters CSV" })
+  return /* @__PURE__ */ jsxs12(Card, { title, hint: "One workbook round-trips Parameters and Volumes; config and saved-run JSON share whole plans; CSVs are plain-text fallbacks.", children: [
+    /* @__PURE__ */ jsxs12("div", { className: "grid", style: { gap: 14 }, children: [
+      /* @__PURE__ */ jsxs12(Section, { label: "Excel package", hint: "One workbook carries every sheet; re-import reads only Parameters and Volumes.", children: [
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn primary", "data-testid": "export-workbook", onClick: onWorkbook, children: "Export workbook" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", onClick: () => wbInput.current && wbInput.current.click(), children: "Import workbook" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", "data-testid": "export-params-csv", onClick: () => downloadText("parameters.csv", parametersCSV(config), "text/csv"), children: "Parameters CSV" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", "data-testid": "export-volumes-csv", onClick: () => downloadText("volumes.csv", volumesCSV(config), "text/csv"), children: "Volumes CSV" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", onClick: () => csvInput.current && csvInput.current.click(), children: "Import parameters CSV" })
       ] }),
-      /* @__PURE__ */ jsxs11(Section, { label: "Config JSON", hint: "The whole plan as JSON \u2014 export to share, import to replace.", children: [
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-config", onClick: () => downloadText("capacity-config.json", configJSON(config), "application/json"), children: "Export config" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => cfgInput.current && cfgInput.current.click(), children: "Import config" })
+      /* @__PURE__ */ jsxs12(Section, { label: "Config JSON", hint: "The whole plan as JSON \u2014 export to share, import to replace.", children: [
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", "data-testid": "export-config", onClick: () => downloadText("capacity-config.json", configJSON(config), "application/json"), children: "Export config" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", onClick: () => cfgInput.current && cfgInput.current.click(), children: "Import config" })
       ] }),
-      /* @__PURE__ */ jsxs11(Section, { label: "Run files", hint: "A saved run bundles the config with its results; importing one makes that config active.", children: [
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", "data-testid": "export-run", onClick: () => downloadText("capacity-run.json", runJSON(sim, config), "application/json"), children: "Export run" }),
-        /* @__PURE__ */ jsx12("button", { type: "button", className: "btn", onClick: () => runInput.current && runInput.current.click(), children: "Import run" })
+      /* @__PURE__ */ jsxs12(Section, { label: "Run files", hint: "A saved run bundles the config with its results; importing one makes that config active.", children: [
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", "data-testid": "export-run", onClick: () => downloadText("capacity-run.json", runJSON(sim, config), "application/json"), children: "Export run" }),
+        /* @__PURE__ */ jsx13("button", { type: "button", className: "btn", onClick: () => runInput.current && runInput.current.click(), children: "Import run" })
       ] }),
-      /* @__PURE__ */ jsx12("input", { ref: wbInput, type: "file", accept: ".xlsx", "data-testid": "import-workbook", style: { display: "none" }, onChange: (e) => e.target.files[0] && importWorkbook(e.target.files[0]) }),
-      /* @__PURE__ */ jsx12("input", { ref: cfgInput, type: "file", accept: ".json", "data-testid": "import-config", style: { display: "none" }, onChange: (e) => e.target.files[0] && importConfig(e.target.files[0]) }),
-      /* @__PURE__ */ jsx12("input", { ref: runInput, type: "file", accept: ".json", "data-testid": "import-run", style: { display: "none" }, onChange: (e) => e.target.files[0] && importRun(e.target.files[0]) }),
-      /* @__PURE__ */ jsx12("input", { ref: csvInput, type: "file", accept: ".csv", "data-testid": "import-params-csv", style: { display: "none" }, onChange: (e) => e.target.files[0] && importParamsCSV(e.target.files[0]) })
+      /* @__PURE__ */ jsx13("input", { ref: wbInput, type: "file", accept: ".xlsx", "data-testid": "import-workbook", style: { display: "none" }, onChange: (e) => e.target.files[0] && importWorkbook(e.target.files[0]) }),
+      /* @__PURE__ */ jsx13("input", { ref: cfgInput, type: "file", accept: ".json", "data-testid": "import-config", style: { display: "none" }, onChange: (e) => e.target.files[0] && importConfig(e.target.files[0]) }),
+      /* @__PURE__ */ jsx13("input", { ref: runInput, type: "file", accept: ".json", "data-testid": "import-run", style: { display: "none" }, onChange: (e) => e.target.files[0] && importRun(e.target.files[0]) }),
+      /* @__PURE__ */ jsx13("input", { ref: csvInput, type: "file", accept: ".csv", "data-testid": "import-params-csv", style: { display: "none" }, onChange: (e) => e.target.files[0] && importParamsCSV(e.target.files[0]) })
     ] }),
-    msg && /* @__PURE__ */ jsx12("p", { className: "note", style: { marginTop: 12, color: msg.tone === "err" ? "var(--red)" : void 0 }, children: msg.text })
+    msg && /* @__PURE__ */ jsx13("p", { className: "note", style: { marginTop: 12, color: msg.tone === "err" ? "var(--red)" : void 0 }, children: msg.text })
   ] });
 }
 
 // ui/components/SnapshotsTab.jsx
-import { Fragment as Fragment4, jsx as jsx13, jsxs as jsxs12 } from "react/jsx-runtime";
+import { Fragment as Fragment6, jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
 var SERIES3 = ["#0e7c86", "#d98a0b", "#5a54c9", "#c0417a"];
 var dt = (iso) => {
   try {
@@ -5235,86 +5462,86 @@ function SnapshotsTab({ snapshots, storageMode, storageNotice, compareSel, setCo
   const cur = config.engine.currency;
   const toggle = (slug) => setCompareSel((sel) => sel.includes(slug) ? sel.filter((s) => s !== slug) : [...sel, slug]);
   const selected = snapshots.filter((r) => compareSel.includes(r.slug));
-  return /* @__PURE__ */ jsxs12("div", { className: "grid", style: { gap: 16 }, children: [
-    /* @__PURE__ */ jsxs12("p", { className: "note", "data-testid": "snapshots-copy", children: [
-      /* @__PURE__ */ jsx13("strong", { children: "Snapshots" }),
+  return /* @__PURE__ */ jsxs13("div", { className: "grid", style: { gap: 16 }, children: [
+    /* @__PURE__ */ jsxs13("p", { className: "note", "data-testid": "snapshots-copy", children: [
+      /* @__PURE__ */ jsx14("strong", { children: "Snapshots" }),
       " are frozen results \u2014 capture the plan now to compare before/after or share it. ",
-      /* @__PURE__ */ jsx13("strong", { children: "Views" }),
+      /* @__PURE__ */ jsx14("strong", { children: "Views" }),
       " (top bar) are live scenario lenses on the current model, not saved."
     ] }),
-    /* @__PURE__ */ jsxs12(
+    /* @__PURE__ */ jsxs13(
       Card,
       {
         title: "Snapshots",
         sub: `storage: ${storageMode}`,
         hint: "Save the current plan as a named snapshot, then tick snapshots to compare them.",
-        right: /* @__PURE__ */ jsx13("button", { type: "button", className: "btn sm", onClick: onRefresh, children: "Refresh" }),
+        right: /* @__PURE__ */ jsx14("button", { type: "button", className: "btn sm", onClick: onRefresh, children: "Refresh" }),
         children: [
-          storageNotice && /* @__PURE__ */ jsx13("p", { className: "note", style: { marginBottom: 12, color: "var(--amber)" }, children: storageNotice }),
-          /* @__PURE__ */ jsxs12("div", { className: "rowflex", children: [
-            /* @__PURE__ */ jsx13("input", { type: "text", className: "inp", style: { maxWidth: 260 }, placeholder: "snapshot name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "snapshot-name" }),
-            /* @__PURE__ */ jsx13("button", { type: "button", className: "btn primary", "data-testid": "save-snapshot", disabled: !name.trim(), onClick: () => {
+          storageNotice && /* @__PURE__ */ jsx14("p", { className: "note", style: { marginBottom: 12, color: "var(--amber)" }, children: storageNotice }),
+          /* @__PURE__ */ jsxs13("div", { className: "rowflex", children: [
+            /* @__PURE__ */ jsx14("input", { type: "text", className: "inp", style: { maxWidth: 260 }, placeholder: "snapshot name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "snapshot-name" }),
+            /* @__PURE__ */ jsx14("button", { type: "button", className: "btn primary", "data-testid": "save-snapshot", disabled: !name.trim(), onClick: () => {
               onSave(name.trim());
               setName("");
             }, children: "Save current plan" })
           ] }),
-          /* @__PURE__ */ jsx13("div", { className: "tbl-wrap", style: { marginTop: 14 }, children: /* @__PURE__ */ jsxs12("table", { className: "data", "data-testid": "snapshots-table", children: [
-            /* @__PURE__ */ jsx13("thead", { children: /* @__PURE__ */ jsxs12("tr", { children: [
-              /* @__PURE__ */ jsx13("th", { children: "Compare" }),
-              /* @__PURE__ */ jsx13("th", { children: "Name" }),
-              /* @__PURE__ */ jsx13("th", { children: "Saved" }),
-              /* @__PURE__ */ jsx13("th", { children: "Strategy" }),
-              /* @__PURE__ */ jsx13("th", { children: "All-in" }),
-              /* @__PURE__ */ jsx13("th", { children: "Actions" })
+          /* @__PURE__ */ jsx14("div", { className: "tbl-wrap", style: { marginTop: 14 }, children: /* @__PURE__ */ jsxs13("table", { className: "data", "data-testid": "snapshots-table", children: [
+            /* @__PURE__ */ jsx14("thead", { children: /* @__PURE__ */ jsxs13("tr", { children: [
+              /* @__PURE__ */ jsx14("th", { children: "Compare" }),
+              /* @__PURE__ */ jsx14("th", { children: "Name" }),
+              /* @__PURE__ */ jsx14("th", { children: "Saved" }),
+              /* @__PURE__ */ jsx14("th", { children: "Strategy" }),
+              /* @__PURE__ */ jsx14("th", { children: "All-in" }),
+              /* @__PURE__ */ jsx14("th", { children: "Actions" })
             ] }) }),
-            /* @__PURE__ */ jsxs12("tbody", { children: [
-              snapshots.map((r) => /* @__PURE__ */ jsxs12("tr", { children: [
-                /* @__PURE__ */ jsx13("td", { children: /* @__PURE__ */ jsxs12("label", { className: "switch", style: { justifyContent: "center" }, children: [
-                  /* @__PURE__ */ jsx13("input", { type: "checkbox", checked: compareSel.includes(r.slug), onChange: () => toggle(r.slug), "data-testid": "tick-" + r.slug }),
-                  /* @__PURE__ */ jsx13("span", { className: "track", "aria-hidden": "true" })
+            /* @__PURE__ */ jsxs13("tbody", { children: [
+              snapshots.map((r) => /* @__PURE__ */ jsxs13("tr", { children: [
+                /* @__PURE__ */ jsx14("td", { children: /* @__PURE__ */ jsxs13("label", { className: "switch", style: { justifyContent: "center" }, children: [
+                  /* @__PURE__ */ jsx14("input", { type: "checkbox", checked: compareSel.includes(r.slug), onChange: () => toggle(r.slug), "data-testid": "tick-" + r.slug }),
+                  /* @__PURE__ */ jsx14("span", { className: "track", "aria-hidden": "true" })
                 ] }) }),
-                /* @__PURE__ */ jsx13("td", { style: { textAlign: "left", fontWeight: 600 }, children: r.name }),
-                /* @__PURE__ */ jsx13("td", { children: dt(r.savedAt) }),
-                /* @__PURE__ */ jsx13("td", { children: r.strategy }),
-                /* @__PURE__ */ jsx13("td", { children: money(cur, r.allIn) }),
-                /* @__PURE__ */ jsx13("td", { children: /* @__PURE__ */ jsxs12("span", { className: "btnbar", children: [
-                  /* @__PURE__ */ jsx13("button", { type: "button", className: "btn sm", onClick: () => onLoadSettings(r), children: "Load settings" }),
-                  /* @__PURE__ */ jsx13("button", { type: "button", className: "btn sm", onClick: () => downloadText(`${r.slug}.json`, JSON.stringify({ kind: "capacity-run", savedAt: r.savedAt, config: r.config, run: r.run }, null, 2), "application/json"), children: "Download" }),
-                  /* @__PURE__ */ jsx13("button", { type: "button", className: "btn sm danger", onClick: () => onDelete(r), children: "Delete" })
+                /* @__PURE__ */ jsx14("td", { style: { textAlign: "left", fontWeight: 600 }, children: r.name }),
+                /* @__PURE__ */ jsx14("td", { children: dt(r.savedAt) }),
+                /* @__PURE__ */ jsx14("td", { children: r.strategy }),
+                /* @__PURE__ */ jsx14("td", { children: money(cur, r.allIn) }),
+                /* @__PURE__ */ jsx14("td", { children: /* @__PURE__ */ jsxs13("span", { className: "btnbar", children: [
+                  /* @__PURE__ */ jsx14("button", { type: "button", className: "btn sm", onClick: () => onLoadSettings(r), children: "Load settings" }),
+                  /* @__PURE__ */ jsx14("button", { type: "button", className: "btn sm", onClick: () => downloadText(`${r.slug}.json`, JSON.stringify({ kind: "capacity-run", savedAt: r.savedAt, config: r.config, run: r.run }, null, 2), "application/json"), children: "Download" }),
+                  /* @__PURE__ */ jsx14("button", { type: "button", className: "btn sm danger", onClick: () => onDelete(r), children: "Delete" })
                 ] }) })
               ] }, r.slug)),
-              snapshots.length === 0 && /* @__PURE__ */ jsx13("tr", { children: /* @__PURE__ */ jsx13("td", { colSpan: 6, className: "empty", children: "No snapshots yet \u2014 save the current plan above." }) })
+              snapshots.length === 0 && /* @__PURE__ */ jsx14("tr", { children: /* @__PURE__ */ jsx14("td", { colSpan: 6, className: "empty", children: "No snapshots yet \u2014 save the current plan above." }) })
             ] })
           ] }) })
         ]
       }
     ),
-    selected.length > 0 && /* @__PURE__ */ jsxs12(Card, { title: "Compare", sub: `${selected.length} snapshot(s) ticked`, hint: "Ticked snapshots compared side by side. Deltas are versus the first ticked snapshot.", children: [
-      /* @__PURE__ */ jsx13(TotalsDelta, { runs: selected, cur }),
-      /* @__PURE__ */ jsx13("h4", { style: { margin: "18px 0 6px", fontSize: 13 }, children: "Cumulative all-in cost" }),
-      /* @__PURE__ */ jsx13(AllInOverlay, { runs: selected, cur }),
-      /* @__PURE__ */ jsx13("h4", { style: { margin: "18px 0 6px", fontSize: 13 }, children: "Per-queue comparison (matched by name)" }),
-      /* @__PURE__ */ jsx13(PerQueue, { runs: selected, cur })
+    selected.length > 0 && /* @__PURE__ */ jsxs13(Card, { title: "Compare", sub: `${selected.length} snapshot(s) ticked`, hint: "Ticked snapshots compared side by side. Deltas are versus the first ticked snapshot.", children: [
+      /* @__PURE__ */ jsx14(TotalsDelta, { runs: selected, cur }),
+      /* @__PURE__ */ jsx14("h4", { style: { margin: "18px 0 6px", fontSize: 13 }, children: "Cumulative all-in cost" }),
+      /* @__PURE__ */ jsx14(AllInOverlay, { runs: selected, cur }),
+      /* @__PURE__ */ jsx14("h4", { style: { margin: "18px 0 6px", fontSize: 13 }, children: "Per-queue comparison (matched by name)" }),
+      /* @__PURE__ */ jsx14(PerQueue, { runs: selected, cur })
     ] }),
-    /* @__PURE__ */ jsx13(FilesCard, { sim, strategySims: sims, config, activeStrategy, activeViewId, onImportConfig, title: "Files" })
+    /* @__PURE__ */ jsx14(FilesCard, { sim, strategySims: sims, config, activeStrategy, activeViewId, onImportConfig, title: "Files" })
   ] });
 }
 function TotalsDelta({ runs, cur }) {
   const { rows, metrics } = totalsDelta(runs);
   const fmt = (k, v) => k === "endPaid" ? num(v, 0) : money(cur, v);
-  return /* @__PURE__ */ jsx13("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs12("table", { className: "data", "data-testid": "totals-delta", children: [
-    /* @__PURE__ */ jsx13("thead", { children: /* @__PURE__ */ jsxs12("tr", { children: [
-      /* @__PURE__ */ jsx13("th", { children: "Snapshot" }),
-      metrics.map((m) => /* @__PURE__ */ jsx13("th", { children: m.label }, m.key))
+  return /* @__PURE__ */ jsx14("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs13("table", { className: "data", "data-testid": "totals-delta", children: [
+    /* @__PURE__ */ jsx14("thead", { children: /* @__PURE__ */ jsxs13("tr", { children: [
+      /* @__PURE__ */ jsx14("th", { children: "Snapshot" }),
+      metrics.map((m) => /* @__PURE__ */ jsx14("th", { children: m.label }, m.key))
     ] }) }),
-    /* @__PURE__ */ jsx13("tbody", { children: rows.map((r) => /* @__PURE__ */ jsxs12("tr", { children: [
-      /* @__PURE__ */ jsxs12("td", { style: { textAlign: "left", fontWeight: 600 }, children: [
+    /* @__PURE__ */ jsx14("tbody", { children: rows.map((r) => /* @__PURE__ */ jsxs13("tr", { children: [
+      /* @__PURE__ */ jsxs13("td", { style: { textAlign: "left", fontWeight: 600 }, children: [
         r.name,
         r.baseline ? " (baseline)" : ""
       ] }),
-      metrics.map((m) => /* @__PURE__ */ jsxs12("td", { children: [
+      metrics.map((m) => /* @__PURE__ */ jsxs13("td", { children: [
         fmt(m.key, r.values[m.key]),
-        !r.baseline && /* @__PURE__ */ jsxs12("span", { style: { color: r.deltas[m.key] > 0 ? "var(--red)" : "var(--green)", fontSize: 11, marginLeft: 6 }, children: [
+        !r.baseline && /* @__PURE__ */ jsxs13("span", { style: { color: r.deltas[m.key] > 0 ? "var(--red)" : "var(--green)", fontSize: 11, marginLeft: 6 }, children: [
           r.deltas[m.key] > 0 ? "\u25B2" : "\u25BC",
           fmt(m.key, Math.abs(r.deltas[m.key]))
         ] })
@@ -5324,37 +5551,37 @@ function TotalsDelta({ runs, cur }) {
 }
 function AllInOverlay({ runs, cur }) {
   const data = allInOverlay(runs);
-  return /* @__PURE__ */ jsx13(Chart, { title: "", height: 240, children: (w, h) => /* @__PURE__ */ jsxs12(LineChart3, { width: w, height: h, data, margin: { top: 8, right: 16, left: 8, bottom: 4 }, children: [
-    /* @__PURE__ */ jsx13(CartesianGrid4, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
-    /* @__PURE__ */ jsx13(XAxis4, { dataKey: "wk", tick: { fontSize: 11 }, interval: "preserveStartEnd", minTickGap: 18 }),
-    /* @__PURE__ */ jsx13(YAxis4, { tick: { fontSize: 11 }, width: 52, tickFormatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx13(Tooltip4, { formatter: (v) => money(cur, v) }),
-    /* @__PURE__ */ jsx13(Legend4, { wrapperStyle: { fontSize: 11 } }),
-    runs.map((r, i) => /* @__PURE__ */ jsx13(Line4, { type: "monotone", dataKey: r.slug, name: r.name, stroke: SERIES3[i % SERIES3.length], dot: false, strokeWidth: 2, isAnimationActive: false }, r.slug))
+  return /* @__PURE__ */ jsx14(Chart, { title: "", height: 240, children: (w, h) => /* @__PURE__ */ jsxs13(LineChart3, { width: w, height: h, data, margin: { top: 8, right: 16, left: 8, bottom: 4 }, children: [
+    /* @__PURE__ */ jsx14(CartesianGrid4, { strokeDasharray: "3 3", stroke: "#eef2f5" }),
+    /* @__PURE__ */ jsx14(XAxis4, { dataKey: "wk", tick: { fontSize: 11 }, interval: "preserveStartEnd", minTickGap: 18 }),
+    /* @__PURE__ */ jsx14(YAxis4, { tick: { fontSize: 11 }, width: 52, tickFormatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx14(Tooltip4, { formatter: (v) => money(cur, v) }),
+    /* @__PURE__ */ jsx14(Legend4, { wrapperStyle: { fontSize: 11 } }),
+    runs.map((r, i) => /* @__PURE__ */ jsx14(Line4, { type: "monotone", dataKey: r.slug, name: r.name, stroke: SERIES3[i % SERIES3.length], dot: false, strokeWidth: 2, isAnimationActive: false }, r.slug))
   ] }) });
 }
 function PerQueue({ runs, cur }) {
   const blocks = perQueueBlocks(runs);
-  return /* @__PURE__ */ jsx13("div", { className: "grid", style: { gap: 12 }, "data-testid": "per-queue-compare", children: blocks.map((b) => /* @__PURE__ */ jsxs12("div", { className: "erow", children: [
-    /* @__PURE__ */ jsx13("div", { className: "erow-h", children: /* @__PURE__ */ jsx13("strong", { children: b.name }) }),
-    /* @__PURE__ */ jsx13("div", { className: "erow-b", children: /* @__PURE__ */ jsx13("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs12("table", { className: "data", children: [
-      /* @__PURE__ */ jsx13("thead", { children: /* @__PURE__ */ jsxs12("tr", { children: [
-        /* @__PURE__ */ jsx13("th", { children: "Snapshot" }),
-        /* @__PURE__ */ jsx13("th", { children: "Red wks" }),
-        /* @__PURE__ */ jsx13("th", { children: "Avg cover" }),
-        /* @__PURE__ */ jsx13("th", { children: "Worst" }),
-        /* @__PURE__ */ jsx13("th", { children: "Cost" }),
-        /* @__PURE__ */ jsx13("th", { children: "Churn" })
+  return /* @__PURE__ */ jsx14("div", { className: "grid", style: { gap: 12 }, "data-testid": "per-queue-compare", children: blocks.map((b) => /* @__PURE__ */ jsxs13("div", { className: "erow", children: [
+    /* @__PURE__ */ jsx14("div", { className: "erow-h", children: /* @__PURE__ */ jsx14("strong", { children: b.name }) }),
+    /* @__PURE__ */ jsx14("div", { className: "erow-b", children: /* @__PURE__ */ jsx14("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs13("table", { className: "data", children: [
+      /* @__PURE__ */ jsx14("thead", { children: /* @__PURE__ */ jsxs13("tr", { children: [
+        /* @__PURE__ */ jsx14("th", { children: "Snapshot" }),
+        /* @__PURE__ */ jsx14("th", { children: "Red wks" }),
+        /* @__PURE__ */ jsx14("th", { children: "Avg cover" }),
+        /* @__PURE__ */ jsx14("th", { children: "Worst" }),
+        /* @__PURE__ */ jsx14("th", { children: "Cost" }),
+        /* @__PURE__ */ jsx14("th", { children: "Churn" })
       ] }) }),
-      /* @__PURE__ */ jsx13("tbody", { children: b.cells.map((c, i) => /* @__PURE__ */ jsxs12("tr", { children: [
-        /* @__PURE__ */ jsx13("td", { style: { textAlign: "left" }, children: c.run.name }),
-        c.present ? /* @__PURE__ */ jsxs12(Fragment4, { children: [
-          /* @__PURE__ */ jsx13("td", { className: c.redWeeks ? "st-red" : "st-green", children: c.redWeeks }),
-          /* @__PURE__ */ jsx13("td", { children: pct(c.avgCover) }),
-          /* @__PURE__ */ jsx13("td", { children: c.worst.fmt === "s" ? secs(c.worst.value) : pct(c.worst.value) }),
-          /* @__PURE__ */ jsx13("td", { children: money(cur, c.cost) }),
-          /* @__PURE__ */ jsx13("td", { children: money(cur, c.churn) })
-        ] }) : /* @__PURE__ */ jsx13("td", { colSpan: 5, className: "empty", children: "not in this snapshot" })
+      /* @__PURE__ */ jsx14("tbody", { children: b.cells.map((c, i) => /* @__PURE__ */ jsxs13("tr", { children: [
+        /* @__PURE__ */ jsx14("td", { style: { textAlign: "left" }, children: c.run.name }),
+        c.present ? /* @__PURE__ */ jsxs13(Fragment6, { children: [
+          /* @__PURE__ */ jsx14("td", { className: c.redWeeks ? "st-red" : "st-green", children: c.redWeeks }),
+          /* @__PURE__ */ jsx14("td", { children: pct(c.avgCover) }),
+          /* @__PURE__ */ jsx14("td", { children: c.worst.fmt === "s" ? secs(c.worst.value) : pct(c.worst.value) }),
+          /* @__PURE__ */ jsx14("td", { children: money(cur, c.cost) }),
+          /* @__PURE__ */ jsx14("td", { children: money(cur, c.churn) })
+        ] }) : /* @__PURE__ */ jsx14("td", { colSpan: 5, className: "empty", children: "not in this snapshot" })
       ] }, i)) })
     ] }) }) })
   ] }, b.name)) });
@@ -5365,13 +5592,14 @@ import { useState as useState14 } from "react";
 
 // ui/editors/PresetBar.jsx
 import { useState as useState12 } from "react";
-import { jsx as jsx14, jsxs as jsxs13 } from "react/jsx-runtime";
-function ApplyPreset({ presets, onApply, label = "Apply pattern" }) {
+import { jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+function ApplyPreset({ presets, onApply, label = "Apply pattern", id }) {
   const [pick, setPick] = useState12("");
-  return /* @__PURE__ */ jsx14("div", { style: { minWidth: 200, maxWidth: 260 }, children: /* @__PURE__ */ jsx14(
+  return /* @__PURE__ */ jsx15("div", { style: { minWidth: 200, maxWidth: 260 }, children: /* @__PURE__ */ jsx15(
     SelectField,
     {
       label,
+      id,
       value: pick,
       onChange: (v) => {
         const p = presets.find((x) => x.id === v);
@@ -5384,12 +5612,12 @@ function ApplyPreset({ presets, onApply, label = "Apply pattern" }) {
 }
 function IntradaySliders({ curve, onChange, eng }) {
   const stepMin = eng.intervalMin;
-  return /* @__PURE__ */ jsx14("div", { className: "sliders", children: curve.map((v, i) => {
+  return /* @__PURE__ */ jsx15("div", { className: "sliders", children: curve.map((v, i) => {
     const mins = eng.dayStart * 60 + i * stepMin;
     const label = String(Math.floor(mins / 60)).padStart(2, "0") + ":" + String(mins % 60).padStart(2, "0");
-    return /* @__PURE__ */ jsxs13("div", { className: "slider-cell", children: [
-      /* @__PURE__ */ jsx14("span", { className: "val", children: v.toFixed(2) }),
-      /* @__PURE__ */ jsx14(
+    return /* @__PURE__ */ jsxs14("div", { className: "slider-cell", children: [
+      /* @__PURE__ */ jsx15("span", { className: "val", children: v.toFixed(2) }),
+      /* @__PURE__ */ jsx15(
         "input",
         {
           type: "range",
@@ -5405,14 +5633,14 @@ function IntradaySliders({ curve, onChange, eng }) {
           }
         }
       ),
-      /* @__PURE__ */ jsx14("span", { className: "t", children: label })
+      /* @__PURE__ */ jsx15("span", { className: "t", children: label })
     ] }, i);
   }) });
 }
 
 // ui/components/DependencyView.jsx
 import { useState as useState13 } from "react";
-import { Fragment as Fragment5, jsx as jsx15, jsxs as jsxs14 } from "react/jsx-runtime";
+import { Fragment as Fragment7, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
 var CH_COLOR = { voice: "#0e7c86", digital: "#5a54c9", support: "#b0602a" };
 var EDGE_STYLE = {
   share: { stroke: "#1f9d55", label: "shares with" },
@@ -5460,51 +5688,51 @@ function Graph({ cfg, sim, edges, selected, onSelect, week }) {
     pos[q.id] = { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
   });
   const badge = (q) => q.resourcing === "unmanned" ? "U" : q.resourcing === "leveraged" ? "L" : "D";
-  return /* @__PURE__ */ jsx15("div", { className: "tbl-wrap", style: { border: 0 }, children: /* @__PURE__ */ jsxs14("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: { maxWidth: "100%", height: "auto" }, "data-testid": "dep-graph", role: "img", "aria-label": "Queue dependency graph", children: [
-    /* @__PURE__ */ jsx15("defs", { children: Object.entries(EDGE_STYLE).map(([k, v]) => /* @__PURE__ */ jsx15("marker", { id: "arrow-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse", children: /* @__PURE__ */ jsx15("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: v.stroke }) }, k)) }),
+  return /* @__PURE__ */ jsx16("div", { className: "tbl-wrap", style: { border: 0 }, children: /* @__PURE__ */ jsxs15("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: { maxWidth: "100%", height: "auto" }, "data-testid": "dep-graph", role: "img", "aria-label": "Queue dependency graph", children: [
+    /* @__PURE__ */ jsx16("defs", { children: Object.entries(EDGE_STYLE).map(([k, v]) => /* @__PURE__ */ jsx16("marker", { id: "arrow-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse", children: /* @__PURE__ */ jsx16("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: v.stroke }) }, k)) }),
     edges.map((e, i) => {
       const a = pos[e.from], b = pos[e.to];
       if (!a || !b) return null;
       const st = EDGE_STYLE[e.type];
       const hot = selected && (e.from === selected || e.to === selected);
-      return /* @__PURE__ */ jsx15("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: st.stroke, strokeWidth: hot ? 2.5 : 1.2, strokeOpacity: selected && !hot ? 0.15 : 0.7, markerEnd: "url(#arrow-" + e.type + ")" }, i);
+      return /* @__PURE__ */ jsx16("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: st.stroke, strokeWidth: hot ? 2.5 : 1.2, strokeOpacity: selected && !hot ? 0.15 : 0.7, markerEnd: "url(#arrow-" + e.type + ")" }, i);
     }),
     qs.map((q) => {
       const p = pos[q.id];
       const sel = selected === q.id;
-      return /* @__PURE__ */ jsxs14("g", { transform: `translate(${p.x},${p.y})`, style: { cursor: "pointer" }, onClick: () => onSelect(sel ? null : q.id), "data-testid": "dep-node-" + q.id, children: [
-        /* @__PURE__ */ jsx15("circle", { r: sel ? 16 : 13, fill: CH_COLOR[channelOfQueue(q)] || "#5c6b7a", stroke: sel ? "#0f1720" : "#fff", strokeWidth: sel ? 3 : 1.5 }),
-        /* @__PURE__ */ jsx15("text", { textAnchor: "middle", dy: "4", fontSize: "11", fontWeight: "700", fill: "#fff", children: badge(q) }),
-        /* @__PURE__ */ jsx15("text", { textAnchor: "middle", y: 26, fontSize: "10", fill: "#1b2733", children: q.name.length > 16 ? q.name.slice(0, 15) + "\u2026" : q.name })
+      return /* @__PURE__ */ jsxs15("g", { transform: `translate(${p.x},${p.y})`, style: { cursor: "pointer" }, onClick: () => onSelect(sel ? null : q.id), "data-testid": "dep-node-" + q.id, children: [
+        /* @__PURE__ */ jsx16("circle", { r: sel ? 16 : 13, fill: CH_COLOR[channelOfQueue(q)] || "#5c6b7a", stroke: sel ? "#0f1720" : "#fff", strokeWidth: sel ? 3 : 1.5 }),
+        /* @__PURE__ */ jsx16("text", { textAnchor: "middle", dy: "4", fontSize: "11", fontWeight: "700", fill: "#fff", children: badge(q) }),
+        /* @__PURE__ */ jsx16("text", { textAnchor: "middle", y: 26, fontSize: "10", fill: "#1b2733", children: q.name.length > 16 ? q.name.slice(0, 15) + "\u2026" : q.name })
       ] }, q.id);
     })
   ] }) });
 }
 function FlowsPanel({ cfg, sim, selected, week }) {
-  if (!selected) return /* @__PURE__ */ jsx15("p", { className: "note", "data-testid": "dep-flows-empty", children: "Tap a node to see its simulated flows for the selected week." });
+  if (!selected) return /* @__PURE__ */ jsx16("p", { className: "note", "data-testid": "dep-flows-empty", children: "Tap a node to see its simulated flows for the selected week." });
   const q = cfg.queues.find((x) => x.id === selected);
   const f = nodeFlows(sim, selected, week);
-  if (!q || !f) return /* @__PURE__ */ jsx15("p", { className: "note", children: "No simulated data for this queue." });
-  const row = (l, v, unit) => /* @__PURE__ */ jsxs14("div", { className: "kpi", children: [
-    /* @__PURE__ */ jsx15("div", { className: "l", children: l }),
-    /* @__PURE__ */ jsxs14("div", { className: "v", children: [
+  if (!q || !f) return /* @__PURE__ */ jsx16("p", { className: "note", children: "No simulated data for this queue." });
+  const row = (l, v, unit) => /* @__PURE__ */ jsxs15("div", { className: "kpi", children: [
+    /* @__PURE__ */ jsx16("div", { className: "l", children: l }),
+    /* @__PURE__ */ jsxs15("div", { className: "v", children: [
       num(v, 0),
-      /* @__PURE__ */ jsxs14("small", { children: [
+      /* @__PURE__ */ jsxs15("small", { children: [
         " ",
         unit
       ] })
     ] })
   ] });
-  return /* @__PURE__ */ jsxs14("div", { className: "qcard", "data-testid": "dep-flows", style: { marginTop: 12 }, children: [
-    /* @__PURE__ */ jsxs14("div", { className: "qn", children: [
-      /* @__PURE__ */ jsx15("span", { children: q.name }),
-      /* @__PURE__ */ jsx15("span", { className: "spacer" }),
-      /* @__PURE__ */ jsxs14("span", { className: "qtype", children: [
+  return /* @__PURE__ */ jsxs15("div", { className: "qcard", "data-testid": "dep-flows", style: { marginTop: 12 }, children: [
+    /* @__PURE__ */ jsxs15("div", { className: "qn", children: [
+      /* @__PURE__ */ jsx16("span", { children: q.name }),
+      /* @__PURE__ */ jsx16("span", { className: "spacer" }),
+      /* @__PURE__ */ jsxs15("span", { className: "qtype", children: [
         "week ",
         Math.min(week, sim.weeks.length - 1) + 1
       ] })
     ] }),
-    /* @__PURE__ */ jsxs14("div", { className: "kpis", children: [
+    /* @__PURE__ */ jsxs15("div", { className: "kpis", children: [
       row("Shared in", f.sharedIn, "h"),
       row("Leveraged in", f.leveragedIn, "h"),
       row("Support in", f.supportIn, "h"),
@@ -5515,19 +5743,19 @@ function FlowsPanel({ cfg, sim, selected, week }) {
 }
 function LinkTable({ cfg, edges }) {
   const qn = (id) => (cfg.queues.find((q) => q.id === id) || { name: id }).name;
-  return /* @__PURE__ */ jsx15("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs14("table", { className: "data", "data-testid": "dep-table", children: [
-    /* @__PURE__ */ jsx15("thead", { children: /* @__PURE__ */ jsxs14("tr", { children: [
-      /* @__PURE__ */ jsx15("th", { children: "From" }),
-      /* @__PURE__ */ jsx15("th", { children: "Link" }),
-      /* @__PURE__ */ jsx15("th", { children: "To" })
+  return /* @__PURE__ */ jsx16("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs15("table", { className: "data", "data-testid": "dep-table", children: [
+    /* @__PURE__ */ jsx16("thead", { children: /* @__PURE__ */ jsxs15("tr", { children: [
+      /* @__PURE__ */ jsx16("th", { children: "From" }),
+      /* @__PURE__ */ jsx16("th", { children: "Link" }),
+      /* @__PURE__ */ jsx16("th", { children: "To" })
     ] }) }),
-    /* @__PURE__ */ jsxs14("tbody", { children: [
-      edges.map((e, i) => /* @__PURE__ */ jsxs14("tr", { children: [
-        /* @__PURE__ */ jsx15("td", { style: { textAlign: "left" }, children: qn(e.from) }),
-        /* @__PURE__ */ jsx15("td", { children: /* @__PURE__ */ jsx15("span", { className: "pill", style: { color: EDGE_STYLE[e.type].stroke, borderColor: EDGE_STYLE[e.type].stroke }, children: EDGE_STYLE[e.type].label }) }),
-        /* @__PURE__ */ jsx15("td", { style: { textAlign: "left" }, children: qn(e.to) })
+    /* @__PURE__ */ jsxs15("tbody", { children: [
+      edges.map((e, i) => /* @__PURE__ */ jsxs15("tr", { children: [
+        /* @__PURE__ */ jsx16("td", { style: { textAlign: "left" }, children: qn(e.from) }),
+        /* @__PURE__ */ jsx16("td", { children: /* @__PURE__ */ jsx16("span", { className: "pill", style: { color: EDGE_STYLE[e.type].stroke, borderColor: EDGE_STYLE[e.type].stroke }, children: EDGE_STYLE[e.type].label }) }),
+        /* @__PURE__ */ jsx16("td", { style: { textAlign: "left" }, children: qn(e.to) })
       ] }, i)),
-      edges.length === 0 && /* @__PURE__ */ jsx15("tr", { children: /* @__PURE__ */ jsx15("td", { colSpan: 3, className: "empty", children: "No dependency links yet. Add sharing, leverage or converts-to-calls on a queue below." }) })
+      edges.length === 0 && /* @__PURE__ */ jsx16("tr", { children: /* @__PURE__ */ jsx16("td", { colSpan: 3, className: "empty", children: "No dependency links yet. Add sharing, leverage or converts-to-calls on a queue below." }) })
     ] })
   ] }) });
 }
@@ -5537,40 +5765,40 @@ function DependencyView({ config, sim }) {
   const [week, setWeek] = useState13(0);
   const edges = buildEdges(config);
   const maxWk = sim ? sim.weeks.length : 1;
-  return /* @__PURE__ */ jsx15(
+  return /* @__PURE__ */ jsx16(
     Card,
     {
       title: "Dependencies",
       sub: "how capacity and contacts move between queues",
       hint: "Nodes are queues (colour = channel, letter = D dedicated / L leveraged / U unmanned). Edges are sharing, leverage and converts-to-calls links. Tap a node to see the simulated flows for the chosen week.",
-      right: /* @__PURE__ */ jsxs14("div", { className: "btnbar", children: [
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "btn sm" + (view === "graph" ? " primary" : ""), onClick: () => setView("graph"), "data-testid": "dep-view-graph", "aria-pressed": view === "graph", children: "Graph" }),
-        /* @__PURE__ */ jsx15("button", { type: "button", className: "btn sm" + (view === "table" ? " primary" : ""), onClick: () => setView("table"), "data-testid": "dep-view-table", "aria-pressed": view === "table", children: "Table" })
+      right: /* @__PURE__ */ jsxs15("div", { className: "btnbar", children: [
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm" + (view === "graph" ? " primary" : ""), onClick: () => setView("graph"), "data-testid": "dep-view-graph", "aria-pressed": view === "graph", children: "Graph" }),
+        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm" + (view === "table" ? " primary" : ""), onClick: () => setView("table"), "data-testid": "dep-view-table", "aria-pressed": view === "table", children: "Table" })
       ] }),
-      children: view === "graph" ? /* @__PURE__ */ jsxs14(Fragment5, { children: [
-        /* @__PURE__ */ jsxs14("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
-          /* @__PURE__ */ jsxs14("label", { className: "field", style: { maxWidth: 260 }, children: [
-            /* @__PURE__ */ jsxs14("span", { className: "lab", children: [
+      children: view === "graph" ? /* @__PURE__ */ jsxs15(Fragment7, { children: [
+        /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
+          /* @__PURE__ */ jsxs15("label", { className: "field", style: { maxWidth: 260 }, children: [
+            /* @__PURE__ */ jsxs15("span", { className: "lab", children: [
               "Week ",
               Math.min(week, maxWk - 1) + 1
             ] }),
-            /* @__PURE__ */ jsx15("input", { type: "range", min: 0, max: Math.max(0, maxWk - 1), value: Math.min(week, maxWk - 1), onChange: (e) => setWeek(Number(e.target.value)), "data-testid": "dep-week", "aria-label": "Selected week" })
+            /* @__PURE__ */ jsx16("input", { type: "range", min: 0, max: Math.max(0, maxWk - 1), value: Math.min(week, maxWk - 1), onChange: (e) => setWeek(Number(e.target.value)), "data-testid": "dep-week", "aria-label": "Selected week" })
           ] }),
-          /* @__PURE__ */ jsx15("div", { className: "legend", style: { flexWrap: "wrap" }, children: Object.entries(EDGE_STYLE).map(([k, v]) => /* @__PURE__ */ jsxs14("span", { className: "legend-item", children: [
-            /* @__PURE__ */ jsx15("span", { className: "sw", style: { background: v.stroke } }),
+          /* @__PURE__ */ jsx16("div", { className: "legend", style: { flexWrap: "wrap" }, children: Object.entries(EDGE_STYLE).map(([k, v]) => /* @__PURE__ */ jsxs15("span", { className: "legend-item", children: [
+            /* @__PURE__ */ jsx16("span", { className: "sw", style: { background: v.stroke } }),
             v.label
           ] }, k)) })
         ] }),
-        sim ? /* @__PURE__ */ jsx15(Graph, { cfg: config, sim, edges, selected, onSelect: setSelected, week }) : /* @__PURE__ */ jsx15("p", { className: "note", children: "Recalculating\u2026" }),
-        sim && /* @__PURE__ */ jsx15(FlowsPanel, { cfg: config, sim, selected, week })
-      ] }) : /* @__PURE__ */ jsx15(LinkTable, { cfg: config, edges })
+        sim ? /* @__PURE__ */ jsx16(Graph, { cfg: config, sim, edges, selected, onSelect: setSelected, week }) : /* @__PURE__ */ jsx16("p", { className: "note", children: "Recalculating\u2026" }),
+        sim && /* @__PURE__ */ jsx16(FlowsPanel, { cfg: config, sim, selected, week })
+      ] }) : /* @__PURE__ */ jsx16(LinkTable, { cfg: config, edges })
     }
   );
 }
 
 // ui/editors/QueuesEditor.jsx
 var import_engine8 = __toESM(require_engine());
-import { Fragment as Fragment6, jsx as jsx16, jsxs as jsxs15 } from "react/jsx-runtime";
+import { Fragment as Fragment8, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
 var RES_OPTIONS = [
   { value: "dedicated", label: "Dedicated" },
   { value: "leveraged", label: "Leveraged" },
@@ -5579,24 +5807,24 @@ var RES_OPTIONS = [
 var badgeFor = (r) => r === "unmanned" ? "red" : r === "leveraged" ? "amber" : null;
 function InheritHeader({ q, section, label, ops, source }) {
   const overridden = !!(q.overrides && q.overrides[section]);
-  return /* @__PURE__ */ jsxs15("span", { className: "rowflex", style: { gap: 8, alignItems: "center" }, children: [
-    /* @__PURE__ */ jsx16("strong", { children: label }),
-    /* @__PURE__ */ jsx16("span", { className: "inherit-ind " + (overridden ? "overridden" : "inherited"), "data-testid": "inherit-" + section, children: overridden ? "overridden" : "inherited from " + source }),
-    /* @__PURE__ */ jsx16("span", { className: "spacer" }),
-    /* @__PURE__ */ jsxs15("label", { className: "switch", onClick: (e) => e.stopPropagation(), children: [
-      /* @__PURE__ */ jsx16("input", { type: "checkbox", checked: overridden, onChange: (e) => ops.setOverride(q.id, section, e.target.checked), "data-testid": "override-" + section }),
-      /* @__PURE__ */ jsx16("span", { className: "track", "aria-hidden": "true" }),
-      /* @__PURE__ */ jsx16("span", { style: { fontSize: 11 }, children: "Override" })
+  return /* @__PURE__ */ jsxs16("span", { className: "rowflex", style: { gap: 8, alignItems: "center" }, children: [
+    /* @__PURE__ */ jsx17("strong", { children: label }),
+    /* @__PURE__ */ jsx17("span", { className: "inherit-ind " + (overridden ? "overridden" : "inherited"), "data-testid": "inherit-" + section, children: overridden ? "overridden" : "inherited from " + source }),
+    /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+    /* @__PURE__ */ jsxs16("label", { className: "switch", onClick: (e) => e.stopPropagation(), children: [
+      /* @__PURE__ */ jsx17("input", { type: "checkbox", checked: overridden, onChange: (e) => ops.setOverride(q.id, section, e.target.checked), "data-testid": "override-" + section }),
+      /* @__PURE__ */ jsx17("span", { className: "track", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx17("span", { style: { fontSize: 11 }, children: "Override" })
     ] })
   ] });
 }
 function HCField({ value, onChange, disabled }) {
-  return /* @__PURE__ */ jsxs15("label", { className: "field", children: [
-    /* @__PURE__ */ jsxs15("span", { className: "lab", children: [
+  return /* @__PURE__ */ jsxs16("label", { className: "field", children: [
+    /* @__PURE__ */ jsxs16("span", { className: "lab", children: [
       "Starting HC ",
-      /* @__PURE__ */ jsx16(Hint, { text: "Leave blank to draw a workload-weighted share of the global starting HC (Settings). Unmanned queues have no HC." })
+      /* @__PURE__ */ jsx17(Hint, { text: "Leave blank to draw a workload-weighted share of the global starting HC (Settings). Unmanned queues have no HC." })
     ] }),
-    /* @__PURE__ */ jsx16(
+    /* @__PURE__ */ jsx17(
       "input",
       {
         type: "number",
@@ -5613,14 +5841,14 @@ function SharingEditor({ config, q, ops }) {
   const on = !!q.sharing;
   const sh = q.sharing || { sharePct: 100, sharesWith: [] };
   const others = config.queues.filter((x) => x.id !== q.id);
-  return /* @__PURE__ */ jsxs15("div", { children: [
-    /* @__PURE__ */ jsx16("div", { className: "rowflex", style: { marginBottom: 8 }, children: /* @__PURE__ */ jsxs15("label", { className: "switch", children: [
-      /* @__PURE__ */ jsx16("input", { type: "checkbox", checked: on, onChange: (e) => ops.setSharing(q.id, e.target.checked), "data-testid": "sharing-on" }),
-      /* @__PURE__ */ jsx16("span", { className: "track", "aria-hidden": "true" }),
-      /* @__PURE__ */ jsx16("span", { children: "This queue shares its spare" })
+  return /* @__PURE__ */ jsxs16("div", { children: [
+    /* @__PURE__ */ jsx17("div", { className: "rowflex", style: { marginBottom: 8 }, children: /* @__PURE__ */ jsxs16("label", { className: "switch", children: [
+      /* @__PURE__ */ jsx17("input", { type: "checkbox", checked: on, onChange: (e) => ops.setSharing(q.id, e.target.checked), "data-testid": "sharing-on" }),
+      /* @__PURE__ */ jsx17("span", { className: "track", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx17("span", { children: "This queue shares its spare" })
     ] }) }),
-    on ? /* @__PURE__ */ jsxs15(Fragment6, { children: [
-      /* @__PURE__ */ jsx16("div", { className: "fieldrow", style: { maxWidth: 260 }, children: /* @__PURE__ */ jsx16(
+    on ? /* @__PURE__ */ jsxs16(Fragment8, { children: [
+      /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 260 }, children: /* @__PURE__ */ jsx17(
         NumField,
         {
           label: "Share of spare",
@@ -5630,38 +5858,38 @@ function SharingEditor({ config, q, ops }) {
           hint: "How much of this queue's spare capacity (above its own requirement) it offers to the queues below, split pro-rata by their shortfall."
         }
       ) }),
-      /* @__PURE__ */ jsx16("div", { className: "lab", style: { margin: "10px 0 6px" }, children: "Shares with" }),
-      /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { flexWrap: "wrap" }, children: [
-        others.map((x) => /* @__PURE__ */ jsxs15("label", { className: "switch", children: [
-          /* @__PURE__ */ jsx16("input", { type: "checkbox", checked: (sh.sharesWith || []).includes(x.id), onChange: (e) => ops.toggleSharesWith(q.id, x.id, e.target.checked), "data-testid": "shares-" + q.id + "-" + x.id }),
-          /* @__PURE__ */ jsx16("span", { className: "track", "aria-hidden": "true" }),
-          /* @__PURE__ */ jsxs15("span", { children: [
+      /* @__PURE__ */ jsx17("div", { className: "lab", style: { margin: "10px 0 6px" }, children: "Shares with" }),
+      /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { flexWrap: "wrap" }, children: [
+        others.map((x) => /* @__PURE__ */ jsxs16("label", { className: "switch", children: [
+          /* @__PURE__ */ jsx17("input", { type: "checkbox", checked: (sh.sharesWith || []).includes(x.id), onChange: (e) => ops.toggleSharesWith(q.id, x.id, e.target.checked), "data-testid": "shares-" + q.id + "-" + x.id }),
+          /* @__PURE__ */ jsx17("span", { className: "track", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsxs16("span", { children: [
             x.name,
             " ",
-            /* @__PURE__ */ jsx16("span", { className: "pill", children: (0, import_engine8.channelOf)(x) })
+            /* @__PURE__ */ jsx17("span", { className: "pill", children: (0, import_engine8.channelOf)(x) })
           ] })
         ] }, x.id)),
-        others.length === 0 && /* @__PURE__ */ jsx16("p", { className: "note", children: "No other queues to share with." })
+        others.length === 0 && /* @__PURE__ */ jsx17("p", { className: "note", children: "No other queues to share with." })
       ] })
-    ] }) : /* @__PURE__ */ jsx16("p", { className: "note", children: "Not sharing. Turn on to lend this queue's spare to others in deficit." })
+    ] }) : /* @__PURE__ */ jsx17("p", { className: "note", children: "Not sharing. Turn on to lend this queue's spare to others in deficit." })
   ] });
 }
 function SupportsEditor({ config, q, ops }) {
   const others = config.queues.filter((x) => x.id !== q.id);
   const inbound = (0, import_engine8.supportersOf)(config, q.id);
   const nameOf = (id) => (config.queues.find((x) => x.id === id) || { name: id }).name;
-  return /* @__PURE__ */ jsxs15("div", { children: [
-    /* @__PURE__ */ jsxs15("div", { className: "lab", style: { marginBottom: 6 }, children: [
+  return /* @__PURE__ */ jsxs16("div", { children: [
+    /* @__PURE__ */ jsxs16("div", { className: "lab", style: { marginBottom: 6 }, children: [
       "Supports / dependency list (outbound) ",
-      /* @__PURE__ */ jsx16(Hint, { text: "Queues this one lends spare hours to. Lower priority = served first; within a tier spare splits by deficit." })
+      /* @__PURE__ */ jsx17(Hint, { text: "Queues this one lends spare hours to. Lower priority = served first; within a tier spare splits by deficit." })
     ] }),
-    (q.supports || []).length === 0 ? /* @__PURE__ */ jsx16("p", { className: "note", style: { marginBottom: 8 }, children: "Not supporting any queue." }) : /* @__PURE__ */ jsx16("div", { className: "rows", style: { marginBottom: 8 }, children: q.supports.map((s, i) => /* @__PURE__ */ jsxs15("div", { className: "rowflex", children: [
-      /* @__PURE__ */ jsx16("span", { style: { minWidth: 130, fontWeight: 600 }, children: nameOf(s.queueId) }),
-      /* @__PURE__ */ jsx16("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Priority", value: s.priority, min: 1, onChange: (v) => ops.patchSupport(q.id, i, "priority", Math.max(1, v)) }) }),
-      /* @__PURE__ */ jsx16("div", { style: { width: 110 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Max share", unit: "%", value: s.maxSharePct == null ? 100 : s.maxSharePct, onChange: (v) => ops.patchSupport(q.id, i, "maxSharePct", v) }) }),
-      /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm danger", style: { alignSelf: "flex-end" }, onClick: () => ops.deleteSupport(q.id, i), children: "Remove" })
+    (q.supports || []).length === 0 ? /* @__PURE__ */ jsx17("p", { className: "note", style: { marginBottom: 8 }, children: "Not supporting any queue." }) : /* @__PURE__ */ jsx17("div", { className: "rows", style: { marginBottom: 8 }, children: q.supports.map((s, i) => /* @__PURE__ */ jsxs16("div", { className: "rowflex", children: [
+      /* @__PURE__ */ jsx17("span", { style: { minWidth: 130, fontWeight: 600 }, children: nameOf(s.queueId) }),
+      /* @__PURE__ */ jsx17("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Priority", value: s.priority, min: 1, onChange: (v) => ops.patchSupport(q.id, i, "priority", Math.max(1, v)) }) }),
+      /* @__PURE__ */ jsx17("div", { style: { width: 110 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Max share", unit: "%", value: s.maxSharePct == null ? 100 : s.maxSharePct, onChange: (v) => ops.patchSupport(q.id, i, "maxSharePct", v) }) }),
+      /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", style: { alignSelf: "flex-end" }, onClick: () => ops.deleteSupport(q.id, i), children: "Remove" })
     ] }, i)) }),
-    /* @__PURE__ */ jsx16(
+    /* @__PURE__ */ jsx17(
       SelectField,
       {
         label: "Add a queue to support",
@@ -5670,39 +5898,46 @@ function SupportsEditor({ config, q, ops }) {
         options: [{ value: "", label: "Choose a queue\u2026" }, ...others.filter((x) => !(q.supports || []).some((s) => s.queueId === x.id)).map((x) => ({ value: x.id, label: x.name }))]
       }
     ),
-    /* @__PURE__ */ jsx16("div", { className: "lab", style: { margin: "12px 0 4px" }, children: "Supported by (inbound)" }),
-    inbound.length ? /* @__PURE__ */ jsx16("div", { className: "rowflex", children: inbound.map((s) => /* @__PURE__ */ jsxs15("span", { className: "pill", children: [
+    /* @__PURE__ */ jsx17("div", { className: "lab", style: { margin: "12px 0 4px" }, children: "Supported by (inbound)" }),
+    inbound.length ? /* @__PURE__ */ jsx17("div", { className: "rowflex", children: inbound.map((s) => /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
       nameOf(s.queueId),
       " \xB7 pri ",
       s.priority
-    ] }, s.queueId)) }) : /* @__PURE__ */ jsx16("p", { className: "note", children: "No queue currently supports this one." })
+    ] }, s.queueId)) }) : /* @__PURE__ */ jsx17("p", { className: "note", children: "No queue currently supports this one." })
   ] });
 }
+function groupTargetsQueue(group, q) {
+  const sc = group.scope;
+  if (!sc) return true;
+  const anyTarget = (sc.brandIds || []).length || (sc.channels || []).length || (sc.queueIds || []).length;
+  if (!anyTarget) return true;
+  return (sc.brandIds || []).includes(q.brandId) || (sc.channels || []).includes((0, import_engine8.channelOf)(q)) || (sc.queueIds || []).includes(q.id);
+}
 function ScenariosAffecting({ config, q }) {
-  const hits = config.scenarios.filter((s) => {
-    if (s.type === "unified") {
-      const sc = s.scope;
-      if (!sc || sc === "all" || sc.kind === "all") return true;
-      if (sc.kind === "template") return (0, import_engine8.channelOf)(q) === sc.channel;
-      if (sc.kind === "brand") return q.brandId === sc.brandId;
-      if (sc.kind === "queues") return (sc.queueIds || []).includes(q.id);
-      return false;
-    }
-    return s.queueIds === "all" || Array.isArray(s.queueIds) && s.queueIds.includes(q.id);
-  });
-  if (!hits.length) return /* @__PURE__ */ jsx16("p", { className: "note", children: "No scenarios currently target this queue." });
-  return /* @__PURE__ */ jsx16("div", { className: "rowflex", style: { flexWrap: "wrap" }, children: hits.map((s) => /* @__PURE__ */ jsxs15("span", { className: "pill", children: [
-    s.name,
-    s.enabled ? "" : " (off)"
-  ] }, s.id)) });
+  const groups = (config.groups || []).filter((g) => Array.isArray(g.scenarioIds) && g.scenarioIds.length && groupTargetsQueue(g, q));
+  const rows = groups.map((g) => ({
+    group: g,
+    factors: g.scenarioIds.map((id) => config.scenarios.find((s) => s.id === id)).filter(Boolean)
+  })).filter((r) => r.factors.length);
+  if (!rows.length) return /* @__PURE__ */ jsx17("p", { className: "note", children: "No scenario groups currently target this queue. Create and target groups on the Scenarios tab." });
+  return /* @__PURE__ */ jsxs16("div", { className: "rows", style: { gap: 8 }, "data-testid": "q-scenarios-readonly", children: [
+    /* @__PURE__ */ jsx17("p", { className: "note", children: "Read-only. Scenario groups are created and targeted on the Scenarios tab; this shows the ones that reach this queue." }),
+    rows.map(({ group, factors }) => /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { flexWrap: "wrap", gap: 6 }, children: [
+      /* @__PURE__ */ jsx17("span", { className: "tag soft", children: group.name }),
+      factors.map((s) => /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
+        s.name,
+        s.enabled ? "" : " (off)"
+      ] }, s.id))
+    ] }, group.id))
+  ] });
 }
 function AssumptionsMini({ sim, config, q }) {
-  if (!sim || !sim.weeks.length || !sim.weeks[0].queues[q.id]) return /* @__PURE__ */ jsx16("p", { className: "note", children: "Recalculating\u2026" });
+  if (!sim || !sim.weeks.length || !sim.weeks[0].queues[q.id]) return /* @__PURE__ */ jsx17("p", { className: "note", children: "Recalculating\u2026" });
   const cols = assumptionsColumns(q, config.engine.currency);
   const rows = buildWeeklyRows(sim, q, config).filter((_, i) => i % 4 === 0);
-  return /* @__PURE__ */ jsx16("div", { className: "tbl-wrap", style: { maxHeight: 260 }, children: /* @__PURE__ */ jsxs15("table", { className: "data", children: [
-    /* @__PURE__ */ jsx16("thead", { children: /* @__PURE__ */ jsx16("tr", { children: cols.map((c) => /* @__PURE__ */ jsx16("th", { children: c.label }, c.key)) }) }),
-    /* @__PURE__ */ jsx16("tbody", { children: rows.map((r) => /* @__PURE__ */ jsx16("tr", { children: cols.map((c) => /* @__PURE__ */ jsx16("td", { style: c.key === "scenarioTags" ? { textAlign: "left" } : void 0, children: c.fmt(r[c.key]) }, c.key)) }, r.week)) })
+  return /* @__PURE__ */ jsx17("div", { className: "tbl-wrap", style: { maxHeight: 260 }, children: /* @__PURE__ */ jsxs16("table", { className: "data", children: [
+    /* @__PURE__ */ jsx17("thead", { children: /* @__PURE__ */ jsx17("tr", { children: cols.map((c) => /* @__PURE__ */ jsx17("th", { children: c.label }, c.key)) }) }),
+    /* @__PURE__ */ jsx17("tbody", { children: rows.map((r) => /* @__PURE__ */ jsx17("tr", { children: cols.map((c) => /* @__PURE__ */ jsx17("td", { style: c.key === "scenarioTags" ? { textAlign: "left" } : void 0, children: c.fmt(r[c.key]) }, c.key)) }, r.week)) })
   ] }) });
 }
 function VolumesSection({ config, q, ops, seasonalityPresets }) {
@@ -5720,8 +5955,8 @@ function VolumesSection({ config, q, ops, seasonalityPresets }) {
     const arr = csv.split(/[\s,]+/).map((x) => Number(x)).filter((x) => !Number.isNaN(x));
     if (arr.length) ops.setQueueVolume(q.id, "series", arr);
   };
-  return /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-    /* @__PURE__ */ jsx16("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 8 }, children: /* @__PURE__ */ jsx16(
+  return /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+    /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 320, marginBottom: 8 }, children: /* @__PURE__ */ jsx17(
       SelectField,
       {
         label: "Volume source",
@@ -5735,12 +5970,12 @@ function VolumesSection({ config, q, ops, seasonalityPresets }) {
         options: [{ value: "single", label: "Single figure" }, { value: "series", label: "Weekly series (CSV / wizard)" }, { value: "inherit", label: "Inherit from brand" }]
       }
     ) }),
-    mode === "single" && /* @__PURE__ */ jsx16("div", { className: "fieldrow", style: { maxWidth: 240 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Base daily volume", value: q.dailyVolume, onChange: (v) => ops.patchQueue(q.id, ["dailyVolume"], v) }) }),
-    mode === "inherit" && /* @__PURE__ */ jsx16("div", { className: "fieldrow", style: { maxWidth: 240 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Brand share", value: q.volumeShare == null ? 1 : q.volumeShare, onChange: (v) => ops.patchQueue(q.id, ["volumeShare"], v), hint: "This queue's proportional share of its brand's volume, split across brand queues that inherit." }) }),
-    mode === "series" && /* @__PURE__ */ jsxs15(Fragment6, { children: [
-      /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
-        /* @__PURE__ */ jsx16(NumField, { label: "Weekly figure", value: wizBase, onChange: setWizBase }),
-        /* @__PURE__ */ jsx16("div", { style: { minWidth: 180 }, children: /* @__PURE__ */ jsx16(
+    mode === "single" && /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 240 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Base daily volume", value: q.dailyVolume, onChange: (v) => ops.patchQueue(q.id, ["dailyVolume"], v) }) }),
+    mode === "inherit" && /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 240 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Brand share", value: q.volumeShare == null ? 1 : q.volumeShare, onChange: (v) => ops.patchQueue(q.id, ["volumeShare"], v), hint: "This queue's proportional share of its brand's volume, split across brand queues that inherit." }) }),
+    mode === "series" && /* @__PURE__ */ jsxs16(Fragment8, { children: [
+      /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
+        /* @__PURE__ */ jsx17(NumField, { label: "Weekly figure", value: wizBase, onChange: setWizBase }),
+        /* @__PURE__ */ jsx17("div", { style: { minWidth: 180 }, children: /* @__PURE__ */ jsx17(
           SelectField,
           {
             label: "Seasonality pattern",
@@ -5749,14 +5984,14 @@ function VolumesSection({ config, q, ops, seasonalityPresets }) {
             options: [{ value: "", label: "Flat" }, ...seasonalityPresets.map((p) => ({ value: p.id, label: p.name }))]
           }
         ) }),
-        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm primary", onClick: runWizard, "data-testid": "vol-wizard-run", style: { alignSelf: "flex-end" }, children: "Run seasonality wizard" })
+        /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm primary", onClick: runWizard, "data-testid": "vol-wizard-run", style: { alignSelf: "flex-end" }, children: "Run seasonality wizard" })
       ] }),
-      /* @__PURE__ */ jsx16("p", { className: "note", style: { marginBottom: 8 }, "data-testid": "vol-wizard-note", children: "The wizard multiplies your weekly figure by the chosen pattern's monthly multipliers, anchored to the Settings week-1 date, to fill every week. Every week stays editable below." }),
-      /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
-        /* @__PURE__ */ jsx16("input", { type: "text", className: "inp", style: { flex: 1, minWidth: 220 }, placeholder: "paste a CSV weekly list (52+)", value: csv, onChange: (e) => setCsv(e.target.value), "data-testid": "vol-csv" }),
-        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm", onClick: pasteCsv, "data-testid": "vol-csv-apply", children: "Apply CSV" })
+      /* @__PURE__ */ jsx17("p", { className: "note", style: { marginBottom: 8 }, "data-testid": "vol-wizard-note", children: "The wizard multiplies your weekly figure by the chosen pattern's monthly multipliers, anchored to the Settings week-1 date, to fill every week. Every week stays editable below." }),
+      /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
+        /* @__PURE__ */ jsx17("input", { type: "text", className: "inp", style: { flex: 1, minWidth: 220 }, placeholder: "paste a CSV weekly list (52+)", value: csv, onChange: (e) => setCsv(e.target.value), "data-testid": "vol-csv" }),
+        /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm", onClick: pasteCsv, "data-testid": "vol-csv-apply", children: "Apply CSV" })
       ] }),
-      Array.isArray(q.weeklyVolumes) && /* @__PURE__ */ jsx16("div", { className: "fieldrow", "data-testid": "vol-series", style: { gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))" }, children: q.weeklyVolumes.slice(0, config.engine.horizonWeeks).map((v, w) => /* @__PURE__ */ jsx16("div", { style: { width: 74 }, children: /* @__PURE__ */ jsx16(NumField, { label: "W" + (w + 1), value: Math.round(v), onChange: (nv) => ops.patchWeeklyVolume(q.id, w, nv) }) }, w)) })
+      Array.isArray(q.weeklyVolumes) && /* @__PURE__ */ jsx17("div", { className: "fieldrow", "data-testid": "vol-series", style: { gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))" }, children: q.weeklyVolumes.slice(0, config.engine.horizonWeeks).map((v, w) => /* @__PURE__ */ jsx17("div", { style: { width: 74 }, children: /* @__PURE__ */ jsx17(NumField, { label: "W" + (w + 1), value: Math.round(v), onChange: (nv) => ops.patchWeeklyVolume(q.id, w, nv) }) }, w)) })
     ] })
   ] });
 }
@@ -5770,26 +6005,35 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
   const isDigital = q.type === "digital";
   const workflow = isDigital && q.subtype === "workflow";
   const voiceQueues = config.queues.filter((x) => (0, import_engine8.channelOf)(x) === "voice" && x.id !== q.id);
-  return /* @__PURE__ */ jsxs15("details", { className: "erow", open: defaultOpen, children: [
-    /* @__PURE__ */ jsxs15("summary", { children: [
-      /* @__PURE__ */ jsx16("span", { className: "chev", children: "\u25B6" }),
-      /* @__PURE__ */ jsx16("strong", { children: q.name }),
-      isDigital && /* @__PURE__ */ jsx16("span", { className: "qtype", children: q.subtype === "workflow" ? "workflow" : "customer" }),
-      bdg && /* @__PURE__ */ jsx16("span", { className: "badge " + bdg, children: res }),
-      /* @__PURE__ */ jsx16("span", { className: "spacer" }),
-      /* @__PURE__ */ jsxs15("span", { className: "btnbar", onClick: (e) => e.preventDefault(), children: [
-        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm", onClick: () => ops.duplicateQueue(q.id), children: "Duplicate" }),
-        /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteQueue(q.id), children: "Delete" })
+  return /* @__PURE__ */ jsxs16("details", { className: "erow", open: defaultOpen, children: [
+    /* @__PURE__ */ jsxs16("summary", { children: [
+      /* @__PURE__ */ jsx17("span", { className: "chev", children: "\u25B6" }),
+      /* @__PURE__ */ jsx17("strong", { children: q.name }),
+      isDigital && /* @__PURE__ */ jsx17("span", { className: "qtype", children: q.subtype === "workflow" ? "workflow" : "customer" }),
+      bdg && /* @__PURE__ */ jsx17("span", { className: "badge " + bdg, children: res }),
+      /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+      /* @__PURE__ */ jsxs16("span", { className: "btnbar", onClick: (e) => e.preventDefault(), children: [
+        /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm", onClick: () => ops.duplicateQueue(q.id), children: "Duplicate" }),
+        /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteQueue(q.id), children: "Delete" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs15("div", { className: "erow-b", children: [
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", open: defaultOpen, children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Description" }) }),
-        /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-          /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(TextField, { label: "Name", value: q.name, onChange: (v) => ops.patchQueue(q.id, ["name"], v) }),
-            /* @__PURE__ */ jsx16(SelectField, { label: "Channel", value: ch, onChange: (v) => ops.patchQueue(q.id, ["channel"], v), options: [{ value: "voice", label: "Voice" }, { value: "digital", label: "Digital" }, { value: "support", label: "Support" }] }),
-            isDigital && /* @__PURE__ */ jsx16(
+    /* @__PURE__ */ jsxs16("div", { className: "erow-b", children: [
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", open: defaultOpen, children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Description" }) }),
+        /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+          /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(TextField, { label: "Name", value: q.name, onChange: (v) => ops.patchQueue(q.id, ["name"], v) }),
+            /* @__PURE__ */ jsx17(
+              SelectField,
+              {
+                label: "Channel",
+                value: q.channelId || "",
+                onChange: (v) => v && ops.attachQueueChannel(q.id, v),
+                id: "queue-channel-" + q.id,
+                options: [{ value: "", label: "\u2014 pick a channel \u2014" }, ...(config.channelDefs || []).map((d) => ({ value: d.id, label: d.name }))]
+              }
+            ),
+            isDigital && /* @__PURE__ */ jsx17(
               SelectField,
               {
                 label: "Digital subtype",
@@ -5799,81 +6043,92 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
                 options: [{ value: "customer", label: "Customer (live)" }, { value: "workflow", label: "Workflow (backlog)" }]
               }
             ),
-            /* @__PURE__ */ jsx16(NumField, { label: workflow ? "Handle time / item" : "AHT", unit: "s", value: q.aht, onChange: (v) => ops.patchQueue(q.id, ["aht"], v) })
+            /* @__PURE__ */ jsx17(NumField, { label: workflow ? "Handle time / item" : "AHT", unit: "s", value: q.aht, onChange: (v) => ops.patchQueue(q.id, ["aht"], v) })
           ] }),
-          isDigital && /* @__PURE__ */ jsx16("p", { className: "note", children: workflow ? "Workflow: backlog processing \u2014 no concurrency; SLA measured in hours." : "Customer: live interaction \u2014 concurrency and a minutes SLA." })
+          /* @__PURE__ */ jsxs16("p", { className: "note", children: [
+            "Attaching a channel sets this queue's channel group (",
+            chLabel,
+            ") and inherits its template sections. Create channels in Settings \u2192 Channels.",
+            isDigital ? workflow ? " Workflow: backlog processing \u2014 no concurrency; SLA in hours." : " Customer: live interaction \u2014 concurrency and a minutes SLA." : ""
+          ] })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Volumes" }) }),
-        /* @__PURE__ */ jsx16(VolumesSection, { config, q, ops, seasonalityPresets })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Volumes" }) }),
+        /* @__PURE__ */ jsx17(VolumesSection, { config, q, ops, seasonalityPresets })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Arrival pattern" }) }),
-        /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-          /* @__PURE__ */ jsxs15("div", { className: "rowflex", children: [
-            /* @__PURE__ */ jsx16(ApplyPreset, { presets: intradayPresets, onApply: (p) => ops.patchQueue(q.id, ["profile"], [...p.curve]), label: "Apply arrival pattern" }),
-            /* @__PURE__ */ jsx16("span", { className: "note", style: { padding: "6px 10px" }, children: "Create and edit patterns in Settings \u2192 Arrival patterns. Hand-tune below." })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Arrival pattern" }) }),
+        /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+          /* @__PURE__ */ jsxs16("div", { className: "rowflex", children: [
+            /* @__PURE__ */ jsx17(ApplyPreset, { presets: intradayPresets, onApply: (p) => {
+              ops.patchQueue(q.id, ["profile"], [...p.curve]);
+              ops.patchQueue(q.id, ["arrivalPresetId"], p.id);
+            }, label: "Apply arrival pattern" }),
+            /* @__PURE__ */ jsx17("span", { className: "note", style: { padding: "6px 10px" }, children: "Apply a pattern to link it live; editing that pattern in Settings re-simulates this queue. Hand-tuning below unlinks it." })
           ] }),
-          /* @__PURE__ */ jsx16(IntradaySliders, { curve: q.profile, eng, onChange: (next) => ops.patchQueue(q.id, ["profile"], next) })
+          /* @__PURE__ */ jsx17(IntradaySliders, { curve: q.profile, eng, onChange: (next) => {
+            ops.patchQueue(q.id, ["profile"], next);
+            ops.patchQueue(q.id, ["arrivalPresetId"], null);
+          } })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16(InheritHeader, { q, section: "workforce", label: "Workforce", ops, source: chLabel + " template" }) }),
-        /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-          /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(NumField, { label: "Agent cost", unit: "/mo", value: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? Math.round(q.agentCost / 12) : 0, onChange: (v) => {
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17(InheritHeader, { q, section: "workforce", label: "Workforce", ops, source: chLabel + " template" }) }),
+        /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+          /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(NumField, { label: "Agent cost", unit: "/mo", value: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? Math.round(q.agentCost / 12) : 0, onChange: (v) => {
               ops.patchQueue(q.id, ["agentCostMonthly"], v);
               ops.patchQueue(q.id, ["agentCost"], v * 12);
             }, hint: "Fully-loaded monthly cost per agent. The engine works weekly (\xD7 12 \xF7 52)." }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Shrinkage", unit: "%", value: +(q.shrinkage * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["shrinkage"], v / 100), hint: "Paid time not on contacts \u2014 leave, sickness, meetings." }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Attrition", unit: "%/mo", value: +(wf.attrition * 100).toFixed(2), onChange: (v) => ops.patchQueue(q.id, ["wf", "attrition"], v / 100) })
+            /* @__PURE__ */ jsx17(NumField, { label: "Shrinkage", unit: "%", value: +(q.shrinkage * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["shrinkage"], v / 100), hint: "Paid time not on contacts \u2014 leave, sickness, meetings." }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Attrition", unit: "%/mo", value: +(wf.attrition * 100).toFixed(2), onChange: (v) => ops.patchQueue(q.id, ["wf", "attrition"], v / 100) })
           ] }),
-          /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(NumField, { label: "Req-to-start", unit: "wk", value: wf.reqToStart, onChange: (v) => ops.patchQueue(q.id, ["wf", "reqToStart"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Training", unit: "wk", value: wf.trainingWeeks, onChange: (v) => ops.patchQueue(q.id, ["wf", "trainingWeeks"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Burnout occ.", unit: "%", value: +(burn.occThreshold * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["burn", "occThreshold"], v / 100) })
+          /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(NumField, { label: "Req-to-start", unit: "wk", value: wf.reqToStart, onChange: (v) => ops.patchQueue(q.id, ["wf", "reqToStart"], v) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Training", unit: "wk", value: wf.trainingWeeks, onChange: (v) => ops.patchQueue(q.id, ["wf", "trainingWeeks"], v) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Burnout occ.", unit: "%", value: +(burn.occThreshold * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["burn", "occThreshold"], v / 100) })
           ] }),
-          /* @__PURE__ */ jsxs15("div", { style: { marginTop: 8 }, children: [
-            /* @__PURE__ */ jsxs15("div", { className: "lab", style: { marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }, children: [
+          /* @__PURE__ */ jsxs16("div", { style: { marginTop: 8 }, children: [
+            /* @__PURE__ */ jsxs16("div", { className: "lab", style: { marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }, children: [
               "Manual hires (manual strategy) ",
-              /* @__PURE__ */ jsx16("span", { className: "spacer" }),
-              /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm", onClick: () => ops.addHire(q.id), disabled: unmanned, children: "+ Add hire" })
+              /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+              /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm", onClick: () => ops.addHire(q.id), disabled: unmanned, children: "+ Add hire" })
             ] }),
-            (wf.hires || []).length === 0 ? /* @__PURE__ */ jsx16("p", { className: "note", children: "No manual hires." }) : /* @__PURE__ */ jsx16("div", { className: "rows", children: wf.hires.map((h, hi) => /* @__PURE__ */ jsxs15("div", { className: "rowflex", children: [
-              /* @__PURE__ */ jsx16("div", { style: { width: 120 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Week", value: h.week + 1, min: 1, onChange: (v) => ops.patchHire(q.id, hi, "week", Math.max(0, v - 1)) }) }),
-              /* @__PURE__ */ jsx16("div", { style: { width: 120 }, children: /* @__PURE__ */ jsx16(NumField, { label: "Heads", value: h.heads, onChange: (v) => ops.patchHire(q.id, hi, "heads", v) }) }),
-              /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm danger", style: { alignSelf: "flex-end" }, onClick: () => ops.deleteHire(q.id, hi), children: "Remove" })
+            (wf.hires || []).length === 0 ? /* @__PURE__ */ jsx17("p", { className: "note", children: "No manual hires." }) : /* @__PURE__ */ jsx17("div", { className: "rows", children: wf.hires.map((h, hi) => /* @__PURE__ */ jsxs16("div", { className: "rowflex", children: [
+              /* @__PURE__ */ jsx17("div", { style: { width: 120 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Week", value: h.week + 1, min: 1, onChange: (v) => ops.patchHire(q.id, hi, "week", Math.max(0, v - 1)) }) }),
+              /* @__PURE__ */ jsx17("div", { style: { width: 120 }, children: /* @__PURE__ */ jsx17(NumField, { label: "Heads", value: h.heads, onChange: (v) => ops.patchHire(q.id, hi, "heads", v) }) }),
+              /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", style: { alignSelf: "flex-end" }, onClick: () => ops.deleteHire(q.id, hi), children: "Remove" })
             ] }, hi)) })
           ] })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16(InheritHeader, { q, section: "sla", label: "SLA", ops, source: chLabel + " template" }) }),
-        /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-          q.type === "voice" ? /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(NumField, { label: "ASA target", unit: "s", value: q.asaTarget, onChange: (v) => ops.patchQueue(q.id, ["asaTarget"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Max abandon", unit: "%", value: +(q.maxAbandon * 100).toFixed(2), onChange: (v) => ops.patchQueue(q.id, ["maxAbandon"], v / 100) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Patience", unit: "s", value: q.patience, onChange: (v) => ops.patchQueue(q.id, ["patience"], v), hint: "Average seconds a caller waits before hanging up \u2014 drives abandonment; behaviour, not a target." })
-          ] }) : workflow ? /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(NumField, { label: "SLA within", unit: "h", value: q.workflowSlaHours != null ? q.workflowSlaHours : 24, onChange: (v) => ops.patchQueue(q.id, ["workflowSlaHours"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "SLA target", unit: "%", value: +((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
-          ] }) : /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17(InheritHeader, { q, section: "sla", label: "SLA", ops, source: chLabel + " template" }) }),
+        /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+          q.type === "voice" ? /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(NumField, { label: "ASA target", unit: "s", value: q.asaTarget, onChange: (v) => ops.patchQueue(q.id, ["asaTarget"], v) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Max abandon", unit: "%", value: +(q.maxAbandon * 100).toFixed(2), onChange: (v) => ops.patchQueue(q.id, ["maxAbandon"], v / 100) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Patience", unit: "s", value: q.patience, onChange: (v) => ops.patchQueue(q.id, ["patience"], v), hint: "Average seconds a caller waits before hanging up \u2014 drives abandonment; behaviour, not a target." })
+          ] }) : workflow ? /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "h", value: q.workflowSlaHours != null ? q.workflowSlaHours : 24, onChange: (v) => ops.patchQueue(q.id, ["workflowSlaHours"], v), id: "q-sla-hours-" + q.id }),
+            /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
+          ] }) : /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v), id: "q-concurrency-" + q.id }),
+            /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
           ] }),
-          /* @__PURE__ */ jsx16("div", { className: "fieldrow", style: { maxWidth: 220 }, children: /* @__PURE__ */ jsx16(NumField, { label: "SLA attainment target", unit: "%", value: +((q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["slaAttainmentTarget"], v / 100), hint: "Share of weeks that must hold SLA for the Business box to read green." }) })
+          /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 220 }, children: /* @__PURE__ */ jsx17(NumField, { label: "SLA attainment target", unit: "%", value: +((q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["slaAttainmentTarget"], v / 100), hint: "Share of weeks that must hold SLA for the Business box to read green." }) })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Knock-on" }) }),
-        /* @__PURE__ */ jsx16("div", { className: "acc-b", children: /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx16(NumField, { label: "Repeat contacts", unit: "%", value: +(((q.knock || {}).repeatPct || 0) * 100).toFixed(0), onChange: (v) => ops.patchKnock(q.id, "repeatPct", v / 100), hint: "Share of failed contacts that retry THIS queue next day.", "data-testid": "knock-repeat" }),
-          /* @__PURE__ */ jsx16(NumField, { label: "Converts to calls", unit: "%", value: +(((q.knock || {}).convertPct || 0) * 100).toFixed(0), onChange: (v) => ops.patchKnock(q.id, "convertPct", v / 100), hint: "Share of failed contacts that turn into a call on the target voice queue." }),
-          /* @__PURE__ */ jsx16(
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Knock-on" }) }),
+        /* @__PURE__ */ jsx17("div", { className: "acc-b", children: /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx17(NumField, { label: "Repeat contacts", unit: "%", value: +(((q.knock || {}).repeatPct || 0) * 100).toFixed(0), onChange: (v) => ops.patchKnock(q.id, "repeatPct", v / 100), hint: "Share of failed contacts that retry THIS queue next day.", "data-testid": "knock-repeat" }),
+          /* @__PURE__ */ jsx17(NumField, { label: "Converts to calls", unit: "%", value: +(((q.knock || {}).convertPct || 0) * 100).toFixed(0), onChange: (v) => ops.patchKnock(q.id, "convertPct", v / 100), hint: "Share of failed contacts that turn into a call on the target voice queue." }),
+          /* @__PURE__ */ jsx17(
             SelectField,
             {
               label: "Call queue",
@@ -5884,59 +6139,70 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
           )
         ] }) })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Sharing" }) }),
-        /* @__PURE__ */ jsx16("div", { className: "acc-b", children: /* @__PURE__ */ jsx16(SharingEditor, { config, q, ops }) })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Sharing" }) }),
+        /* @__PURE__ */ jsx17("div", { className: "acc-b", children: /* @__PURE__ */ jsx17(SharingEditor, { config, q, ops }) })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", open: defaultOpen, children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Dependencies & mode" }) }),
-        /* @__PURE__ */ jsxs15("div", { className: "acc-b", children: [
-          /* @__PURE__ */ jsxs15("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx16(SelectField, { label: "Brand", value: q.brandId, onChange: (v) => ops.setQueueBrand(q.id, v), options: config.brands.map((b) => ({ value: b.id, label: b.name })), id: "queue-brand-" + q.id }),
-            /* @__PURE__ */ jsx16(SelectField, { label: "Resourcing", value: res, onChange: (v) => ops.setResourcing(q.id, v), options: RES_OPTIONS }),
-            /* @__PURE__ */ jsx16(NumField, { label: "Priority", value: q.priority, min: 1, onChange: (v) => ops.patchQueue(q.id, ["priority"], Math.max(1, Math.round(v))) }),
-            /* @__PURE__ */ jsx16(HCField, { value: q.fte, disabled: unmanned, onChange: (v) => ops.patchQueue(q.id, ["fte"], v) })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", open: defaultOpen, children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Dependencies & mode" }) }),
+        /* @__PURE__ */ jsxs16("div", { className: "acc-b", children: [
+          /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+            /* @__PURE__ */ jsx17(SelectField, { label: "Brand", value: q.brandId, onChange: (v) => ops.setQueueBrand(q.id, v), options: config.brands.map((b) => ({ value: b.id, label: b.name })), id: "queue-brand-" + q.id }),
+            /* @__PURE__ */ jsx17(SelectField, { label: "Resourcing", value: res, onChange: (v) => ops.setResourcing(q.id, v), options: RES_OPTIONS }),
+            /* @__PURE__ */ jsx17(NumField, { label: "Priority", value: q.priority, min: 1, onChange: (v) => ops.patchQueue(q.id, ["priority"], Math.max(1, Math.round(v))) }),
+            /* @__PURE__ */ jsx17(HCField, { value: q.fte, disabled: unmanned, onChange: (v) => ops.patchQueue(q.id, ["fte"], v) })
           ] }),
-          unmanned && /* @__PURE__ */ jsx16("span", { className: "badge red", children: "unmanned \u2014 served only via sharing / leverage" }),
-          res === "leveraged" && /* @__PURE__ */ jsx16("span", { className: "badge amber", children: "leveraged \u2014 donates to its targets" }),
-          /* @__PURE__ */ jsx16("hr", { className: "sep", style: { margin: "12px 0" } }),
-          /* @__PURE__ */ jsx16(SupportsEditor, { config, q, ops })
+          unmanned && /* @__PURE__ */ jsx17("span", { className: "badge red", children: "unmanned \u2014 served only via sharing / leverage" }),
+          res === "leveraged" && /* @__PURE__ */ jsx17("span", { className: "badge amber", children: "leveraged \u2014 donates to its targets" }),
+          /* @__PURE__ */ jsx17("hr", { className: "sep", style: { margin: "12px 0" } }),
+          /* @__PURE__ */ jsx17(SupportsEditor, { config, q, ops })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16(InheritHeader, { q, section: "seasonality", label: "Seasonality", ops, source: "system pattern" }) }),
-        /* @__PURE__ */ jsx16("div", { className: "acc-b", children: q.overrides && q.overrides.seasonality ? /* @__PURE__ */ jsxs15(Fragment6, { children: [
-          /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
-            /* @__PURE__ */ jsx16("button", { type: "button", className: "btn sm", onClick: () => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1)), children: "Initialise overlay" }),
-            /* @__PURE__ */ jsx16(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => ops.patchQueue(q.id, ["seasonal"], [...p.months]), label: "Apply seasonality pattern" }),
-            /* @__PURE__ */ jsx16("span", { className: "note", style: { padding: "6px 10px" }, children: "Multiplies on top of the system pattern." })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17(InheritHeader, { q, section: "seasonality", label: "Seasonality", ops, source: "system pattern" }) }),
+        /* @__PURE__ */ jsx17("div", { className: "acc-b", children: q.overrides && q.overrides.seasonality ? /* @__PURE__ */ jsxs16(Fragment8, { children: [
+          /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { marginBottom: 8 }, children: [
+            /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm", onClick: () => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1)), children: "Initialise overlay" }),
+            /* @__PURE__ */ jsx17(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => {
+              ops.patchQueue(q.id, ["seasonal"], [...p.months]);
+              ops.patchQueue(q.id, ["seasonalPresetId"], p.id);
+            }, label: "Apply seasonality pattern" }),
+            q.seasonalPresetId ? /* @__PURE__ */ jsx17("span", { className: "pill", "data-testid": "q-seasonal-linked-" + q.id, children: "linked" }) : /* @__PURE__ */ jsx17("span", { className: "note", style: { padding: "6px 10px" }, children: "Multiplies on top of the system pattern. Apply a pattern to link it live." })
           ] }),
-          Array.isArray(q.seasonal) && /* @__PURE__ */ jsx16("div", { className: "fieldrow", children: q.seasonal.map((v, i) => /* @__PURE__ */ jsx16("div", { style: { width: 72 }, children: /* @__PURE__ */ jsx16(NumField, { label: "M" + (i + 1), unit: "%", value: +(v * 100).toFixed(0), onChange: (nv) => {
+          Array.isArray(q.seasonal) && /* @__PURE__ */ jsx17("div", { className: "fieldrow", children: q.seasonal.map((v, i) => /* @__PURE__ */ jsx17("div", { style: { width: 72 }, children: /* @__PURE__ */ jsx17(NumField, { label: "M" + (i + 1), unit: "%", value: +(v * 100).toFixed(0), onChange: (nv) => {
             const n = q.seasonal.slice();
             n[i] = nv / 100;
             ops.patchQueue(q.id, ["seasonal"], n);
+            ops.patchQueue(q.id, ["seasonalPresetId"], null);
           } }) }, i)) })
-        ] }) : /* @__PURE__ */ jsx16("p", { className: "note", children: "Inheriting the system seasonality only. Turn on Override to add a queue overlay." }) })
+        ] }) : /* @__PURE__ */ jsx17("p", { className: "note", children: "Inheriting the system seasonality only. Turn on Override to add a queue overlay." }) })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Scenarios affecting this queue" }) }),
-        /* @__PURE__ */ jsx16("div", { className: "acc-b", children: /* @__PURE__ */ jsx16(ScenariosAffecting, { config, q }) })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Scenarios affecting this queue" }) }),
+        /* @__PURE__ */ jsx17("div", { className: "acc-b", children: /* @__PURE__ */ jsx17(ScenariosAffecting, { config, q }) })
       ] }),
-      /* @__PURE__ */ jsxs15("details", { className: "acc-sec", children: [
-        /* @__PURE__ */ jsx16("summary", { children: /* @__PURE__ */ jsx16("strong", { children: "Assumptions over time" }) }),
-        /* @__PURE__ */ jsx16("div", { className: "acc-b", children: /* @__PURE__ */ jsx16(AssumptionsMini, { sim, config, q }) })
+      /* @__PURE__ */ jsxs16("details", { className: "acc-sec", children: [
+        /* @__PURE__ */ jsx17("summary", { children: /* @__PURE__ */ jsx17("strong", { children: "Assumptions over time" }) }),
+        /* @__PURE__ */ jsx17("div", { className: "acc-b", children: /* @__PURE__ */ jsx17(AssumptionsMini, { sim, config, q }) })
       ] })
     ] })
   ] });
 }
 function SystemSeasonality({ config, ops, seasonalityPresets }) {
   const seas = config.seasonality;
-  return /* @__PURE__ */ jsxs15(Card, { title: "System seasonality", hint: "One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Each queue can layer its own overlay in its Seasonality section.", children: [
-    /* @__PURE__ */ jsxs15("div", { className: "rowflex", style: { marginBottom: 12 }, children: [
-      /* @__PURE__ */ jsx16(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => ops.patch(["seasonality", "system"], [...p.months]), label: "Apply seasonality pattern" }),
-      /* @__PURE__ */ jsx16("span", { className: "note", style: { padding: "6px 10px" }, children: "Create and edit patterns in Settings \u2192 Seasonality patterns." })
+  const usingPreset = seas.systemPresetId ? seasonalityPresets.find((p) => p.id === seas.systemPresetId) : null;
+  return /* @__PURE__ */ jsxs16(Card, { title: "System seasonality", hint: "One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Apply a pattern to link it live \u2014 editing that pattern in Settings then re-simulates every queue. Hand-editing a month unlinks it.", children: [
+    /* @__PURE__ */ jsxs16("div", { className: "rowflex", style: { marginBottom: 12 }, children: [
+      /* @__PURE__ */ jsx17(ApplyPreset, { presets: seasonalityPresets, onApply: (p) => {
+        ops.patch(["seasonality", "system"], [...p.months]);
+        ops.patch(["seasonality", "systemPresetId"], p.id);
+      }, label: "Apply seasonality pattern", id: "system-seasonality-apply" }),
+      usingPreset ? /* @__PURE__ */ jsxs16("span", { className: "pill", "data-testid": "system-seasonality-linked", children: [
+        "Linked \xB7 ",
+        usingPreset.name
+      ] }) : /* @__PURE__ */ jsx17("span", { className: "note", style: { padding: "6px 10px" }, children: "Create and edit patterns in Settings \u2192 Seasonality patterns." })
     ] }),
-    /* @__PURE__ */ jsx16("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx16("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx16(
+    /* @__PURE__ */ jsx17("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx17("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx17(
       NumField,
       {
         label: m,
@@ -5946,6 +6212,7 @@ function SystemSeasonality({ config, ops, seasonalityPresets }) {
           const n = seas.system.slice();
           n[i] = v / 100;
           ops.patch(["seasonality", "system"], n);
+          ops.patch(["seasonality", "systemPresetId"], null);
         }
       }
     ) }, m)) })
@@ -5956,55 +6223,55 @@ function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, s
   const brandSection = (b) => {
     const qs = config.queues.filter((q) => q.brandId === b.id);
     const byCh = (ch) => qs.filter((q) => (0, import_engine8.channelOf)(q) === ch);
-    const chBlock = (label, list) => list.length ? /* @__PURE__ */ jsxs15("div", { children: [
-      /* @__PURE__ */ jsxs15("div", { className: "section-title", style: { marginTop: 6 }, children: [
+    const chBlock = (label, list) => list.length ? /* @__PURE__ */ jsxs16("div", { children: [
+      /* @__PURE__ */ jsxs16("div", { className: "section-title", style: { marginTop: 6 }, children: [
         label,
         " ",
-        /* @__PURE__ */ jsx16("span", { className: "pill", children: list.length })
+        /* @__PURE__ */ jsx17("span", { className: "pill", children: list.length })
       ] }),
-      /* @__PURE__ */ jsx16("div", { className: "rows", children: list.map((q) => {
+      /* @__PURE__ */ jsx17("div", { className: "rows", children: list.map((q) => {
         const open = first;
         first = false;
-        return /* @__PURE__ */ jsx16(QueueCard2, { config, q, ops, sim, intradayPresets, seasonalityPresets, defaultOpen: open }, q.id);
+        return /* @__PURE__ */ jsx17(QueueCard2, { config, q, ops, sim, intradayPresets, seasonalityPresets, defaultOpen: open }, q.id);
       }) })
     ] }, label) : null;
-    return /* @__PURE__ */ jsxs15("div", { className: "grid", style: { gap: 8 }, children: [
-      /* @__PURE__ */ jsxs15("div", { className: "section-title", style: { fontSize: 15, color: "var(--ink)" }, children: [
+    return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 8 }, "data-testid": "brand-section-" + b.id, children: [
+      /* @__PURE__ */ jsxs16("div", { className: "section-title", style: { fontSize: 15, color: "var(--ink)" }, children: [
         "Brand \xB7 ",
         b.name,
         " ",
-        /* @__PURE__ */ jsxs15("span", { className: "pill", children: [
+        /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
           qs.length,
           " queue(s)"
         ] })
       ] }),
       ["voice", "digital", "support"].map((ch) => chBlock(ch.charAt(0).toUpperCase() + ch.slice(1), byCh(ch))),
-      qs.length === 0 && /* @__PURE__ */ jsx16("p", { className: "note", children: "No queues in this brand yet." })
+      qs.length === 0 && /* @__PURE__ */ jsx17("p", { className: "note", children: "No queues in this brand yet." })
     ] }, b.id);
   };
-  return /* @__PURE__ */ jsxs15("div", { className: "grid", style: { gap: 18 }, children: [
-    /* @__PURE__ */ jsxs15("div", { className: "btnbar", children: [
-      /* @__PURE__ */ jsx16("button", { type: "button", className: "btn primary", onClick: () => ops.addQueue(), children: "+ Add queue" }),
-      /* @__PURE__ */ jsxs15("span", { className: "note", style: { padding: "6px 10px" }, children: [
+  return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 18 }, children: [
+    /* @__PURE__ */ jsxs16("div", { className: "btnbar", children: [
+      /* @__PURE__ */ jsx17("button", { type: "button", className: "btn primary", onClick: () => ops.addQueue(), children: "+ Add queue" }),
+      /* @__PURE__ */ jsxs16("span", { className: "note", style: { padding: "6px 10px" }, children: [
         config.queues.length,
         " queue(s). New queues default to Voice / the first brand \u2014 change in the card. Create brands in Settings."
       ] })
     ] }),
-    /* @__PURE__ */ jsx16(DependencyView, { config, sim }),
-    /* @__PURE__ */ jsx16(SystemSeasonality, { config, ops, seasonalityPresets }),
+    /* @__PURE__ */ jsx17(DependencyView, { config, sim }),
+    /* @__PURE__ */ jsx17(SystemSeasonality, { config, ops, seasonalityPresets }),
     config.brands.map((b) => brandSection(b))
   ] });
 }
 
 // ui/editors/ScenariosEditor.jsx
 import { useState as useState15 } from "react";
-import { Fragment as Fragment7, jsx as jsx17, jsxs as jsxs16 } from "react/jsx-runtime";
+import { Fragment as Fragment9, jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
 var CHANNELS = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
 function WeekGrid({ horizon, value, onToggle, render }) {
-  return /* @__PURE__ */ jsx17("div", { className: "rowflex", style: { gap: 4, flexWrap: "wrap" }, "data-testid": "week-grid", children: Array.from({ length: horizon }, (_, w) => {
+  return /* @__PURE__ */ jsx18("div", { className: "rowflex", style: { gap: 4, flexWrap: "wrap" }, "data-testid": "week-grid", children: Array.from({ length: horizon }, (_, w) => {
     const on = value(w);
-    return /* @__PURE__ */ jsxs16("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }, children: [
-      /* @__PURE__ */ jsx17(
+    return /* @__PURE__ */ jsxs17("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }, children: [
+      /* @__PURE__ */ jsx18(
         "button",
         {
           type: "button",
@@ -6024,9 +6291,9 @@ function WeekGrid({ horizon, value, onToggle, render }) {
 function FactorParams({ s, ti, ops, horizon }) {
   const p = s.p || {};
   const set = (k, v) => ops.patchScenario(ti, ["p", k], v);
-  return /* @__PURE__ */ jsxs16(Fragment7, { children: [
-    /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
-      /* @__PURE__ */ jsx17(
+  return /* @__PURE__ */ jsxs17(Fragment9, { children: [
+    /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
+      /* @__PURE__ */ jsx18(
         SelectField,
         {
           label: "Tag",
@@ -6035,7 +6302,7 @@ function FactorParams({ s, ti, ops, horizon }) {
           options: ["growth", "launch", "digitization", "p1", "custom"].map((v) => ({ value: v, label: v }))
         }
       ),
-      /* @__PURE__ */ jsx17(
+      /* @__PURE__ */ jsx18(
         SelectField,
         {
           label: "Parameter",
@@ -6044,7 +6311,7 @@ function FactorParams({ s, ti, ops, horizon }) {
           options: [{ value: "volume", label: "Volume" }, { value: "aht", label: "AHT" }, { value: "sla", label: "SLA" }, { value: "profileShares", label: "Profile shares" }, { value: "people", label: "People" }]
         }
       ),
-      /* @__PURE__ */ jsx17(
+      /* @__PURE__ */ jsx18(
         SelectField,
         {
           label: "Mechanism",
@@ -6053,7 +6320,7 @@ function FactorParams({ s, ti, ops, horizon }) {
           options: [{ value: "step", label: "Step" }, { value: "growthRate", label: "Growth rate" }, { value: "manualSeries", label: "Manual series" }]
         }
       ),
-      /* @__PURE__ */ jsx17(
+      /* @__PURE__ */ jsx18(
         SelectField,
         {
           label: "Granularity",
@@ -6063,13 +6330,13 @@ function FactorParams({ s, ti, ops, horizon }) {
         }
       )
     ] }),
-    /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
-      /* @__PURE__ */ jsx17(NumField, { label: "Start week", value: s.startWeek + 1, min: 1, onChange: (v) => ops.patchScenario(ti, ["startWeek"], Math.max(0, v - 1)) }),
-      /* @__PURE__ */ jsx17(NumField, { label: "Stop week", value: s.stopWeek == null ? "" : s.stopWeek + 1, onChange: (v) => ops.patchScenario(ti, ["stopWeek"], v ? v - 1 : null), hint: "Blank = runs to the horizon." })
+    /* @__PURE__ */ jsxs17("div", { className: "fieldrow", children: [
+      /* @__PURE__ */ jsx18(NumField, { label: "Start week", value: s.startWeek + 1, min: 1, onChange: (v) => ops.patchScenario(ti, ["startWeek"], Math.max(0, v - 1)) }),
+      /* @__PURE__ */ jsx18(NumField, { label: "Stop week", value: s.stopWeek == null ? "" : s.stopWeek + 1, onChange: (v) => ops.patchScenario(ti, ["stopWeek"], v ? v - 1 : null), hint: "Blank = runs to the horizon." })
     ] }),
-    s.mechanism === "step" && s.parameter !== "people" && s.parameter !== "profileShares" && /* @__PURE__ */ jsx17(NumField, { label: "Step value", unit: "%", value: +((p.value || 0) * 100).toFixed(1), onChange: (v) => set("value", v / 100) }),
-    s.mechanism === "growthRate" && /* @__PURE__ */ jsx17(NumField, { label: "Growth rate", unit: "%/mo", value: +((p.rate || 0) * 100).toFixed(1), onChange: (v) => set("rate", v / 100) }),
-    s.parameter === "people" && /* @__PURE__ */ jsx17(
+    s.mechanism === "step" && s.parameter !== "people" && s.parameter !== "profileShares" && /* @__PURE__ */ jsx18(NumField, { label: "Step value", unit: "%", value: +((p.value || 0) * 100).toFixed(1), onChange: (v) => set("value", v / 100) }),
+    s.mechanism === "growthRate" && /* @__PURE__ */ jsx18(NumField, { label: "Growth rate", unit: "%/mo", value: +((p.rate || 0) * 100).toFixed(1), onChange: (v) => set("rate", v / 100) }),
+    s.parameter === "people" && /* @__PURE__ */ jsx18(
       SelectField,
       {
         label: "People change",
@@ -6078,18 +6345,18 @@ function FactorParams({ s, ti, ops, horizon }) {
         options: [{ value: "attritionDelta", label: "Attrition delta" }, { value: "hiringFreeze", label: "Hiring freeze" }, { value: "trainingShrinkage", label: "Training shrinkage" }, { value: "headcountStep", label: "Headcount step" }]
       }
     ),
-    s.mechanism === "manualSeries" && /* @__PURE__ */ jsxs16("div", { style: { marginTop: 8 }, children: [
-      /* @__PURE__ */ jsxs16("div", { className: "lab", style: { marginBottom: 6 }, children: [
+    s.mechanism === "manualSeries" && /* @__PURE__ */ jsxs17("div", { style: { marginTop: 8 }, children: [
+      /* @__PURE__ */ jsxs17("div", { className: "lab", style: { marginBottom: 6 }, children: [
         "Manual series \u2014 click a ",
         s.granularity || "week",
         " to add it, then set its value"
       ] }),
-      /* @__PURE__ */ jsx17(WeekGrid, { horizon, value: (w) => (p.series || {})[w] != null, onToggle: (w) => {
+      /* @__PURE__ */ jsx18(WeekGrid, { horizon, value: (w) => (p.series || {})[w] != null, onToggle: (w) => {
         const ser = { ...p.series || {} };
         if (ser[w] != null) delete ser[w];
         else ser[w] = 0.1;
         set("series", ser);
-      }, render: (w) => /* @__PURE__ */ jsx17(
+      }, render: (w) => /* @__PURE__ */ jsx18(
         "input",
         {
           type: "number",
@@ -6105,63 +6372,63 @@ function FactorParams({ s, ti, ops, horizon }) {
 }
 function ScopeEditor({ config, group, ops }) {
   const scope = group.scope || {};
-  const chip = (kind, id, label, on) => /* @__PURE__ */ jsxs16("label", { className: "switch", children: [
-    /* @__PURE__ */ jsx17("input", { type: "checkbox", checked: on, onChange: (e) => ops.toggleGroupScopeTarget(group.id, kind, id, e.target.checked), "data-testid": "scope-" + kind + "-" + id }),
-    /* @__PURE__ */ jsx17("span", { className: "track", "aria-hidden": "true" }),
-    /* @__PURE__ */ jsx17("span", { children: label })
+  const chip = (kind, id, label, on) => /* @__PURE__ */ jsxs17("label", { className: "switch", children: [
+    /* @__PURE__ */ jsx18("input", { type: "checkbox", checked: on, onChange: (e) => ops.toggleGroupScopeTarget(group.id, kind, id, e.target.checked), "data-testid": "scope-" + kind + "-" + id }),
+    /* @__PURE__ */ jsx18("span", { className: "track", "aria-hidden": "true" }),
+    /* @__PURE__ */ jsx18("span", { children: label })
   ] }, kind + id);
   const anyTarget = (scope.brandIds || []).length || (scope.channels || []).length || (scope.queueIds || []).length;
-  return /* @__PURE__ */ jsxs16("div", { children: [
-    /* @__PURE__ */ jsxs16("div", { className: "lab", style: { marginBottom: 6 }, children: [
+  return /* @__PURE__ */ jsxs17("div", { children: [
+    /* @__PURE__ */ jsxs17("div", { className: "lab", style: { marginBottom: 6 }, children: [
       "Targets ",
-      /* @__PURE__ */ jsx17(Hint, { text: "Brands, channels or queues this group's factors apply to. Empty = the whole operation." })
+      /* @__PURE__ */ jsx18(Hint, { text: "Brands, channels or queues this group's factors apply to. Empty = the whole operation." })
     ] }),
-    /* @__PURE__ */ jsx17("div", { className: "rowflex", style: { flexWrap: "wrap", marginBottom: 6 }, children: (config.brands || []).map((b) => chip("brand", b.id, "Brand: " + b.name, (scope.brandIds || []).includes(b.id))) }),
-    /* @__PURE__ */ jsx17("div", { className: "rowflex", style: { flexWrap: "wrap", marginBottom: 6 }, children: CHANNELS.map((c) => chip("channel", c.key, c.label, (scope.channels || []).includes(c.key))) }),
-    /* @__PURE__ */ jsx17("div", { className: "rowflex", style: { flexWrap: "wrap" }, children: config.queues.map((q) => chip("queue", q.id, q.name, (scope.queueIds || []).includes(q.id))) }),
-    !anyTarget && /* @__PURE__ */ jsx17("p", { className: "note", style: { marginTop: 6 }, children: "No targets \u2014 this group applies to the whole operation." })
+    /* @__PURE__ */ jsx18("div", { className: "rowflex", style: { flexWrap: "wrap", marginBottom: 6 }, children: (config.brands || []).map((b) => chip("brand", b.id, "Brand: " + b.name, (scope.brandIds || []).includes(b.id))) }),
+    /* @__PURE__ */ jsx18("div", { className: "rowflex", style: { flexWrap: "wrap", marginBottom: 6 }, children: CHANNELS.map((c) => chip("channel", c.key, c.label, (scope.channels || []).includes(c.key))) }),
+    /* @__PURE__ */ jsx18("div", { className: "rowflex", style: { flexWrap: "wrap" }, children: config.queues.map((q) => chip("queue", q.id, q.name, (scope.queueIds || []).includes(q.id))) }),
+    !anyTarget && /* @__PURE__ */ jsx18("p", { className: "note", style: { marginTop: 6 }, children: "No targets \u2014 this group applies to the whole operation." })
   ] });
 }
 function GroupCard({ config, group, ops, horizon }) {
   const factorIds = Array.isArray(group.scenarioIds) ? group.scenarioIds : null;
   const editable = !group.builtin && factorIds != null;
   const factors = (factorIds || []).map((id) => config.scenarios.findIndex((s) => s.id === id)).filter((i) => i >= 0);
-  return /* @__PURE__ */ jsxs16("div", { className: "erow", "data-testid": "group-card", children: [
-    /* @__PURE__ */ jsxs16("div", { className: "erow-h", children: [
-      group.builtin ? /* @__PURE__ */ jsx17("span", { className: "pill", children: "built-in" }) : /* @__PURE__ */ jsx17("span", { className: "tag soft", children: "group" }),
-      editable ? /* @__PURE__ */ jsx17("input", { type: "text", className: "inp", style: { maxWidth: 240 }, value: group.name, "aria-label": "Group name", onChange: (e) => ops.renameGroup(group.id, e.target.value) }) : /* @__PURE__ */ jsx17("strong", { children: group.name }),
-      /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
+  return /* @__PURE__ */ jsxs17("div", { className: "erow", "data-testid": "group-card", children: [
+    /* @__PURE__ */ jsxs17("div", { className: "erow-h", children: [
+      group.builtin ? /* @__PURE__ */ jsx18("span", { className: "pill", children: "built-in" }) : /* @__PURE__ */ jsx18("span", { className: "tag soft", children: "group" }),
+      editable ? /* @__PURE__ */ jsx18("input", { type: "text", className: "inp", style: { maxWidth: 240 }, value: group.name, "aria-label": "Group name", onChange: (e) => ops.renameGroup(group.id, e.target.value) }) : /* @__PURE__ */ jsx18("strong", { children: group.name }),
+      /* @__PURE__ */ jsxs17("span", { className: "pill", children: [
         groupScenarioIds(config, group.id).length,
         " factor(s)"
       ] }),
-      /* @__PURE__ */ jsx17("span", { className: "spacer" }),
-      editable && /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm primary", onClick: () => ops.addFactor(group.id), "data-testid": "add-factor-" + group.id, children: "+ Add factor" }),
-      !group.builtin && /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteGroup(group.id), children: "Delete" })
+      /* @__PURE__ */ jsx18("span", { className: "spacer" }),
+      editable && /* @__PURE__ */ jsx18("button", { type: "button", className: "btn sm primary", onClick: () => ops.addFactor(group.id), "data-testid": "add-factor-" + group.id, children: "+ Add factor" }),
+      !group.builtin && /* @__PURE__ */ jsx18("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteGroup(group.id), children: "Delete" })
     ] }),
-    /* @__PURE__ */ jsxs16("div", { className: "erow-b", children: [
-      !factorIds && /* @__PURE__ */ jsx17("p", { className: "note", children: "Built-in group \u2014 tracks the live enabled set of every group's factors." }),
-      editable && /* @__PURE__ */ jsxs16(Fragment7, { children: [
-        /* @__PURE__ */ jsx17(ScopeEditor, { config, group, ops }),
-        /* @__PURE__ */ jsx17("hr", { className: "sep", style: { margin: "12px 0" } }),
-        /* @__PURE__ */ jsxs16("div", { className: "rows", "data-testid": "scenario-rows", children: [
+    /* @__PURE__ */ jsxs17("div", { className: "erow-b", children: [
+      !factorIds && /* @__PURE__ */ jsx18("p", { className: "note", children: "Built-in group \u2014 tracks the live enabled set of every group's factors." }),
+      editable && /* @__PURE__ */ jsxs17(Fragment9, { children: [
+        /* @__PURE__ */ jsx18(ScopeEditor, { config, group, ops }),
+        /* @__PURE__ */ jsx18("hr", { className: "sep", style: { margin: "12px 0" } }),
+        /* @__PURE__ */ jsxs17("div", { className: "rows", "data-testid": "scenario-rows", children: [
           factors.map((ti) => {
             const s = config.scenarios[ti];
-            return /* @__PURE__ */ jsxs16("div", { className: "erow", children: [
-              /* @__PURE__ */ jsxs16("div", { className: "erow-h", children: [
-                /* @__PURE__ */ jsx17(Toggle, { checked: s.enabled, onChange: (v) => ops.patchScenario(ti, ["enabled"], v) }),
-                /* @__PURE__ */ jsx17("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: s.name, "aria-label": "Factor name", onChange: (e) => ops.patchScenario(ti, ["name"], e.target.value) }),
-                /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
+            return /* @__PURE__ */ jsxs17("div", { className: "erow", children: [
+              /* @__PURE__ */ jsxs17("div", { className: "erow-h", children: [
+                /* @__PURE__ */ jsx18(Toggle, { checked: s.enabled, onChange: (v) => ops.patchScenario(ti, ["enabled"], v) }),
+                /* @__PURE__ */ jsx18("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: s.name, "aria-label": "Factor name", onChange: (e) => ops.patchScenario(ti, ["name"], e.target.value) }),
+                /* @__PURE__ */ jsxs17("span", { className: "pill", children: [
                   s.parameter,
                   " \xB7 ",
                   s.mechanism
                 ] }),
-                /* @__PURE__ */ jsx17("span", { className: "spacer" }),
-                /* @__PURE__ */ jsx17("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteScenario(s.id), children: "Remove" })
+                /* @__PURE__ */ jsx18("span", { className: "spacer" }),
+                /* @__PURE__ */ jsx18("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteScenario(s.id), children: "Remove" })
               ] }),
-              /* @__PURE__ */ jsx17("div", { className: "erow-b", children: /* @__PURE__ */ jsx17(FactorParams, { s, ti, ops, horizon }) })
+              /* @__PURE__ */ jsx18("div", { className: "erow-b", children: /* @__PURE__ */ jsx18(FactorParams, { s, ti, ops, horizon }) })
             ] }, s.id);
           }),
-          factors.length === 0 && /* @__PURE__ */ jsx17("p", { className: "note", children: "No factors yet. Add one above." })
+          factors.length === 0 && /* @__PURE__ */ jsx18("p", { className: "note", children: "No factors yet. Add one above." })
         ] })
       ] })
     ] })
@@ -6170,7 +6437,7 @@ function GroupCard({ config, group, ops, horizon }) {
 function ParameterTimeline({ config }) {
   const N = config.engine.horizonWeeks;
   const enabled = config.scenarios.filter((s) => s.enabled);
-  if (!enabled.length) return /* @__PURE__ */ jsx17("p", { className: "note", children: "No factors enabled \u2014 nothing in force." });
+  if (!enabled.length) return /* @__PURE__ */ jsx18("p", { className: "note", children: "No factors enabled \u2014 nothing in force." });
   const fires = (s, w) => {
     const start = s.startWeek || 0;
     const stop = s.stopWeek != null ? s.stopWeek : s.p && s.p.stopWeek != null ? s.p.stopWeek : null;
@@ -6179,48 +6446,52 @@ function ParameterTimeline({ config }) {
     return true;
   };
   const weeks = Array.from({ length: Math.min(N, 52) }, (_, w) => w);
-  return /* @__PURE__ */ jsx17("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs16("table", { className: "data", "data-testid": "parameter-timeline", children: [
-    /* @__PURE__ */ jsx17("thead", { children: /* @__PURE__ */ jsxs16("tr", { children: [
-      /* @__PURE__ */ jsx17("th", { style: { textAlign: "left" }, children: "Factor" }),
-      weeks.filter((w) => w % 4 === 0).map((w) => /* @__PURE__ */ jsx17("th", { children: w + 1 }, w))
+  return /* @__PURE__ */ jsx18("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs17("table", { className: "data", "data-testid": "parameter-timeline", children: [
+    /* @__PURE__ */ jsx18("thead", { children: /* @__PURE__ */ jsxs17("tr", { children: [
+      /* @__PURE__ */ jsx18("th", { style: { textAlign: "left" }, children: "Factor" }),
+      weeks.filter((w) => w % 4 === 0).map((w) => /* @__PURE__ */ jsx18("th", { children: w + 1 }, w))
     ] }) }),
-    /* @__PURE__ */ jsx17("tbody", { children: enabled.map((s) => /* @__PURE__ */ jsxs16("tr", { children: [
-      /* @__PURE__ */ jsx17("td", { style: { textAlign: "left", fontWeight: 600 }, children: s.name }),
-      weeks.filter((w) => w % 4 === 0).map((w) => /* @__PURE__ */ jsx17("td", { className: fires(s, w) ? "st-green" : "", children: fires(s, w) ? "\u25CF" : "\xB7" }, w))
+    /* @__PURE__ */ jsx18("tbody", { children: enabled.map((s) => /* @__PURE__ */ jsxs17("tr", { children: [
+      /* @__PURE__ */ jsx18("td", { style: { textAlign: "left", fontWeight: 600 }, children: s.name }),
+      weeks.filter((w) => w % 4 === 0).map((w) => /* @__PURE__ */ jsx18("td", { className: fires(s, w) ? "st-green" : "", children: fires(s, w) ? "\u25CF" : "\xB7" }, w))
     ] }, s.id)) })
   ] }) });
 }
 function ScenariosEditor({ config, ops }) {
   const [name, setName] = useState15("");
   const horizon = config.engine.horizonWeeks;
-  return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 14 }, children: [
-    /* @__PURE__ */ jsxs16("div", { className: "btnbar", children: [
-      /* @__PURE__ */ jsx17("input", { type: "text", className: "inp", style: { maxWidth: 220 }, placeholder: "new scenario group name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "group-name" }),
-      /* @__PURE__ */ jsx17("button", { type: "button", className: "btn primary", onClick: () => {
+  return /* @__PURE__ */ jsxs17("div", { className: "grid", style: { gap: 14 }, children: [
+    /* @__PURE__ */ jsxs17("div", { className: "btnbar", children: [
+      /* @__PURE__ */ jsx18("input", { type: "text", className: "inp", style: { maxWidth: 220 }, placeholder: "new scenario group name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "group-name" }),
+      /* @__PURE__ */ jsx18("button", { type: "button", className: "btn primary", onClick: () => {
         ops.addGroup(name.trim() || "New group", []);
         setName("");
       }, "data-testid": "add-group", children: "+ New scenario group" }),
-      /* @__PURE__ */ jsxs16("span", { className: "note", style: { padding: "6px 10px" }, children: [
+      /* @__PURE__ */ jsxs17("span", { className: "note", style: { padding: "6px 10px" }, children: [
         "A group scopes its factors to brands, channels or queues. ",
         config.groups.length,
         " group(s)."
       ] })
     ] }),
-    /* @__PURE__ */ jsx17("div", { className: "rows", "data-testid": "groups", children: (config.groups || []).map((g) => /* @__PURE__ */ jsx17(GroupCard, { config, group: g, ops, horizon }, g.id)) }),
-    /* @__PURE__ */ jsx17(Card, { title: "Parameter timeline", sub: "what is in force each week", hint: "Which enabled factors fire in each 4-weekly checkpoint across the horizon.", children: /* @__PURE__ */ jsx17(ParameterTimeline, { config }) })
+    /* @__PURE__ */ jsx18("div", { className: "rows", "data-testid": "groups", children: (config.groups || []).map((g) => /* @__PURE__ */ jsx18(GroupCard, { config, group: g, ops, horizon }, g.id)) }),
+    /* @__PURE__ */ jsx18(Card, { title: "Parameter timeline", sub: "what is in force each week", hint: "Which enabled factors fire in each 4-weekly checkpoint across the horizon.", children: /* @__PURE__ */ jsx18(ParameterTimeline, { config }) })
   ] });
 }
 
+// ui/editors/SettingsEditor.jsx
+import { useState as useState17 } from "react";
+
 // ui/editors/PresetLibrary.jsx
 import { useState as useState16 } from "react";
-import { jsx as jsx18, jsxs as jsxs17 } from "react/jsx-runtime";
-function MonthEditor({ months, onChange }) {
-  return /* @__PURE__ */ jsx18("div", { className: "fieldrow", children: MONTHS.map((m, i) => /* @__PURE__ */ jsx18("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx18(
+import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
+function MonthEditor({ months, onChange, testid }) {
+  return /* @__PURE__ */ jsx19("div", { className: "fieldrow", "data-testid": testid, children: MONTHS.map((m, i) => /* @__PURE__ */ jsx19("div", { style: { width: 82 }, children: /* @__PURE__ */ jsx19(
     NumField,
     {
       label: m,
       unit: "%",
       value: +(months[i] * 100).toFixed(0),
+      id: testid ? testid + "-" + i : void 0,
       onChange: (v) => {
         const n = months.slice();
         n[i] = v / 100;
@@ -6241,9 +6512,9 @@ function PresetLibrary({ kind, presets, setPresets, eng }) {
     setPresets((lib) => [...lib, make(name)]);
     setNewName("");
   };
-  return /* @__PURE__ */ jsxs17("div", { className: "preset-lib", children: [
-    /* @__PURE__ */ jsxs17("div", { className: "rowflex", children: [
-      /* @__PURE__ */ jsx18(
+  return /* @__PURE__ */ jsxs18("div", { className: "preset-lib", children: [
+    /* @__PURE__ */ jsxs18("div", { className: "rowflex", children: [
+      /* @__PURE__ */ jsx19(
         "input",
         {
           type: "text",
@@ -6255,59 +6526,115 @@ function PresetLibrary({ kind, presets, setPresets, eng }) {
           "data-testid": "preset-new-" + kind
         }
       ),
-      /* @__PURE__ */ jsx18("button", { type: "button", className: "btn sm primary", onClick: add, "data-testid": "preset-add-" + kind, children: "+ Add pattern" }),
-      /* @__PURE__ */ jsxs17("span", { className: "note", style: { padding: "6px 10px" }, children: [
+      /* @__PURE__ */ jsx19("button", { type: "button", className: "btn sm primary", onClick: add, "data-testid": "preset-add-" + kind, children: "+ Add pattern" }),
+      /* @__PURE__ */ jsxs18("span", { className: "note", style: { padding: "6px 10px" }, children: [
         presets.length,
-        " pattern(s). Built-ins are read-only. Apply patterns to the system or a queue on the Queues tab."
+        " pattern(s). Create, edit and delete freely \u2014 edits flow to any queue using the pattern on the next re-simulation. Apply patterns on the Queues tab."
       ] })
     ] }),
-    presets.map((p) => /* @__PURE__ */ jsxs17("div", { className: "preset-item", children: [
-      /* @__PURE__ */ jsxs17("div", { className: "preset-item-h", children: [
-        p.builtin ? /* @__PURE__ */ jsx18("strong", { children: p.name }) : /* @__PURE__ */ jsx18("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: p.name, "aria-label": "Pattern name", onChange: (e) => update(p.id, { name: e.target.value }) }),
-        /* @__PURE__ */ jsx18("span", { className: "pill", children: p.builtin ? "built-in" : "custom" }),
-        /* @__PURE__ */ jsx18("span", { className: "spacer" }),
-        !p.builtin && /* @__PURE__ */ jsx18("button", { type: "button", className: "btn sm danger", onClick: () => remove(p.id), "data-testid": "preset-del-" + p.id, children: "Delete" })
+    presets.map((p) => /* @__PURE__ */ jsxs18("div", { className: "preset-item", "data-testid": "preset-item-" + p.id, children: [
+      /* @__PURE__ */ jsxs18("div", { className: "preset-item-h", children: [
+        /* @__PURE__ */ jsx19("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: p.name, "aria-label": "Pattern name", onChange: (e) => update(p.id, { name: e.target.value }) }),
+        /* @__PURE__ */ jsx19("span", { className: "pill", children: p.builtin ? "built-in" : "custom" }),
+        /* @__PURE__ */ jsx19("span", { className: "spacer" }),
+        /* @__PURE__ */ jsx19("button", { type: "button", className: "btn sm danger", onClick: () => remove(p.id), "data-testid": "preset-del-" + p.id, children: "Delete" })
       ] }),
-      !p.builtin && (isSeason ? /* @__PURE__ */ jsx18(MonthEditor, { months: valuesOf(p), onChange: (next) => update(p.id, { months: next }) }) : /* @__PURE__ */ jsx18(IntradaySliders, { curve: valuesOf(p), eng, onChange: (next) => update(p.id, { curve: next }) }))
+      isSeason ? /* @__PURE__ */ jsx19(MonthEditor, { months: valuesOf(p), onChange: (next) => update(p.id, { months: next }), testid: "preset-months-" + p.id }) : /* @__PURE__ */ jsx19(IntradaySliders, { curve: valuesOf(p), eng, onChange: (next) => update(p.id, { curve: next }) })
     ] }, p.id))
   ] });
 }
 
 // ui/editors/SettingsEditor.jsx
 var import_engine9 = __toESM(require_engine());
-import { jsx as jsx19, jsxs as jsxs18 } from "react/jsx-runtime";
+import { Fragment as Fragment10, jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
 var CHANNELS2 = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
+var KIND_LABEL = { voice: "Voice \xB7 Erlang", digitalCustomer: "Digital Customer \xB7 live", digitalWorkflow: "Digital Workflow \xB7 backlog", serviceWorkflow: "Service Workflow \xB7 support" };
+function ChannelTemplateFields({ d, ops }) {
+  const t = d.template || {};
+  const T = (path, v) => ops.patchChannelDef(d.id, ["template", ...path], v);
+  return /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+    d.kind === "voice" && /* @__PURE__ */ jsxs19(Fragment10, { children: [
+      /* @__PURE__ */ jsx20(NumField, { label: "ASA target", unit: "s", value: t.asaTarget, onChange: (v) => T(["asaTarget"], v), id: "chdef-" + d.id + "-asa" }),
+      /* @__PURE__ */ jsx20(NumField, { label: "Max abandon", unit: "%", value: +((t.maxAbandon || 0) * 100).toFixed(1), onChange: (v) => T(["maxAbandon"], v / 100) }),
+      /* @__PURE__ */ jsx20(NumField, { label: "Patience", unit: "s", value: t.patience, onChange: (v) => T(["patience"], v) })
+    ] }),
+    d.kind === "digitalCustomer" && /* @__PURE__ */ jsxs19(Fragment10, { children: [
+      /* @__PURE__ */ jsx20(NumField, { label: "Concurrency", value: t.concurrency, onChange: (v) => T(["concurrency"], v), id: "chdef-" + d.id + "-concurrency" }),
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA within", unit: "min", value: t.digitalSlaMinutes, onChange: (v) => T(["digitalSlaMinutes"], v), id: "chdef-" + d.id + "-slamins" }),
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA target", unit: "%", value: +((t.digitalSlaPct || 0) * 100).toFixed(0), onChange: (v) => T(["digitalSlaPct"], v / 100) })
+    ] }),
+    d.kind === "digitalWorkflow" && /* @__PURE__ */ jsxs19(Fragment10, { children: [
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA within", unit: "h", value: t.workflowSlaHours, onChange: (v) => T(["workflowSlaHours"], v), id: "chdef-" + d.id + "-slahours" }),
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA target", unit: "%", value: +((t.workflowSlaPct || 0) * 100).toFixed(0), onChange: (v) => T(["workflowSlaPct"], v / 100) })
+    ] }),
+    d.kind === "serviceWorkflow" && /* @__PURE__ */ jsxs19(Fragment10, { children: [
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA within", unit: "days", value: Math.round((t.workflowSlaHours || 0) / 24), onChange: (v) => T(["workflowSlaHours"], (v || 0) * 24), id: "chdef-" + d.id + "-sladays" }),
+      /* @__PURE__ */ jsx20(NumField, { label: "SLA target", unit: "%", value: +((t.workflowSlaPct || 0) * 100).toFixed(0), onChange: (v) => T(["workflowSlaPct"], v / 100) })
+    ] })
+  ] });
+}
+function ChannelsManager({ config, ops }) {
+  const [name, setName] = useState17("");
+  const [preset, setPreset] = useState17("voice");
+  return /* @__PURE__ */ jsxs19(Card, { title: "Channels", hint: "Create a channel from a preset \u2014 its template carries the mechanics of that kind (Voice Erlang; Digital Customer concurrency + minutes SLA; Digital Workflow no concurrency + hours SLA; Service Workflow days SLA). Queues attach to a channel on the Queues tab and inherit its sections.", children: [
+    /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { marginBottom: 10 }, children: [
+      /* @__PURE__ */ jsx20("input", { type: "text", className: "inp", style: { maxWidth: 200 }, placeholder: "new channel name", value: name, onChange: (e) => setName(e.target.value), "data-testid": "channel-name" }),
+      /* @__PURE__ */ jsx20("div", { style: { minWidth: 210 }, children: /* @__PURE__ */ jsx20(SelectField, { label: "Preset", value: preset, onChange: setPreset, options: CHANNEL_PRESET_LIST, id: "channel-preset" }) }),
+      /* @__PURE__ */ jsx20("button", { type: "button", className: "btn sm primary", style: { alignSelf: "flex-end" }, onClick: () => {
+        ops.addChannel(name.trim() || void 0, preset);
+        setName("");
+      }, "data-testid": "add-channel", children: "+ Add channel" })
+    ] }),
+    /* @__PURE__ */ jsx20("div", { className: "rows", children: (config.channelDefs || []).map((d) => {
+      const count = (config.queues || []).filter((q) => q.channelId === d.id).length;
+      return /* @__PURE__ */ jsxs19("div", { className: "erow", "data-testid": "chdef-" + d.id, children: [
+        /* @__PURE__ */ jsxs19("div", { className: "erow-h", children: [
+          /* @__PURE__ */ jsx20("input", { type: "text", className: "inp", style: { maxWidth: 200 }, value: d.name, "aria-label": "Channel name", onChange: (e) => ops.patchChannelDef(d.id, ["name"], e.target.value) }),
+          /* @__PURE__ */ jsx20("span", { className: "pill", children: KIND_LABEL[d.kind] || d.kind }),
+          /* @__PURE__ */ jsx20("span", { className: "pill", children: d.group }),
+          /* @__PURE__ */ jsxs19("span", { className: "pill", children: [
+            count,
+            " queue(s)"
+          ] }),
+          /* @__PURE__ */ jsx20("span", { className: "spacer" }),
+          /* @__PURE__ */ jsx20("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteChannelDef(d.id), "data-testid": "chdef-del-" + d.id, children: "Delete" })
+        ] }),
+        /* @__PURE__ */ jsx20("div", { className: "erow-b", children: /* @__PURE__ */ jsx20(ChannelTemplateFields, { d, ops }) })
+      ] }, d.id);
+    }) })
+  ] });
+}
 function OrgSetup({ config, ops }) {
   const cal = config.settings && config.settings.calendar || {};
-  return /* @__PURE__ */ jsxs18(Card, { title: "Organisation & calendar", hint: "Create brands here (name only). A queue's channel \u2014 Voice, Digital or Support \u2014 and, for digital, its Customer/Workflow subtype are chosen per queue on the Queues tab.", children: [
-    /* @__PURE__ */ jsxs18("div", { className: "rowflex", style: { marginBottom: 10 }, children: [
-      /* @__PURE__ */ jsxs18("label", { className: "field", style: { maxWidth: 220 }, children: [
-        /* @__PURE__ */ jsxs18("span", { className: "lab", children: [
+  return /* @__PURE__ */ jsxs19(Card, { title: "Organisation & calendar", hint: "Create brands here (name only). A queue's channel \u2014 Voice, Digital or Support \u2014 and, for digital, its Customer/Workflow subtype are chosen per queue on the Queues tab.", children: [
+    /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { marginBottom: 10 }, children: [
+      /* @__PURE__ */ jsxs19("label", { className: "field", style: { maxWidth: 220 }, children: [
+        /* @__PURE__ */ jsxs19("span", { className: "lab", children: [
           "Week-1 date ",
-          /* @__PURE__ */ jsx19(Hint, { text: "The calendar date week 1 of the horizon starts on. Anchors the seasonality wizard and month-granular scenarios to real months. Blank = start from January." })
+          /* @__PURE__ */ jsx20(Hint, { text: "The calendar date week 1 of the horizon starts on. Anchors the seasonality wizard and month-granular scenarios to real months. Blank = start from January." })
         ] }),
-        /* @__PURE__ */ jsx19("input", { type: "date", value: cal.weekOneDate || "", onChange: (e) => ops.setWeekOneDate(e.target.value || null), "data-testid": "week-one-date" })
+        /* @__PURE__ */ jsx20("input", { type: "date", value: cal.weekOneDate || "", onChange: (e) => ops.setWeekOneDate(e.target.value || null), "data-testid": "week-one-date" })
       ] }),
-      /* @__PURE__ */ jsx19("button", { type: "button", className: "btn sm primary", onClick: () => ops.addBrand(), "data-testid": "add-brand", style: { alignSelf: "flex-end" }, children: "+ Add brand" })
+      /* @__PURE__ */ jsx20("button", { type: "button", className: "btn sm primary", onClick: () => ops.addBrand(), "data-testid": "add-brand", style: { alignSelf: "flex-end" }, children: "+ Add brand" })
     ] }),
-    /* @__PURE__ */ jsx19("div", { className: "rows", children: (config.brands || []).map((b) => /* @__PURE__ */ jsxs18("div", { className: "erow", children: [
-      /* @__PURE__ */ jsxs18("div", { className: "erow-h", children: [
-        /* @__PURE__ */ jsx19("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: b.name, "aria-label": "Brand name", onChange: (e) => ops.patchBrand(b.id, ["name"], e.target.value) }),
-        /* @__PURE__ */ jsxs18("span", { className: "pill", children: [
+    /* @__PURE__ */ jsx20("div", { className: "rows", children: (config.brands || []).map((b) => /* @__PURE__ */ jsxs19("div", { className: "erow", children: [
+      /* @__PURE__ */ jsxs19("div", { className: "erow-h", children: [
+        /* @__PURE__ */ jsx20("input", { type: "text", className: "inp", style: { maxWidth: 220 }, value: b.name, "aria-label": "Brand name", onChange: (e) => ops.patchBrand(b.id, ["name"], e.target.value) }),
+        /* @__PURE__ */ jsxs19("span", { className: "pill", children: [
           (config.queues || []).filter((q) => q.brandId === b.id).length,
           " queue(s)"
         ] }),
-        /* @__PURE__ */ jsx19("span", { className: "spacer" }),
-        /* @__PURE__ */ jsxs18("label", { className: "switch", children: [
-          /* @__PURE__ */ jsx19("input", { type: "checkbox", checked: !!b.training, onChange: (e) => ops.toggleBrandTraining(b.id, e.target.checked) }),
-          /* @__PURE__ */ jsx19("span", { className: "track", "aria-hidden": "true" }),
-          /* @__PURE__ */ jsx19("span", { style: { fontSize: 11 }, children: "Training profile" })
+        /* @__PURE__ */ jsx20("span", { className: "spacer" }),
+        /* @__PURE__ */ jsxs19("label", { className: "switch", children: [
+          /* @__PURE__ */ jsx20("input", { type: "checkbox", checked: !!b.training, onChange: (e) => ops.toggleBrandTraining(b.id, e.target.checked) }),
+          /* @__PURE__ */ jsx20("span", { className: "track", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsx20("span", { style: { fontSize: 11 }, children: "Training profile" })
         ] }),
-        (config.brands || []).length > 1 && /* @__PURE__ */ jsx19("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteBrand(b.id), children: "Delete" })
+        (config.brands || []).length > 1 && /* @__PURE__ */ jsx20("button", { type: "button", className: "btn sm danger", onClick: () => ops.deleteBrand(b.id), children: "Delete" })
       ] }),
-      b.training && /* @__PURE__ */ jsx19("div", { className: "erow-b", children: /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-        /* @__PURE__ */ jsx19(NumField, { label: "Training weeks", value: b.training.trainingWeeks, onChange: (v) => ops.patchBrand(b.id, ["training", "trainingWeeks"], v) }),
-        /* @__PURE__ */ jsx19(NumField, { label: "Training shrinkage", unit: "%", value: +((b.training.trainingShrinkagePct || 0) * 100).toFixed(1), onChange: (v) => ops.patchBrand(b.id, ["training", "trainingShrinkagePct"], v / 100) })
+      b.training && /* @__PURE__ */ jsx20("div", { className: "erow-b", children: /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+        /* @__PURE__ */ jsx20(NumField, { label: "Training weeks", value: b.training.trainingWeeks, onChange: (v) => ops.patchBrand(b.id, ["training", "trainingWeeks"], v) }),
+        /* @__PURE__ */ jsx20(NumField, { label: "Training shrinkage", unit: "%", value: +((b.training.trainingShrinkagePct || 0) * 100).toFixed(1), onChange: (v) => ops.patchBrand(b.id, ["training", "trainingShrinkagePct"], v / 100) })
       ] }) })
     ] }, b.id)) })
   ] });
@@ -6319,16 +6646,16 @@ function CapsMatrix({ config, ops }) {
     const v = (caps.segments || {})[bid + "|" + ch];
     return v == null ? "" : v;
   };
-  return /* @__PURE__ */ jsxs18(Card, { title: "Hiring caps", sub: "brand \xD7 channel", hint: "Requisitions per week allowed in each brand \xD7 channel segment (blank = unlimited), plus optional per-brand and total ceilings. When a ceiling binds, scarce hires are trimmed from the lowest marginal-churn grant first.", children: [
-    /* @__PURE__ */ jsx19("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs18("table", { className: "data", "data-testid": "caps-matrix", children: [
-      /* @__PURE__ */ jsx19("thead", { children: /* @__PURE__ */ jsxs18("tr", { children: [
-        /* @__PURE__ */ jsx19("th", { children: "Brand" }),
-        CHANNELS2.map((c) => /* @__PURE__ */ jsx19("th", { children: c.label }, c.key)),
-        /* @__PURE__ */ jsx19("th", { children: "Brand ceiling" })
+  return /* @__PURE__ */ jsxs19(Card, { title: "Hiring caps", sub: "brand \xD7 channel", hint: "Requisitions per week allowed in each brand \xD7 channel segment (blank = unlimited), plus optional per-brand and total ceilings. When a ceiling binds, scarce hires are trimmed from the lowest marginal-churn grant first.", children: [
+    /* @__PURE__ */ jsx20("div", { className: "tbl-wrap", children: /* @__PURE__ */ jsxs19("table", { className: "data", "data-testid": "caps-matrix", children: [
+      /* @__PURE__ */ jsx20("thead", { children: /* @__PURE__ */ jsxs19("tr", { children: [
+        /* @__PURE__ */ jsx20("th", { children: "Brand" }),
+        CHANNELS2.map((c) => /* @__PURE__ */ jsx20("th", { children: c.label }, c.key)),
+        /* @__PURE__ */ jsx20("th", { children: "Brand ceiling" })
       ] }) }),
-      /* @__PURE__ */ jsx19("tbody", { children: brands.map((b) => /* @__PURE__ */ jsxs18("tr", { children: [
-        /* @__PURE__ */ jsx19("td", { style: { textAlign: "left", fontWeight: 600 }, children: b.name }),
-        CHANNELS2.map((c) => /* @__PURE__ */ jsx19("td", { children: /* @__PURE__ */ jsx19(
+      /* @__PURE__ */ jsx20("tbody", { children: brands.map((b) => /* @__PURE__ */ jsxs19("tr", { children: [
+        /* @__PURE__ */ jsx20("td", { style: { textAlign: "left", fontWeight: 600 }, children: b.name }),
+        CHANNELS2.map((c) => /* @__PURE__ */ jsx20("td", { children: /* @__PURE__ */ jsx20(
           "input",
           {
             type: "number",
@@ -6341,7 +6668,7 @@ function CapsMatrix({ config, ops }) {
             "aria-label": b.name + " " + c.label + " cap"
           }
         ) }, c.key)),
-        /* @__PURE__ */ jsx19("td", { children: /* @__PURE__ */ jsx19(
+        /* @__PURE__ */ jsx20("td", { children: /* @__PURE__ */ jsx20(
           "input",
           {
             type: "number",
@@ -6356,9 +6683,9 @@ function CapsMatrix({ config, ops }) {
         ) })
       ] }, b.id)) })
     ] }) }),
-    /* @__PURE__ */ jsxs18("div", { className: "rowflex", style: { marginTop: 10 }, children: [
-      /* @__PURE__ */ jsx19(NumField, { label: "Total ceiling", unit: "/wk", id: "cap-total", value: caps.total == null ? "" : caps.total, onChange: (v) => ops.patchCapTotal(v), hint: "The operation-wide weekly cap across all segments. Blank = no total ceiling." }),
-      /* @__PURE__ */ jsx19("span", { className: "note", style: { padding: "6px 10px" }, children: "Effective limit for a segment = the tightest of its segment cap, its brand ceiling and the total ceiling." })
+    /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { marginTop: 10 }, children: [
+      /* @__PURE__ */ jsx20(NumField, { label: "Total ceiling", unit: "/wk", id: "cap-total", value: caps.total == null ? "" : caps.total, onChange: (v) => ops.patchCapTotal(v), hint: "The operation-wide weekly cap across all segments. Blank = no total ceiling." }),
+      /* @__PURE__ */ jsx20("span", { className: "note", style: { padding: "6px 10px" }, children: "Effective limit for a segment = the tightest of its segment cap, its brand ceiling and the total ceiling." })
     ] })
   ] });
 }
@@ -6368,18 +6695,19 @@ function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seas
   const ot = set.ot || {}, tr = set.training || {}, debt = set.trainingDebt || {}, kn = set.knockOn || {}, risk = set.risk || {};
   const P = (path, v) => ops.patch(path, v);
   const S = (path, v) => ops.patch(["settings", ...path], v);
-  const band = (fam, key, testid) => /* @__PURE__ */ jsxs18("div", { className: "rowflex", style: { gap: 8 }, children: [
-    /* @__PURE__ */ jsx19("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: key }),
-    /* @__PURE__ */ jsx19("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx19(NumField, { label: "Amber", value: (risk[fam] || {}).amber, onChange: (v) => S(["risk", fam, "amber"], v), id: testid + "-amber" }) }),
-    /* @__PURE__ */ jsx19("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx19(NumField, { label: "Red", value: (risk[fam] || {}).red, onChange: (v) => S(["risk", fam, "red"], v), id: testid + "-red" }) })
+  const band = (fam, key, testid) => /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { gap: 8 }, children: [
+    /* @__PURE__ */ jsx20("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: key }),
+    /* @__PURE__ */ jsx20("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx20(NumField, { label: "Amber", value: (risk[fam] || {}).amber, onChange: (v) => S(["risk", fam, "amber"], v), id: testid + "-amber" }) }),
+    /* @__PURE__ */ jsx20("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx20(NumField, { label: "Red", value: (risk[fam] || {}).red, onChange: (v) => S(["risk", fam, "red"], v), id: testid + "-red" }) })
   ] });
-  return /* @__PURE__ */ jsxs18("div", { className: "grid", style: { gap: 16 }, children: [
-    /* @__PURE__ */ jsx19(OrgSetup, { config, ops }),
-    /* @__PURE__ */ jsx19(CapsMatrix, { config, ops }),
-    /* @__PURE__ */ jsxs18("div", { className: "grid cols-2", style: { alignItems: "start" }, children: [
-      /* @__PURE__ */ jsxs18(Card, { title: "Engine & simulation window", children: [
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsxs19("div", { className: "grid", style: { gap: 16 }, children: [
+    /* @__PURE__ */ jsx20(OrgSetup, { config, ops }),
+    /* @__PURE__ */ jsx20(ChannelsManager, { config, ops }),
+    /* @__PURE__ */ jsx20(CapsMatrix, { config, ops }),
+    /* @__PURE__ */ jsxs19("div", { className: "grid cols-2", style: { alignItems: "start" }, children: [
+      /* @__PURE__ */ jsxs19(Card, { title: "Engine & simulation window", children: [
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(
             NumField,
             {
               id: "horizon-input",
@@ -6392,19 +6720,19 @@ function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seas
               hint: "Weekly horizon, clamped to [24, 78]. 24 floors it because the 10-week hire-to-productive pipeline plus ramp needs room to matter; default 52."
             }
           ),
-          /* @__PURE__ */ jsx19(NumField, { label: "Occupancy ceiling", unit: "%", value: +(eng.occupancyCeiling * 100).toFixed(0), onChange: (v) => P(["engine", "occupancyCeiling"], v / 100) }),
-          /* @__PURE__ */ jsx19(TextField, { label: "Currency", value: eng.currency, onChange: (v) => P(["engine", "currency"], v || "\xA3") })
+          /* @__PURE__ */ jsx20(NumField, { label: "Occupancy ceiling", unit: "%", value: +(eng.occupancyCeiling * 100).toFixed(0), onChange: (v) => P(["engine", "occupancyCeiling"], v / 100) }),
+          /* @__PURE__ */ jsx20(TextField, { label: "Currency", value: eng.currency, onChange: (v) => P(["engine", "currency"], v || "\xA3") })
         ] }),
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(NumField, { label: "Day start", unit: "h", value: eng.dayStart, onChange: (v) => P(["engine", "dayStart"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Day end", unit: "h", value: eng.dayEnd, onChange: (v) => P(["engine", "dayEnd"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Interval", unit: "min", value: eng.intervalMin, onChange: (v) => P(["engine", "intervalMin"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Support prof.", unit: "%", value: +(eng.crossSkillProficiency * 100).toFixed(0), onChange: (v) => P(["engine", "crossSkillProficiency"], v / 100) })
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(NumField, { label: "Day start", unit: "h", value: eng.dayStart, onChange: (v) => P(["engine", "dayStart"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Day end", unit: "h", value: eng.dayEnd, onChange: (v) => P(["engine", "dayEnd"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Interval", unit: "min", value: eng.intervalMin, onChange: (v) => P(["engine", "intervalMin"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Support prof.", unit: "%", value: +(eng.crossSkillProficiency * 100).toFixed(0), onChange: (v) => P(["engine", "crossSkillProficiency"], v / 100) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx19(Card, { title: "Global starting HC", hint: "Queues left blank share this pool, weighted by workload (volume \xD7 AHT \xF7 concurrency). Explicit per-queue HC wins; unmanned queues are excluded.", children: /* @__PURE__ */ jsxs18("label", { className: "field", style: { maxWidth: 240 }, children: [
-        /* @__PURE__ */ jsx19("span", { className: "lab", children: "Global starting HC" }),
-        /* @__PURE__ */ jsx19(
+      /* @__PURE__ */ jsx20(Card, { title: "Global starting HC", hint: "Queues left blank share this pool, weighted by workload (volume \xD7 AHT \xF7 concurrency). Explicit per-queue HC wins; unmanned queues are excluded.", children: /* @__PURE__ */ jsxs19("label", { className: "field", style: { maxWidth: 240 }, children: [
+        /* @__PURE__ */ jsx20("span", { className: "lab", children: "Global starting HC" }),
+        /* @__PURE__ */ jsx20(
           "input",
           {
             type: "number",
@@ -6415,31 +6743,31 @@ function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seas
           }
         )
       ] }) }),
-      /* @__PURE__ */ jsx19(Card, { title: "Overtime rules", hint: "Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.", children: /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-        /* @__PURE__ */ jsx19(NumField, { label: "Max / agent / day", unit: "h", value: ot.maxDailyHours, step: "0.5", onChange: (v) => S(["ot", "maxDailyHours"], v) }),
-        /* @__PURE__ */ jsx19(NumField, { label: "Weekly ceiling", unit: "h", value: ot.weeklyCeiling, onChange: (v) => S(["ot", "weeklyCeiling"], v) }),
-        /* @__PURE__ */ jsx19(NumField, { label: "Premium", unit: "\xD7", value: ot.premium, step: "0.1", onChange: (v) => S(["ot", "premium"], v) }),
-        /* @__PURE__ */ jsx19(NumField, { label: "Burnout load", value: ot.burnoutLoad, onChange: (v) => S(["ot", "burnoutLoad"], v) })
+      /* @__PURE__ */ jsx20(Card, { title: "Overtime rules", hint: "Rung 2 of the supply ladder: own overtime, capped per agent per day AND by a weekly ceiling, costed at a premium and feeding the burnout index.", children: /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+        /* @__PURE__ */ jsx20(NumField, { label: "Max / agent / day", unit: "h", value: ot.maxDailyHours, step: "0.5", onChange: (v) => S(["ot", "maxDailyHours"], v) }),
+        /* @__PURE__ */ jsx20(NumField, { label: "Weekly ceiling", unit: "h", value: ot.weeklyCeiling, onChange: (v) => S(["ot", "weeklyCeiling"], v) }),
+        /* @__PURE__ */ jsx20(NumField, { label: "Premium", unit: "\xD7", value: ot.premium, step: "0.1", onChange: (v) => S(["ot", "premium"], v) }),
+        /* @__PURE__ */ jsx20(NumField, { label: "Burnout load", value: ot.burnoutLoad, onChange: (v) => S(["ot", "burnoutLoad"], v) })
       ] }) }),
-      /* @__PURE__ */ jsxs18(Card, { title: "Training & debt", hint: "Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.", children: [
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(NumField, { label: "Default training", unit: "wk", value: tr.weeks, onChange: (v) => S(["training", "weeks"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Training shrinkage", unit: "%", value: +((tr.shrinkagePct || 0) * 100).toFixed(1), onChange: (v) => S(["training", "shrinkagePct"], v / 100) })
+      /* @__PURE__ */ jsxs19(Card, { title: "Training & debt", hint: "Rung 3: training reclaim converts up to the training-shrinkage share back to service, accruing a debt index that lifts AHT and attrition until training is restored.", children: [
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(NumField, { label: "Default training", unit: "wk", value: tr.weeks, onChange: (v) => S(["training", "weeks"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Training shrinkage", unit: "%", value: +((tr.shrinkagePct || 0) * 100).toFixed(1), onChange: (v) => S(["training", "shrinkagePct"], v / 100) })
         ] }),
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(NumField, { label: "Debt accrual", value: debt.accumRate, onChange: (v) => S(["trainingDebt", "accumRate"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Debt recovery", value: debt.recoveryRate, onChange: (v) => S(["trainingDebt", "recoveryRate"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Max AHT penalty", unit: "%", value: +((debt.maxAhtPenalty || 0) * 100).toFixed(0), onChange: (v) => S(["trainingDebt", "maxAhtPenalty"], v / 100) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Max attrition", unit: "\xD7", value: debt.maxAttritionMult, step: "0.1", onChange: (v) => S(["trainingDebt", "maxAttritionMult"], v) })
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(NumField, { label: "Debt accrual", value: debt.accumRate, onChange: (v) => S(["trainingDebt", "accumRate"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Debt recovery", value: debt.recoveryRate, onChange: (v) => S(["trainingDebt", "recoveryRate"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Max AHT penalty", unit: "%", value: +((debt.maxAhtPenalty || 0) * 100).toFixed(0), onChange: (v) => S(["trainingDebt", "maxAhtPenalty"], v / 100) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Max attrition", unit: "\xD7", value: debt.maxAttritionMult, step: "0.1", onChange: (v) => S(["trainingDebt", "maxAttritionMult"], v) })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs18(Card, { title: "Knock-on channel defaults", hint: "Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.", children: [
-        ["voice", "digital", "support"].map((ch) => /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19("div", { style: { minWidth: 70, alignSelf: "flex-end", fontSize: 12, fontWeight: 600, paddingBottom: 8, textTransform: "capitalize" }, children: ch }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Repeat", unit: "%", value: (kn[ch] || {}).repeatPct == null ? "" : +((kn[ch] || {}).repeatPct * 100).toFixed(0), onChange: (v) => S(["knockOn", ch, "repeatPct"], v === 0 ? 0 : v / 100) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Spill", unit: "%", value: (kn[ch] || {}).spillPct == null ? "" : +((kn[ch] || {}).spillPct * 100).toFixed(0), onChange: (v) => S(["knockOn", ch, "spillPct"], v === 0 ? 0 : v / 100) })
+      /* @__PURE__ */ jsxs19(Card, { title: "Knock-on channel defaults", hint: "Repeat and spill shares a queue inherits unless it overrides them. Voice repeat defaults to the legacy redial; digital spill to the legacy deflection.", children: [
+        ["voice", "digital", "support"].map((ch) => /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20("div", { style: { minWidth: 70, alignSelf: "flex-end", fontSize: 12, fontWeight: 600, paddingBottom: 8, textTransform: "capitalize" }, children: ch }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Repeat", unit: "%", value: (kn[ch] || {}).repeatPct == null ? "" : +((kn[ch] || {}).repeatPct * 100).toFixed(0), onChange: (v) => S(["knockOn", ch, "repeatPct"], v === 0 ? 0 : v / 100) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Spill", unit: "%", value: (kn[ch] || {}).spillPct == null ? "" : +((kn[ch] || {}).spillPct * 100).toFixed(0), onChange: (v) => S(["knockOn", ch, "spillPct"], v === 0 ? 0 : v / 100) })
         ] }, ch)),
-        /* @__PURE__ */ jsxs18("p", { className: "note", style: { marginTop: 8 }, children: [
+        /* @__PURE__ */ jsxs19("p", { className: "note", style: { marginTop: 8 }, children: [
           "Blank = inherit the legacy loop (voice redial ",
           Math.round(loops.redial * 100),
           "%, digital deflection ",
@@ -6447,25 +6775,25 @@ function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seas
           "%)."
         ] })
       ] }),
-      /* @__PURE__ */ jsxs18(Card, { title: "Hiring, costs & CX", children: [
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(NumField, { label: "Default buffer", unit: "%", value: +(hir.buffer * 100).toFixed(0), onChange: (v) => P(["hiring", "buffer"], v / 100), hint: "Fallback buffer for buffer strategies that don't set their own. Hiring caps live in the Hiring caps card below." }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Manager cost", unit: "/mo", value: costs.managerCostMonthly != null ? costs.managerCostMonthly : costs.managerCost != null ? costs.managerCost / 12 : 0, onChange: (v) => {
+      /* @__PURE__ */ jsxs19(Card, { title: "Hiring, costs & CX", children: [
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(NumField, { label: "Default buffer", unit: "%", value: +(hir.buffer * 100).toFixed(0), onChange: (v) => P(["hiring", "buffer"], v / 100), hint: "Fallback buffer for buffer strategies that don't set their own. Hiring caps live in the Hiring caps card below." }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Manager cost", unit: "/mo", value: costs.managerCostMonthly != null ? costs.managerCostMonthly : costs.managerCost != null ? costs.managerCost / 12 : 0, onChange: (v) => {
             P(["costs", "managerCostMonthly"], v);
             P(["costs", "managerCost"], v * 12);
           }, hint: "Monthly manager cost. The engine works weekly (\xD7 12 \xF7 52); outputs report monthly and annual." }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Manager ratio", unit: "1:n", value: costs.managerRatio, onChange: (v) => P(["costs", "managerRatio"], v) })
+          /* @__PURE__ */ jsx20(NumField, { label: "Manager ratio", unit: "1:n", value: costs.managerRatio, onChange: (v) => P(["costs", "managerRatio"], v) })
         ] }),
-        /* @__PURE__ */ jsxs18("div", { className: "fieldrow", children: [
-          /* @__PURE__ */ jsx19(NumField, { label: "\xA3 / lost customer", value: cx.costPerLostCustomer, onChange: (v) => P(["cx", "costPerLostCustomer"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Repeat uplift", unit: "\xD7", value: cx.repeatUplift, step: "0.1", onChange: (v) => P(["cx", "repeatUplift"], v) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Redial rate", unit: "%", value: +(loops.redial * 100).toFixed(0), onChange: (v) => P(["loops", "redial"], v / 100) }),
-          /* @__PURE__ */ jsx19(NumField, { label: "Deflection rate", unit: "%", value: +(loops.deflection * 100).toFixed(0), onChange: (v) => P(["loops", "deflection"], v / 100) })
+        /* @__PURE__ */ jsxs19("div", { className: "fieldrow", children: [
+          /* @__PURE__ */ jsx20(NumField, { label: "\xA3 / lost customer", value: cx.costPerLostCustomer, onChange: (v) => P(["cx", "costPerLostCustomer"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Repeat uplift", unit: "\xD7", value: cx.repeatUplift, step: "0.1", onChange: (v) => P(["cx", "repeatUplift"], v) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Redial rate", unit: "%", value: +(loops.redial * 100).toFixed(0), onChange: (v) => P(["loops", "redial"], v / 100) }),
+          /* @__PURE__ */ jsx20(NumField, { label: "Deflection rate", unit: "%", value: +(loops.deflection * 100).toFixed(0), onChange: (v) => P(["loops", "deflection"], v / 100) })
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs18(Card, { title: "Risk parameters", hint: "Amber and red bands per risk family. The Summary risk register re-scores from these instantly \u2014 changing a band does not re-run the simulation.", children: [
-      /* @__PURE__ */ jsxs18("div", { className: "grid cols-2", style: { gap: 10 }, children: [
+    /* @__PURE__ */ jsxs19(Card, { title: "Risk parameters", hint: "Amber and red bands per risk family. The Summary risk register re-scores from these instantly \u2014 changing a band does not re-run the simulation.", children: [
+      /* @__PURE__ */ jsxs19("div", { className: "grid cols-2", style: { gap: 10 }, children: [
         band("slaBreachRun", "SLA breach run (wk)", "risk-slabreach"),
         band("burnout", "Burnout peak (/100)", "risk-burnout"),
         band("trainingDebt", "Training-debt peak", "risk-debt"),
@@ -6473,27 +6801,27 @@ function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seas
         band("tippingMargin", "Tipping margin (/wk)", "risk-tipping"),
         band("knockOnShare", "Knock-on share", "risk-knockon")
       ] }),
-      /* @__PURE__ */ jsx19("hr", { className: "sep", style: { margin: "12px 0" } }),
-      /* @__PURE__ */ jsxs18("div", { className: "grid cols-2", style: { gap: 10 }, children: [
-        /* @__PURE__ */ jsxs18("div", { className: "rowflex", style: { gap: 8 }, children: [
-          /* @__PURE__ */ jsx19("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: "Borrowed-capacity share" }),
-          /* @__PURE__ */ jsx19("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx19(NumField, { label: "Amber", unit: "%", value: +(((risk.borrowedShare || {}).amber || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "borrowedShare", "amber"], v / 100), id: "risk-borrowed-amber" }) }),
-          /* @__PURE__ */ jsx19("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx19(NumField, { label: "Red", unit: "%", value: +(((risk.borrowedShare || {}).red || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "borrowedShare", "red"], v / 100), id: "risk-borrowed-red" }) })
+      /* @__PURE__ */ jsx20("hr", { className: "sep", style: { margin: "12px 0" } }),
+      /* @__PURE__ */ jsxs19("div", { className: "grid cols-2", style: { gap: 10 }, children: [
+        /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { gap: 8 }, children: [
+          /* @__PURE__ */ jsx20("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: "Borrowed-capacity share" }),
+          /* @__PURE__ */ jsx20("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx20(NumField, { label: "Amber", unit: "%", value: +(((risk.borrowedShare || {}).amber || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "borrowedShare", "amber"], v / 100), id: "risk-borrowed-amber" }) }),
+          /* @__PURE__ */ jsx20("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx20(NumField, { label: "Red", unit: "%", value: +(((risk.borrowedShare || {}).red || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "borrowedShare", "red"], v / 100), id: "risk-borrowed-red" }) })
         ] }),
-        /* @__PURE__ */ jsxs18("div", { className: "rowflex", style: { gap: 8 }, children: [
-          /* @__PURE__ */ jsx19("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: "Unmanned starvation" }),
-          /* @__PURE__ */ jsx19("div", { style: { width: 110 }, children: /* @__PURE__ */ jsx19(NumField, { label: "Floor cover", unit: "%", value: +(((risk.unmannedStarvation || {}).floorCover || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "unmannedStarvation", "floorCover"], v / 100) }) }),
-          /* @__PURE__ */ jsx19("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx19(NumField, { label: "\u2265 weeks", value: (risk.unmannedStarvation || {}).weeks, onChange: (v) => S(["risk", "unmannedStarvation", "weeks"], v) }) })
+        /* @__PURE__ */ jsxs19("div", { className: "rowflex", style: { gap: 8 }, children: [
+          /* @__PURE__ */ jsx20("span", { style: { minWidth: 150, fontSize: 12, fontWeight: 600 }, children: "Unmanned starvation" }),
+          /* @__PURE__ */ jsx20("div", { style: { width: 110 }, children: /* @__PURE__ */ jsx20(NumField, { label: "Floor cover", unit: "%", value: +(((risk.unmannedStarvation || {}).floorCover || 0) * 100).toFixed(0), onChange: (v) => S(["risk", "unmannedStarvation", "floorCover"], v / 100) }) }),
+          /* @__PURE__ */ jsx20("div", { style: { width: 96 }, children: /* @__PURE__ */ jsx20(NumField, { label: "\u2265 weeks", value: (risk.unmannedStarvation || {}).weeks, onChange: (v) => S(["risk", "unmannedStarvation", "weeks"], v) }) })
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx19(Card, { title: "Seasonality patterns", sub: "library", hint: "Named monthly-multiplier patterns. Create, edit and delete them here; apply a pattern to the system or a queue on the Queues tab.", children: /* @__PURE__ */ jsx19(PresetLibrary, { kind: "seasonality", presets: seasonalityPresets, setPresets: setSeasonalityPresets, eng: config.engine }) }),
-    /* @__PURE__ */ jsx19(Card, { title: "Arrival patterns", sub: "library", hint: "Named intraday arrival curves. Create, edit and delete them here; apply a pattern to a queue on the Queues tab.", children: /* @__PURE__ */ jsx19(PresetLibrary, { kind: "arrival", presets: intradayPresets, setPresets: setIntradayPresets, eng: config.engine }) })
+    /* @__PURE__ */ jsx20(Card, { title: "Seasonality patterns", sub: "library", hint: "Named monthly-multiplier patterns. Create, edit and delete them here; apply a pattern to the system or a queue on the Queues tab.", children: /* @__PURE__ */ jsx20(PresetLibrary, { kind: "seasonality", presets: seasonalityPresets, setPresets: setSeasonalityPresets, eng: config.engine }) }),
+    /* @__PURE__ */ jsx20(Card, { title: "Arrival patterns", sub: "library", hint: "Named intraday arrival curves. Create, edit and delete them here; apply a pattern to a queue on the Queues tab.", children: /* @__PURE__ */ jsx20(PresetLibrary, { kind: "arrival", presets: intradayPresets, setPresets: setIntradayPresets, eng: config.engine }) })
   ] });
 }
 
 // ui/App.jsx
-import { jsx as jsx20, jsxs as jsxs19 } from "react/jsx-runtime";
+import { jsx as jsx21, jsxs as jsxs20 } from "react/jsx-runtime";
 var TABS = [
   { id: "summary", label: "Summary" },
   { id: "strategies", label: "Strategies" },
@@ -6506,21 +6834,21 @@ var TABS = [
   { id: "settings", label: "Settings" }
 ];
 function App() {
-  const [config, setConfig] = useState17(() => migrateConfig((0, import_engine10.makeDefaultConfig)()));
-  const [tab, setTab] = useState17("summary");
-  const [intradayPresets, setIntradayPresets] = useState17(INTRADAY_PRESETS);
-  const [seasonalityPresets, setSeasonalityPresets] = useState17(SEASONALITY_PRESETS);
+  const [config, setConfig] = useState18(() => migrateConfig((0, import_engine10.makeDefaultConfig)()));
+  const [tab, setTab] = useState18("summary");
+  const [intradayPresets, setIntradayPresets] = useState18(INTRADAY_PRESETS);
+  const [seasonalityPresets, setSeasonalityPresets] = useState18(SEASONALITY_PRESETS);
   const ops = useConfigOps(setConfig);
-  const [activeStrategyId, setActiveStrategyId] = useState17("S1");
-  const [activeGroupId, setActiveGroupId] = useState17("g_por");
+  const [activeStrategyId, setActiveStrategyId] = useState18("S1");
+  const [activeGroupId, setActiveGroupId] = useState18("g_por");
   const stratIdsAll = strategyList(config).map((s) => s.id);
   const safeStrategy = stratIdsAll.includes(activeStrategyId) ? activeStrategyId : stratIdsAll[0] || "S1";
   const groupIds = groupList(config).map((g) => g.id);
   const safeGroup = groupIds.includes(activeGroupId) ? activeGroupId : groupIds[0] || "g_por";
   const storage = useMemo3(() => makeStorageAdapter(), []);
-  const [snapshots, setSnapshots] = useState17([]);
-  const [compareSel, setCompareSel] = useState17([]);
-  const [viewingSlug, setViewingSlug] = useState17(null);
+  const [snapshots, setSnapshots] = useState18([]);
+  const [compareSel, setCompareSel] = useState18([]);
+  const [viewingSlug, setViewingSlug] = useState18(null);
   const hydrated = useRef4(false);
   const loadSnapshots = useCallback4(async () => {
     const index = await storage.get(KEYS.index) || [];
@@ -6554,12 +6882,13 @@ function App() {
   const viewing = viewingSlug ? snapshots.find((r) => r.slug === viewingSlug) : null;
   const effectiveConfig = viewing ? migrateConfig(viewing.config) : config;
   const readOnly = !!viewing;
-  const simSet = useStrategySims(effectiveConfig, safeStrategy, safeGroup);
+  const simConfig = useMemo3(() => resolvePresets(effectiveConfig, seasonalityPresets, intradayPresets), [effectiveConfig, seasonalityPresets, intradayPresets]);
+  const simSet = useStrategySims(simConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
-  const [matrix, setMatrix] = useState17(null);
-  const liveHash = useMemo3(() => simHash(effectiveConfig), [effectiveConfig]);
+  const [matrix, setMatrix] = useState18(null);
+  const liveHash = useMemo3(() => simHash(simConfig), [simConfig]);
   const matrixStale = !matrix || matrix.hash !== liveHash;
-  const onRunMatrix = useCallback4(() => setMatrix(runMatrix(effectiveConfig)), [effectiveConfig]);
+  const onRunMatrix = useCallback4(() => setMatrix(runMatrix(simConfig)), [simConfig]);
   const onSelectCell = useCallback4((gid, sid) => {
     setActiveGroupId(gid);
     setActiveStrategyId(sid);
@@ -6626,28 +6955,28 @@ function App() {
     onLoadSnapshotSettings: loadSnapshotSettings,
     onRefreshSnapshots: loadSnapshots
   };
-  return /* @__PURE__ */ jsx20(PrintProvider, { children: /* @__PURE__ */ jsxs19("div", { className: "app", children: [
-    /* @__PURE__ */ jsxs19("header", { className: "topbar", children: [
-      /* @__PURE__ */ jsxs19("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx20("span", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsx20("span", { children: "Capacity Simulator" }),
-        /* @__PURE__ */ jsx20("small", { children: "call centre planning" })
+  return /* @__PURE__ */ jsx21(PrintProvider, { children: /* @__PURE__ */ jsxs20("div", { className: "app", children: [
+    /* @__PURE__ */ jsxs20("header", { className: "topbar", children: [
+      /* @__PURE__ */ jsxs20("div", { className: "brand", children: [
+        /* @__PURE__ */ jsx21("span", { className: "mark", children: "C" }),
+        /* @__PURE__ */ jsx21("span", { children: "Capacity Simulator" }),
+        /* @__PURE__ */ jsx21("small", { children: "call centre planning" })
       ] }),
-      /* @__PURE__ */ jsx20("span", { className: "spacer" }),
-      /* @__PURE__ */ jsxs19("div", { className: "topctrl", children: [
-        /* @__PURE__ */ jsx20("span", { children: "New simulation" }),
-        /* @__PURE__ */ jsxs19("select", { value: "", onChange: (e) => {
+      /* @__PURE__ */ jsx21("span", { className: "spacer" }),
+      /* @__PURE__ */ jsxs20("div", { className: "topctrl", children: [
+        /* @__PURE__ */ jsx21("span", { children: "New simulation" }),
+        /* @__PURE__ */ jsxs20("select", { value: "", onChange: (e) => {
           if (e.target.value) newSimulation(e.target.value);
         }, "data-testid": "new-sim", "aria-label": "New simulation", children: [
-          /* @__PURE__ */ jsx20("option", { value: "", children: "Choose\u2026" }),
-          /* @__PURE__ */ jsx20("option", { value: "duplicate", children: "Duplicate current" }),
-          /* @__PURE__ */ jsx20("option", { value: "defaults", children: "Start from defaults" }),
-          /* @__PURE__ */ jsx20("option", { value: "blank", children: "Start blank" })
+          /* @__PURE__ */ jsx21("option", { value: "", children: "Choose\u2026" }),
+          /* @__PURE__ */ jsx21("option", { value: "duplicate", children: "Duplicate current" }),
+          /* @__PURE__ */ jsx21("option", { value: "defaults", children: "Start from defaults" }),
+          /* @__PURE__ */ jsx21("option", { value: "blank", children: "Start blank" })
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsx20("nav", { className: "tabs", role: "tablist", "aria-label": "Sections", children: TABS.map((t) => /* @__PURE__ */ jsx20("button", { type: "button", role: "tab", id: "tab-" + t.id, "aria-selected": tab === t.id, "aria-controls": "panel-" + t.id, className: "tab", onClick: () => setTab(t.id), children: t.label }, t.id)) }),
-    /* @__PURE__ */ jsx20(
+    /* @__PURE__ */ jsx21("nav", { className: "tabs", role: "tablist", "aria-label": "Sections", children: TABS.map((t) => /* @__PURE__ */ jsx21("button", { type: "button", role: "tab", id: "tab-" + t.id, "aria-selected": tab === t.id, "aria-controls": "panel-" + t.id, className: "tab", onClick: () => setTab(t.id), children: t.label }, t.id)) }),
+    /* @__PURE__ */ jsx21(
       ContextBar,
       {
         config: effectiveConfig,
@@ -6662,24 +6991,24 @@ function App() {
         pending
       }
     ),
-    readOnly && /* @__PURE__ */ jsxs19("div", { className: "ro-banner", role: "status", "data-testid": "readonly-banner", children: [
+    readOnly && /* @__PURE__ */ jsxs20("div", { className: "ro-banner", role: "status", "data-testid": "readonly-banner", children: [
       "Viewing snapshot ",
-      /* @__PURE__ */ jsx20("strong", { children: viewing.name }),
+      /* @__PURE__ */ jsx21("strong", { children: viewing.name }),
       " \u2014 read-only. Editors are disabled.",
-      /* @__PURE__ */ jsx20("button", { type: "button", className: "btn sm", style: { marginLeft: 12 }, onClick: () => setViewingSlug(null), "data-testid": "exit-snapshot", children: "Return to live model" })
+      /* @__PURE__ */ jsx21("button", { type: "button", className: "btn sm", style: { marginLeft: 12 }, onClick: () => setViewingSlug(null), "data-testid": "exit-snapshot", children: "Return to live model" })
     ] }),
-    /* @__PURE__ */ jsxs19("main", { className: "main", children: [
-      isBlank && /* @__PURE__ */ jsxs19("div", { className: "empty-state", "data-testid": "blank-empty-state", children: [
-        /* @__PURE__ */ jsx20("div", { className: "es-mark", children: "\u2726" }),
-        /* @__PURE__ */ jsx20("h2", { children: "Start from nothing" }),
-        /* @__PURE__ */ jsx20("p", { children: "This simulation has no brands and no queues yet. Build it up from scratch: create a brand in Settings, then add your first queue." }),
-        /* @__PURE__ */ jsxs19("div", { className: "btnbar", style: { justifyContent: "center" }, children: [
-          /* @__PURE__ */ jsx20("button", { type: "button", className: "btn primary", onClick: () => setTab("settings"), "data-testid": "es-add-brand", children: "Create a brand (Settings)" }),
-          /* @__PURE__ */ jsx20("button", { type: "button", className: "btn", onClick: () => setTab("queues"), "data-testid": "es-add-queue", children: "Add a queue (Queues)" }),
-          /* @__PURE__ */ jsx20("button", { type: "button", className: "btn", onClick: () => newSimulation("defaults"), children: "Load the demo defaults" })
+    /* @__PURE__ */ jsxs20("main", { className: "main", children: [
+      isBlank && /* @__PURE__ */ jsxs20("div", { className: "empty-state", "data-testid": "blank-empty-state", children: [
+        /* @__PURE__ */ jsx21("div", { className: "es-mark", children: "\u2726" }),
+        /* @__PURE__ */ jsx21("h2", { children: "Start from nothing" }),
+        /* @__PURE__ */ jsx21("p", { children: "This simulation has no brands and no queues yet. Build it up from scratch: create a brand in Settings, then add your first queue." }),
+        /* @__PURE__ */ jsxs20("div", { className: "btnbar", style: { justifyContent: "center" }, children: [
+          /* @__PURE__ */ jsx21("button", { type: "button", className: "btn primary", onClick: () => setTab("settings"), "data-testid": "es-add-brand", children: "Create a brand (Settings)" }),
+          /* @__PURE__ */ jsx21("button", { type: "button", className: "btn", onClick: () => setTab("queues"), "data-testid": "es-add-queue", children: "Add a queue (Queues)" }),
+          /* @__PURE__ */ jsx21("button", { type: "button", className: "btn", onClick: () => newSimulation("defaults"), children: "Load the demo defaults" })
         ] })
       ] }),
-      /* @__PURE__ */ jsx20("fieldset", { className: "ro-fieldset", disabled: readOnly, style: { border: 0, margin: 0, padding: 0, minInlineSize: "auto" }, children: TABS.map((t) => /* @__PURE__ */ jsx20("div", { role: "tabpanel", id: "panel-" + t.id, "aria-labelledby": "tab-" + t.id, hidden: tab !== t.id, children: tab === t.id && /* @__PURE__ */ jsx20(TabBody, { id: t.id, ...tabProps }) }, t.id)) })
+      /* @__PURE__ */ jsx21("fieldset", { className: "ro-fieldset", disabled: readOnly, style: { border: 0, margin: 0, padding: 0, minInlineSize: "auto" }, children: TABS.map((t) => /* @__PURE__ */ jsx21("div", { role: "tabpanel", id: "panel-" + t.id, "aria-labelledby": "tab-" + t.id, hidden: tab !== t.id, children: tab === t.id && /* @__PURE__ */ jsx21(TabBody, { id: t.id, ...tabProps }) }, t.id)) })
     ] })
   ] }) });
 }
@@ -6687,21 +7016,21 @@ function TabBody(props) {
   const { id, simSet, activeSim, config, ops } = props;
   switch (id) {
     case "summary":
-      return /* @__PURE__ */ jsx20(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell });
+      return /* @__PURE__ */ jsx21(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell });
     case "strategies":
-      return /* @__PURE__ */ jsx20(StrategiesTab, { simSet, config, activeStrategy: props.activeStrategy, ops });
+      return /* @__PURE__ */ jsx21(StrategiesTab, { simSet, config, activeStrategy: props.activeStrategy, ops });
     case "plan":
-      return /* @__PURE__ */ jsx20(PlanTab, { sim: activeSim, config, viewLabel: groupName(config, props.activeGroupId) });
+      return /* @__PURE__ */ jsx21(PlanTab, { sim: activeSim, config, viewLabel: groupName(config, props.activeGroupId) });
     case "data":
-      return /* @__PURE__ */ jsx20(DataTab, { sim: activeSim, config, activeGroupId: props.activeGroupId, onSelectGroup: props.onSelectGroup });
+      return /* @__PURE__ */ jsx21(DataTab, { sim: activeSim, config, ops, activeGroupId: props.activeGroupId, onSelectGroup: props.onSelectGroup });
     case "intraday":
-      return /* @__PURE__ */ jsx20(IntradayTab, { sim: activeSim });
+      return /* @__PURE__ */ jsx21(IntradayTab, { sim: activeSim });
     case "queues":
-      return /* @__PURE__ */ jsx20(QueuesEditor, { config, ops, sim: activeSim, intradayPresets: props.intradayPresets, setIntradayPresets: props.setIntradayPresets, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
+      return /* @__PURE__ */ jsx21(QueuesEditor, { config, ops, sim: activeSim, intradayPresets: props.intradayPresets, setIntradayPresets: props.setIntradayPresets, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
     case "scenarios":
-      return /* @__PURE__ */ jsx20(ScenariosEditor, { config, ops });
+      return /* @__PURE__ */ jsx21(ScenariosEditor, { config, ops });
     case "snapshots":
-      return /* @__PURE__ */ jsx20(
+      return /* @__PURE__ */ jsx21(
         SnapshotsTab,
         {
           snapshots: props.snapshots,
@@ -6722,7 +7051,7 @@ function TabBody(props) {
         }
       );
     case "settings":
-      return /* @__PURE__ */ jsx20(SettingsEditor, { config, ops, intradayPresets: props.intradayPresets, setIntradayPresets: props.setIntradayPresets, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
+      return /* @__PURE__ */ jsx21(SettingsEditor, { config, ops, intradayPresets: props.intradayPresets, setIntradayPresets: props.setIntradayPresets, seasonalityPresets: props.seasonalityPresets, setSeasonalityPresets: props.setSeasonalityPresets });
     default:
       return null;
   }
@@ -7048,10 +7377,20 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .acc-sec > summary { list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .acc-sec > summary::-webkit-details-marker { display: none; }
 .acc-sec > .acc-b { padding: 0 12px 12px; }
+
+/* \xA724.6 (R3c) Data tab \u2014 clear vertical divider between column groups, editable
+   input cells and a muted read-only treatment so the input/outcome boundary
+   reads at a glance. */
+table.data.seg th.seg-first, table.data.seg td.seg-first { border-left: 2px solid var(--line-2); }
+table.data td.cell-ro { color: var(--muted); }
+table.data th.col-input { color: var(--accent-ink); }
+table.data td.col-input { background: rgba(31,157,85,.05); }
+.cell-inp { width: 74px; font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--accent-2); border-radius: 5px; background: var(--panel); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.cell-inp:focus { outline: 2px solid var(--accent-2); outline-offset: 0; }
 `;
 
 // ui/main.jsx
-import { jsx as jsx21 } from "react/jsx-runtime";
+import { jsx as jsx22 } from "react/jsx-runtime";
 function injectStyle() {
   if (document.getElementById("capacity-sim-style")) return;
   const el2 = document.createElement("style");
@@ -7062,7 +7401,7 @@ function injectStyle() {
 function mount(container) {
   injectStyle();
   const root = createRoot(container);
-  root.render(/* @__PURE__ */ jsx21(App, {}));
+  root.render(/* @__PURE__ */ jsx22(App, {}));
   return root;
 }
 var el = typeof document !== "undefined" ? document.getElementById("root") : null;

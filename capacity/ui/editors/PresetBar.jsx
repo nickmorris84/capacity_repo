@@ -4,12 +4,13 @@ import { SelectField } from "../components/primitives.jsx";
 /* Apply-only preset selector. Patterns are created and edited in Settings; on the
    Queues tab you only apply them. Choosing a pattern applies its values and then
    resets, so the same pattern can be re-applied. */
-export function ApplyPreset({ presets, onApply, label = "Apply pattern" }) {
+export function ApplyPreset({ presets, onApply, label = "Apply pattern", id }) {
   const [pick, setPick] = useState("");
   return (
     <div style={{ minWidth: 200, maxWidth: 260 }}>
       <SelectField
         label={label}
+        id={id}
         value={pick}
         onChange={(v) => { const p = presets.find((x) => x.id === v); if (p) onApply(p); setPick(""); }}
         options={[{ value: "", label: "Apply a pattern…" }, ...presets.map((p) => ({ value: p.id, label: p.name + (p.builtin ? "" : " ★") }))]}

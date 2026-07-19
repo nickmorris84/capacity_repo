@@ -9,12 +9,12 @@ import { MONTHS } from "../format.js";
    Application (which pattern a queue or the system uses) happens on the Queues
    tab — this card never touches the live config. */
 
-function MonthEditor({ months, onChange }) {
+function MonthEditor({ months, onChange, testid }) {
   return (
-    <div className="fieldrow">
+    <div className="fieldrow" data-testid={testid}>
       {MONTHS.map((m, i) => (
         <div key={m} style={{ width: 82 }}>
-          <NumField label={m} unit="%" value={+(months[i] * 100).toFixed(0)}
+          <NumField label={m} unit="%" value={+(months[i] * 100).toFixed(0)} id={testid ? testid + "-" + i : undefined}
             onChange={(v) => { const n = months.slice(); n[i] = v / 100; onChange(n); }} />
         </div>
       ))}
@@ -44,21 +44,19 @@ export function PresetLibrary({ kind, presets, setPresets, eng }) {
         <input type="text" className="inp" style={{ maxWidth: 220 }} placeholder="new pattern name"
           value={newName} onChange={(e) => setNewName(e.target.value)} data-testid={"preset-new-" + kind} />
         <button type="button" className="btn sm primary" onClick={add} data-testid={"preset-add-" + kind}>+ Add pattern</button>
-        <span className="note" style={{ padding: "6px 10px" }}>{presets.length} pattern(s). Built-ins are read-only. Apply patterns to the system or a queue on the Queues tab.</span>
+        <span className="note" style={{ padding: "6px 10px" }}>{presets.length} pattern(s). Create, edit and delete freely — edits flow to any queue using the pattern on the next re-simulation. Apply patterns on the Queues tab.</span>
       </div>
       {presets.map((p) => (
-        <div className="preset-item" key={p.id}>
+        <div className="preset-item" key={p.id} data-testid={"preset-item-" + p.id}>
           <div className="preset-item-h">
-            {p.builtin
-              ? <strong>{p.name}</strong>
-              : <input type="text" className="inp" style={{ maxWidth: 220 }} value={p.name} aria-label="Pattern name" onChange={(e) => update(p.id, { name: e.target.value })} />}
+            <input type="text" className="inp" style={{ maxWidth: 220 }} value={p.name} aria-label="Pattern name" onChange={(e) => update(p.id, { name: e.target.value })} />
             <span className="pill">{p.builtin ? "built-in" : "custom"}</span>
             <span className="spacer" />
-            {!p.builtin && <button type="button" className="btn sm danger" onClick={() => remove(p.id)} data-testid={"preset-del-" + p.id}>Delete</button>}
+            <button type="button" className="btn sm danger" onClick={() => remove(p.id)} data-testid={"preset-del-" + p.id}>Delete</button>
           </div>
-          {!p.builtin && (isSeason
-            ? <MonthEditor months={valuesOf(p)} onChange={(next) => update(p.id, { months: next })} />
-            : <IntradaySliders curve={valuesOf(p)} eng={eng} onChange={(next) => update(p.id, { curve: next })} />)}
+          {isSeason
+            ? <MonthEditor months={valuesOf(p)} onChange={(next) => update(p.id, { months: next })} testid={"preset-months-" + p.id} />
+            : <IntradaySliders curve={valuesOf(p)} eng={eng} onChange={(next) => update(p.id, { curve: next })} />}
         </div>
       ))}
     </div>

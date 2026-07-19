@@ -48,6 +48,27 @@ const STRATEGY_DEFAULTS = {
 const blankChannel = () => ({ knockOn: { repeatPct: null, spillPct: null, spillTargetQueue: null } });
 const defaultChannels = () => ({ voice: blankChannel(), digital: blankChannel(), support: blankChannel() });
 
+/* §24.5 / §7 channel presets — each seeds a channel template with the mechanics
+   of its kind. Voice: Erlang (ASA / abandon / patience). Digital Customer: live
+   interaction (concurrency + minutes SLA). Digital Workflow: backlog processing,
+   NO concurrency, handle time per item, SLA in HOURS (default 90% within 24h).
+   Service Workflow: support channel, deferrable, SLA in DAYS (default 95% within
+   5 days). Group (voice/digital/support) drives the Brand → channel hierarchy;
+   kind drives which template sections a queue inherits when it attaches. */
+export const CHANNEL_PRESETS = {
+  voice: { label: "Voice (Erlang)", kind: "voice", group: "voice", template: { type: "voice", subtype: null, asaTarget: 30, maxAbandon: 0.05, patience: 90 } },
+  digitalCustomer: { label: "Digital Customer (live)", kind: "digitalCustomer", group: "digital", template: { type: "digital", subtype: "customer", concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8 } },
+  digitalWorkflow: { label: "Digital Workflow (backlog)", kind: "digitalWorkflow", group: "digital", template: { type: "digital", subtype: "workflow", workflowSlaHours: 24, workflowSlaPct: 0.9 } },
+  serviceWorkflow: { label: "Service Workflow (support)", kind: "serviceWorkflow", group: "support", template: { type: "digital", subtype: "workflow", workflowSlaHours: 120, workflowSlaPct: 0.95, slaUnit: "days" } },
+};
+export const CHANNEL_PRESET_LIST = Object.entries(CHANNEL_PRESETS).map(([k, v]) => ({ value: k, label: v.label }));
+const defaultChannelDefs = () => [
+  { id: "ch_voice", name: "Voice", kind: "voice", group: "voice", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.voice.template)) },
+  { id: "ch_digcust", name: "Digital Customer", kind: "digitalCustomer", group: "digital", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.digitalCustomer.template)) },
+  { id: "ch_digwf", name: "Digital Workflow", kind: "digitalWorkflow", group: "digital", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.digitalWorkflow.template)) },
+  { id: "ch_svcwf", name: "Service Workflow", kind: "serviceWorkflow", group: "support", builtin: true, template: JSON.parse(JSON.stringify(CHANNEL_PRESETS.serviceWorkflow.template)) },
+];
+
 /* R2 (§15–§21) working-config migration, applied on load. Adds the R2 concept
    model — brands, pools, scenario groups, channel templates, an editable
    settings (physics + risk) block — and the crossSkill→supports shim (§14.3),
@@ -77,6 +98,8 @@ export function migrateConfig(config) {
   const out = { ...config, queues, brands };
   out.pools = Array.isArray(config.pools) ? config.pools : [];
   out.channels = config.channels || defaultChannels();
+  // §24.5/§7 channel definitions library (name + preset-seeded template).
+  out.channelDefs = Array.isArray(config.channelDefs) && config.channelDefs.length ? config.channelDefs : defaultChannelDefs();
   // Groups replace views (§19). Adopt existing groups, else derive from views 1:1.
   if (!Array.isArray(out.groups) || !out.groups.length) {
     const fromViews = (config.views || []).map((v) => ({ id: v.id.replace(/^v_/, "g_"), name: v.name, builtin: !!v.builtin, scenarioIds: Array.isArray(v.scenarioIds) ? [...v.scenarioIds] : undefined }));
@@ -127,12 +150,17 @@ function migrateR3(cfg) {
         : kn.spillPct > 0 ? null
         : primary && primary.id !== q.id ? primary.id : null,
     };
+    const subtype = q.type === "digital" ? (q.subtype || "customer") : q.subtype;
+    const channelId = q.channelId || (
+      q.channel === "support" ? "ch_svcwf"
+        : (q.type === "voice" || q.channel === "voice") ? "ch_voice"
+          : subtype === "workflow" ? "ch_digwf" : "ch_digcust");
     return {
       ...q,
       knock,
       repeatPct: knock.repeatPct, spillPct: knock.convertPct, spillTargetQueue: knock.convertTarget,
       sharing: q.sharing !== undefined ? q.sharing : (shareOf[q.id] || null),
-      subtype: q.type === "digital" ? (q.subtype || "customer") : q.subtype,
+      subtype, channelId,
       workflowSlaHours: q.workflowSlaHours != null ? q.workflowSlaHours : 24,
       workflowSlaPct: q.workflowSlaPct != null ? q.workflowSlaPct : 0.9,
       agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : (q.agentCost != null ? q.agentCost / 12 : null),
@@ -153,6 +181,34 @@ function migrateR3(cfg) {
   };
   if (!out.settings.calendar) out.settings = { ...out.settings, calendar: { weekOneDate: null } };
   return out;
+}
+
+/* §24 (R3c) live preset references. Seasonality and arrival patterns are edited
+   as a library in Settings; a queue (or the system) that APPLIES a pattern
+   stores the pattern id, and this resolver bakes the library's CURRENT values
+   into the config the engine simulates — so editing a pattern in Settings flows
+   into every queue that uses it on the next re-simulation. Pure; returns
+   content-identical config when no references are present. */
+export function resolvePresets(cfg, seasPresets, arrPresets) {
+  const seas = cfg.seasonality || {};
+  let system = seas.system;
+  if (seas.systemPresetId) {
+    const p = (seasPresets || []).find((x) => x.id === seas.systemPresetId);
+    if (p && Array.isArray(p.months)) system = p.months;
+  }
+  const queues = cfg.queues.map((q) => {
+    let nq = q;
+    if (q.seasonalPresetId && q.overrides && q.overrides.seasonality) {
+      const p = (seasPresets || []).find((x) => x.id === q.seasonalPresetId);
+      if (p && Array.isArray(p.months)) nq = { ...nq, seasonal: p.months };
+    }
+    if (q.arrivalPresetId) {
+      const p = (arrPresets || []).find((x) => x.id === q.arrivalPresetId);
+      if (p && Array.isArray(p.curve)) nq = { ...nq, profile: p.curve };
+    }
+    return nq;
+  });
+  return { ...cfg, seasonality: { ...seas, system }, queues };
 }
 
 function mergeSettings(base, over) {
@@ -497,6 +553,37 @@ export function useConfigOps(setConfig) {
   // ---- §16 channel templates ----
   const patchChannel = useCallback((ch, path, value) => setConfig((c) => ({ ...c, channels: setPath(c.channels || { voice: {}, digital: {}, support: {} }, [ch, ...path], value) })), [setConfig]);
 
+  // ---- §24.5/§7 channel definitions (name + preset-seeded template) ----
+  const addChannel = useCallback((name, presetKind) => {
+    const preset = CHANNEL_PRESETS[presetKind] || CHANNEL_PRESETS.voice;
+    const id = "ch_" + uid();
+    setConfig((c) => ({ ...c, channelDefs: [...(c.channelDefs || []), { id, name: name || preset.label, kind: preset.kind, group: preset.group, builtin: false, template: JSON.parse(JSON.stringify(preset.template)) }] }));
+    return id;
+  }, [setConfig]);
+  const patchChannelDef = useCallback((id, path, value) => setConfig((c) => ({ ...c, channelDefs: (c.channelDefs || []).map((d) => (d.id === id ? setPath(d, path, value) : d)) })), [setConfig]);
+  const deleteChannelDef = useCallback((id) => setConfig((c) => ({
+    ...c,
+    channelDefs: (c.channelDefs || []).filter((d) => d.id !== id),
+    queues: c.queues.map((q) => (q.channelId === id ? { ...q, channelId: null } : q)),
+  })), [setConfig]);
+  // Attach a queue to a channel: it inherits the template's sections (type,
+  // subtype and the SLA fields for its kind), exactly as elsewhere.
+  const attachQueueChannel = useCallback((qid, defId) => setConfig((c) => {
+    const def = (c.channelDefs || []).find((d) => d.id === defId);
+    if (!def) return c;
+    const t = def.template || {};
+    return {
+      ...c,
+      queues: c.queues.map((q) => {
+        if (q.id !== qid) return q;
+        const nq = { ...q, channelId: def.id, channel: def.group, type: t.type || q.type };
+        if (t.subtype !== undefined) nq.subtype = t.subtype;
+        ["asaTarget", "maxAbandon", "patience", "concurrency", "digitalSlaMinutes", "digitalSlaPct", "workflowSlaHours", "workflowSlaPct"].forEach((k) => { if (t[k] != null) nq[k] = t[k]; });
+        return nq;
+      }),
+    };
+  }), [setConfig]);
+
   // ---- §16 section-level inheritance flags (queue overrides a channel/brand default) ----
   const setOverride = useCallback((qid, section, on) => setConfig((c) => ({
     ...c, queues: c.queues.map((q) => (q.id === qid ? { ...q, overrides: { ...(q.overrides || {}), [section]: on } } : q)),
@@ -569,7 +656,11 @@ export function useConfigOps(setConfig) {
   const patchWeeklyVolume = useCallback((qid, week, value) => setConfig((c) => ({
     ...c, queues: c.queues.map((q) => {
       if (q.id !== qid) return q;
-      const arr = Array.isArray(q.weeklyVolumes) ? q.weeklyVolumes.slice() : [];
+      // Materialise the full series from the single figure first, so editing one
+      // week's volume never zeroes the rest (the engine reads each week directly).
+      let arr;
+      if (Array.isArray(q.weeklyVolumes)) arr = q.weeklyVolumes.slice();
+      else arr = new Array(c.engine.horizonWeeks).fill(q.dailyVolume != null ? q.dailyVolume : 0);
       arr[week] = value;
       return { ...q, weeklyVolumes: arr, dailyVolume: null };
     }),
@@ -618,6 +709,7 @@ export function useConfigOps(setConfig) {
     addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining,
     addPool, renamePool, deletePool, setPoolMember, patchPoolMember,
     patchChannel, setOverride,
+    addChannel, patchChannelDef, deleteChannelDef, attachQueueChannel,
     setResourcing, addSupport, patchSupport, deleteSupport,
     addStrategy, duplicateStrategy, deleteStrategy, patchStrategy,
     addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy,
@@ -625,5 +717,5 @@ export function useConfigOps(setConfig) {
     setSharing, patchSharing, toggleSharesWith, patchKnock,
     patchCapSegment, patchCapBrand, patchCapTotal,
     setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype,
-  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
+  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, addChannel, patchChannelDef, deleteChannelDef, attachQueueChannel, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
 }
