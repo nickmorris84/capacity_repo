@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { makeDefaultConfig } from "../engine/engine.js";
 import { useStrategySims, runMatrix, simHash, bestCell } from "./sim-set.js";
-import { useConfigOps, migrateConfig, resolvePresets } from "./config-ops.js";
+import { useConfigOps, migrateConfig } from "./config-ops.js";
 import { groupName, groupList, strategyList } from "./views.js";
 import { makeRun } from "./sim-store.js";
 import { PrintProvider } from "./print.jsx";
@@ -32,15 +32,14 @@ const TABS = [
    arrives fully loaded; the live config AUTO-SAVES continuously through
    onPersist (§26.2) and the context bar's Save creates a named Run. Mounted
    with key={record.id} so opening a different simulation re-initialises. */
-export default function Workspace({ record, onPersist, onBack, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets }) {
+export default function Workspace({ record, onPersist, onBack, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets, channelPresets }) {
   // One-time hydration from the record: migrated config, plus the persisted
   // matrix cache / selected pair (R3d-B semantics — if the cache still matches
   // the live config, auto-select the most favourable cell with a note; else
   // restore the last selected pair behind the stale banner).
   const boot = useMemo(() => {
     const cfg = migrateConfig(record.config);
-    const resolved = resolvePresets(cfg, seasonalityPresets, intradayPresets);
-    const hash = simHash(resolved);
+    const hash = simHash(cfg);
     const mc = record.matrixCache && record.matrixCache.cells ? record.matrixCache : null;
     let gid = (record.selectedPair && record.selectedPair.gid) || "g_por";
     let sid = (record.selectedPair && record.selectedPair.sid) || "S1";
@@ -74,9 +73,9 @@ export default function Workspace({ record, onPersist, onBack, intradayPresets, 
   const effectiveConfig = viewing ? migrateConfig(viewing.config) : config;
   const readOnly = !!viewing;
 
-  // §24.6: bake the CURRENT library values of any applied seasonality / arrival
-  // pattern into the config the engine simulates.
-  const simConfig = useMemo(() => resolvePresets(effectiveConfig, seasonalityPresets, intradayPresets), [effectiveConfig, seasonalityPresets, intradayPresets]);
+  // §26.6 copy-on-apply: applied pattern values are already stored in the
+  // config, so the sim config is the config itself (resolvePresets is identity).
+  const simConfig = effectiveConfig;
 
   const simSet = useStrategySims(simConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
@@ -128,7 +127,7 @@ export default function Workspace({ record, onPersist, onBack, intradayPresets, 
     activeStrategy: safeStrategy, activeGroupId: safeGroup, onSetActive: setActiveStrategyId,
     onSelectGroup: setActiveGroupId, onImportConfig: importConfig,
     matrix, matrixStale, onRunMatrix, onSelectCell, autoPicked,
-    intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets,
+    intradayPresets, seasonalityPresets, channelPresets,
   };
 
   return (
@@ -198,13 +197,11 @@ function TabBody(props) {
     case "plan": return <PlanTab sim={activeSim} config={config} viewLabel={groupName(config, props.activeGroupId)} />;
     case "data": return <DataTab sim={activeSim} config={config} ops={ops} activeGroupId={props.activeGroupId} onSelectGroup={props.onSelectGroup} />;
     case "intraday": return <IntradayTab sim={activeSim} />;
-    case "queues": return <QueuesEditor config={config} ops={ops} sim={activeSim} intradayPresets={props.intradayPresets} setIntradayPresets={props.setIntradayPresets} seasonalityPresets={props.seasonalityPresets} setSeasonalityPresets={props.setSeasonalityPresets} />;
+    case "queues": return <QueuesEditor config={config} ops={ops} sim={activeSim} intradayPresets={props.intradayPresets} seasonalityPresets={props.seasonalityPresets} />;
     case "scenarios": return <ScenariosEditor config={config} ops={ops} />;
     case "settings": return (
       <SettingsEditor
-        config={config} ops={ops}
-        intradayPresets={props.intradayPresets} setIntradayPresets={props.setIntradayPresets}
-        seasonalityPresets={props.seasonalityPresets} setSeasonalityPresets={props.setSeasonalityPresets}
+        config={config} ops={ops} channelPresets={props.channelPresets}
         sim={activeSim} sims={simSet.sims} activeStrategy={props.activeStrategy} activeGroupId={props.activeGroupId} onImportConfig={props.onImportConfig}
       />
     );

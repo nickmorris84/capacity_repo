@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { uid, clamp, generateWeeklySeries } from "../../engine/engine.js";
-import { blankQueue, applyChannelTemplate, CHANNEL_PRESETS, CHANNEL_PRESET_LIST } from "../config-ops.js";
+import { blankQueue, applyChannelTemplate } from "../config-ops.js";
 import { NumField, TextField, SelectField, Card } from "./primitives.jsx";
 
 /* §26.5 new-simulation wizard. Flow (c) runs all four steps over a blank world
@@ -16,7 +16,7 @@ const STEPS = [
   { key: "queues", label: "Queues" },
 ];
 
-export function NewSimWizard({ baseConfig, startStep = 0, defaultName, seasonalityPresets, onFinish, onCancel }) {
+export function NewSimWizard({ baseConfig, startStep = 0, defaultName, seasonalityPresets, channelPresets, onFinish, onCancel }) {
   const [step, setStep] = useState(startStep);
   const [name, setName] = useState(defaultName || "New simulation");
   const [config, setConfig] = useState(baseConfig);
@@ -98,7 +98,7 @@ export function NewSimWizard({ baseConfig, startStep = 0, defaultName, seasonali
 
         {step === 2 && (
           <Card title="Channels" sub="created from the global channel presets">
-            <ChannelsStep config={config} set={set} />
+            <ChannelsStep config={config} set={set} channelPresets={channelPresets} />
           </Card>
         )}
 
@@ -146,12 +146,14 @@ function BrandsStep({ config, set }) {
   );
 }
 
-function ChannelsStep({ config, set }) {
+function ChannelsStep({ config, set, channelPresets }) {
+  const lib = (channelPresets && channelPresets.length) ? channelPresets : [];
   const [cname, setCname] = useState("");
-  const [preset, setPreset] = useState("voice");
+  const [presetId, setPresetId] = useState(lib[0] ? lib[0].id : "");
   const add = () => {
-    const p = CHANNEL_PRESETS[preset] || CHANNEL_PRESETS.voice;
-    const nm = cname.trim() || p.label;
+    const p = lib.find((x) => x.id === presetId) || lib[0];
+    if (!p) return;
+    const nm = cname.trim() || p.name;
     set((c) => { c.channelDefs = [...(c.channelDefs || []), { id: "ch_" + uid(), name: nm, kind: p.kind, group: p.group, builtin: false, template: JSON.parse(JSON.stringify(p.template)) }]; return c; });
     setCname("");
   };
@@ -160,7 +162,7 @@ function ChannelsStep({ config, set }) {
       <div className="rowflex" style={{ marginBottom: 10 }}>
         <input type="text" className="inp" style={{ maxWidth: 220 }} placeholder="channel name (optional)" value={cname} onChange={(e) => setCname(e.target.value)} data-testid="wiz-channel-name" />
         <div style={{ minWidth: 220 }}>
-          <SelectField label="From global preset" value={preset} onChange={setPreset} options={CHANNEL_PRESET_LIST} id="wiz-channel-preset" />
+          <SelectField label="From global preset" value={presetId} onChange={setPresetId} options={lib.map((p) => ({ value: p.id, label: p.name }))} id="wiz-channel-preset" />
         </div>
         <button type="button" className="btn sm primary" style={{ alignSelf: "flex-end" }} onClick={add} data-testid="wiz-add-channel">+ Add channel</button>
       </div>

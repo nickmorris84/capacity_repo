@@ -69,4 +69,6 @@ export const KEYS = {
   // §26.2 multi-simulation shell.
   simList: "sim-list",
   simulation: (id) => "simulation-" + id,
+  // §26.6 global channel-preset library (built-ins + user-created).
+  channelPresets: "presets-channel",
 };

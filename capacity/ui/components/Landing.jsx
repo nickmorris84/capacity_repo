@@ -11,7 +11,7 @@ const dt = (iso) => { try { return iso.replace("T", " ").slice(0, 16); } catch (
    management lives here). Ticking runs compares them below — the full §26.7
    verdict-first compare, and the §26.6 global preset libraries, land in
    Session B; both have visible entry points here. */
-export function Landing({ sims, records, storageMode, storageNotice, compareSel, setCompareSel, onOpen, onRename, onDuplicate, onDelete, onDeleteRun, onNewSim, onNewInherit }) {
+export function Landing({ sims, records, storageMode, storageNotice, compareSel, setCompareSel, onOpen, onRename, onDuplicate, onDelete, onDeleteRun, onNewSim, onNewInherit, onOpenPresets, onOpenCompare }) {
   const [renaming, setRenaming] = useState(null);   // sim id being renamed
   const [renameVal, setRenameVal] = useState("");
   const [deleting, setDeleting] = useState(null);   // sim id pending typed confirm
@@ -19,7 +19,6 @@ export function Landing({ sims, records, storageMode, storageNotice, compareSel,
   const [newOpen, setNewOpen] = useState(false);
   const [sourceId, setSourceId] = useState("");
   const [newName, setNewName] = useState("");
-  const [stub, setStub] = useState(null);           // "compare" | "presets"
 
   const toggleRun = (runId) => setCompareSel((sel) => (sel.includes(runId) ? sel.filter((x) => x !== runId) : [...sel, runId]));
   const allRuns = sims.flatMap((s) => ((records[s.id] || {}).runs || []).map((r) => ({ ...r, simName: s.name })));
@@ -41,22 +40,12 @@ export function Landing({ sims, records, storageMode, storageNotice, compareSel,
         <div className="rowflex" style={{ margin: "6px 0 16px" }}>
           <h1 className="landing-title">Simulations</h1>
           <span className="spacer" />
-          <button type="button" className="btn" onClick={() => { setStub(stub === "presets" ? null : "presets"); }} data-testid="landing-presets">Global presets</button>
-          <button type="button" className="btn" onClick={() => { setStub(stub === "compare" ? null : "compare"); }} data-testid="landing-compare">Compare</button>
+          <button type="button" className="btn" onClick={onOpenPresets} data-testid="landing-presets">Global presets</button>
+          <button type="button" className="btn" onClick={onOpenCompare} data-testid="landing-compare">Compare</button>
           <button type="button" className="btn primary" onClick={() => setNewOpen(!newOpen)} data-testid="landing-new-sim">+ New simulation</button>
         </div>
 
         {storageNotice && <p className="note" style={{ marginBottom: 12 }}>{storageNotice}</p>}
-        {stub === "compare" && (
-          <p className="note" style={{ marginBottom: 12 }} data-testid="compare-stub">
-            The verdict-first cross-simulation Compare arrives in part B. Until then, tick runs on the cards below to compare them side by side.
-          </p>
-        )}
-        {stub === "presets" && (
-          <p className="note" style={{ marginBottom: 12 }} data-testid="presets-stub">
-            The global preset libraries (channels, arrival patterns, seasonality) move here in part B. For now, edit them inside a simulation under Simulation Settings.
-          </p>
-        )}
 
         {newOpen && (
           <div className="card" style={{ marginBottom: 16 }} data-testid="new-sim-panel">

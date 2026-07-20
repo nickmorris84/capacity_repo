@@ -111,6 +111,25 @@ export async function loadRecord(storage, id) {
   return await storage.get(KEYS.simulation(id));
 }
 
+/* §26.6 delete-in-use guard. Which loaded simulations still reference a global
+   preset by provenance (arrival / seasonal overlay / system seasonality)?
+   Returns the simulation names, so a blocked delete can name them. Runs are NOT
+   scanned — they are frozen copies that a preset delete must never touch, so a
+   preset used only by a saved Run is freely deletable. */
+export function simsUsingPreset(records, presetId) {
+  const names = [];
+  for (const rec of Object.values(records || {})) {
+    if (!rec || !rec.config) continue;
+    const cfg = rec.config;
+    const used = (cfg.queues || []).some((q) =>
+      (q.arrivalProv && q.arrivalProv.presetId === presetId) ||
+      (q.seasonalProv && q.seasonalProv.presetId === presetId))
+      || (cfg.seasonality && cfg.seasonality.systemProv && cfg.seasonality.systemProv.presetId === presetId);
+    if (used) names.push(rec.name);
+  }
+  return names;
+}
+
 // Read-modify-write a record (stamping updatedAt), then refresh its index
 // entry. Returns { record, list }.
 export async function saveRecord(storage, record) {

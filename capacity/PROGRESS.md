@@ -1127,3 +1127,84 @@ exports + normal form); deleted `ui/components/SnapshotsTab.jsx`;
 preset libraries on the landing (workspace libraries + in-sim preset
 affordances removed there), §26.7 verdict-first Compare (the landing's interim
 tick-compare panel is its placeholder).
+
+## R4-B (SPEC §26.6/§26.7 — global presets + verdict-first Compare; UI only)
+New gate `tests/r4b.test.js` (11 tests, R4-B / §26.6–§26.7 GATE: GREEN) with the
+ENTIRE battery green — P1 20 · R1 19 · R2 27 · R3a 20 · R3d-A 5 · P7b 20 · R3b 9 ·
+R3c 9 · R3d-B 6 · R4-A 12 · **R4-B 11** · §13 harness 20 = **178 tests, 0
+failures**. Engine untouched (`git diff engine/` empty vs the R4 baseline, per
+the R4 hard gate). `/dist` rebuilt. Zero console noise (incl. React act
+warnings) across every suite.
+
+1. **Global presets (§26.6) — the ONLY place presets are created/edited.** A new
+   landing screen (`ui/components/GlobalPresets.jsx`) hosts three libraries:
+   **Channel presets** (four built-ins from `CHANNEL_PRESETS` + user-created, new
+   `CHANNEL_PRESET_LIBRARY`/`makeChannelPreset` in `ui/presets.js`), **Seasonality**
+   and **Arrival** patterns (the `PresetLibrary` editor, moved off the workspace).
+   All three persist app-wide (`presets-channel` joins the existing intraday /
+   seasonality keys). The Simulation-Settings "Preset libraries" section that A
+   kept is REMOVED; the workspace can only APPLY. Channel creation in Settings and
+   the wizard now reads the global channel-preset library and copies the chosen
+   template.
+2. **Copy-on-apply + Re-sync (§26.6).** Applying a seasonality/arrival pattern now
+   COPIES its values into the config and stamps provenance `{presetId, presetName,
+   appliedAt}` (`applyQueuePattern`/`applySystemPattern` in config-ops); the engine
+   reads the copy, so editing a global preset never mutates a running simulation or
+   its Runs. `resolvePresets` is therefore an identity passthrough (superseded the
+   R3c live-baking resolver — the workspace sim path is unchanged, `simConfig ===
+   effectiveConfig`). Each applied use carries a **Re-sync from global** control
+   (`ReSync` in QueuesEditor): when the global preset has diverged from the applied
+   copy (`patternDiffers`) it previews the changed values (old→new) and copies them
+   on demand, re-stamping appliedAt. Hand-editing a value clears provenance (unlinks,
+   as before). Deleting a seasonality/arrival preset still referenced by a
+   simulation's provenance is BLOCKED, naming the simulations (`simsUsingPreset`
+   scans loaded records; Runs — frozen copies — are deliberately not scanned).
+3. **Verdict-first Compare (§26.7).** New pure builder module `ui/compare.js` and
+   landing screen `ui/components/Compare.jsx`. The picker lists every simulation's
+   Runs plus a **Live now** entry; 2–4 selectable, each with a persistent colour
+   chip; one is the switchable **reference** and every delta re-bases when it
+   changes. Layout: (1) headline strip (all-in £, weeks red, customers lost,
+   best-all-in highlighted) with a one-line auto-verdict vs the reference;
+   (2) **What changed** — an exact config diff (`configDiff`, built on the shared
+   `flattenParameters`) listing changed scalar assumptions old→new, added/removed
+   scenario factors, and strategy changes; (3) collapsible **Money** (all-in
+   overlay + cost delta table), **Service** (coverage overlay + weeks-red-per-queue
+   heat strip), **People** (headcount, attrition, burnout, coverage) sections — every
+   figure a value + delta chip coloured by good/bad DIRECTION (`dirClass`: cost up =
+   red, coverage up = green), never by arithmetic sign; (4) per-queue accordion
+   matched by name, sorted by largest |Δ all-in| first. Live comparators compute on
+   demand (`computeLive` mirrors the workspace's activeSim path) and cache by the
+   simulation's updatedAt; Runs render instantly. All wide content stays inside
+   width-capped wrappers — the page never scrolls horizontally.
+4. **Small workspace addition** for the gate: the queue Attrition field gained an
+   `id` (`q-attrition-<id>`) so the What-changed diff could be induced and asserted.
+
+### Existing tests updated to §26.6 copy-on-apply (justified, per R4)
+Engine suites untouched. Two R3c items exercised chrome/behaviour §26.6 changes:
+* `tests/r3c.test.js` #6 — previously asserted **live-linking** (editing a preset in
+  Settings moved a queue). §26.6 replaces live-linking with copy-on-apply, and preset
+  editing moved to the landing, so the old premise is gone. Rewritten to the surviving
+  essence — a global pattern created on the landing and APPLIED to a queue moves its
+  simulated coverage — with the live-link→re-sync behaviour now covered exhaustively by
+  the R4-B gate.
+* `tests/r3c.test.js` #7 — the workspace channel picker now carries global channel-preset
+  **ids** (`cp_digitalWorkflow`) rather than raw kind keys (`digitalWorkflow`); the one
+  selector value was updated. The assertions (no concurrency, hours SLA, queue inherits
+  on attach) are unchanged.
+
+Files: new `ui/compare.js`, `ui/components/Compare.jsx`, `ui/components/GlobalPresets.jsx`,
+`tests/r4b.test.js`; edited `ui/presets.js` (channel-preset library), `ui/config-ops.js`
+(copy-on-apply ops, `resolvePresets` identity, `patternDiffers`, `addChannel` from a preset
+object, exported `applyChannelTemplate`/`blankQueue`), `ui/sim-store.js` (`simsUsingPreset`),
+`ui/storage.js` (`channelPresets` key), `ui/App.jsx` (channel-preset state/persist, presets +
+compare screens, delete-in-use guard), `ui/Workspace.jsx` (identity sim config, channel
+presets through), `ui/editors/SettingsEditor.jsx` (preset-libraries section removed, global
+channel picker), `ui/editors/PresetLibrary.jsx` (delete-in-use guard, built-ins read-only),
+`ui/editors/QueuesEditor.jsx` (apply→copy-on-apply, `ReSync`, attrition id),
+`ui/components/NewSimWizard.jsx` (channels from the global library),
+`ui/components/Landing.jsx` (stub buttons → real screens), `ui/style.js` (Compare styles);
+`package.json` (wire r4b); `/dist` rebuilt.
+
+Human gate: open the app fresh on a phone — it lands on the library with the original
+work sitting as "Simulation 1", one tap from opening; Global presets and Compare are the
+two buttons beside New simulation.

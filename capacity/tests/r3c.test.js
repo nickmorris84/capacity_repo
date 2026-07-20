@@ -152,31 +152,35 @@ async function run() {
     ok(/factor|New factor|group/i.test(ro.textContent), "the read-only accordion lists the targeting group/factor");
   });
 
-  await t("6 — editing a preset's month in Settings moves a queue that uses it", async () => {
-    await goto("Simulation Settings");
+  // R4-B §26.6: patterns are created on the landing (the only place), and apply
+  // is copy-on-apply — editing a preset no longer live-links into a running sim
+  // (that path is the R4-B re-sync gate). This test now proves the surviving
+  // essence: a global pattern applied to a queue moves its simulated coverage.
+  await t("6 — a global seasonality pattern applied to a queue moves its coverage (§26.6)", async () => {
+    await goto("Data");
+    const before = $('[data-testid="cell-cover-1"]').textContent;
+    // Create a spiked pattern on the landing Global-presets screen.
+    click($('[data-testid="back-to-landing"]')); await settle(300);
+    click($('[data-testid="landing-presets"]')); await settle(150);
     setV($('[data-testid="preset-new-seasonality"]'), "R3c pattern");
     click($('[data-testid="preset-add-seasonality"]')); await settle(120);
-    // both libraries render preset-item-* — pick the seasonality one by its name
-    const item = $$('[data-testid^="preset-item-"]').find((r) => { const inp = r.querySelector('input[aria-label="Pattern name"]'); return inp && inp.value === "R3c pattern"; });
-    ok(item, "the new seasonality pattern appears in the library");
+    const item = $$('[data-testid^="preset-item-sp_"]').find((r) => { const inp = r.querySelector('input[aria-label="Pattern name"]'); return inp && inp.value === "R3c pattern"; });
+    ok(item, "the new pattern appears in the global library");
     const pid = item.getAttribute("data-testid").slice("preset-item-".length);
-    // link the pattern to the system seasonality (every queue then uses it)
+    setV(gid("preset-months-" + pid + "-0"), 400); await settle(80); // January ×4
+    // Apply it (copy-on-apply) to the system seasonality in the workspace.
+    click($('[data-testid="presets-back"]')); await settle(300);
+    click($('[data-testid^="sim-open-"]')); await settle(400);
     await goto("Queues");
     setV(gid("system-seasonality-apply"), pid); await settle(350);
     await goto("Data");
-    const cov = () => $('[data-testid="cell-cover-1"]').textContent;
-    const before = cov();
-    // now edit January of that pattern in Settings — a live-linked queue must move
-    await goto("Simulation Settings");
-    setV(gid("preset-months-" + pid + "-0"), 400); await settle(400);
-    await goto("Data");
-    ok(cov() !== before, `the linked pattern edit re-simulated the queue (${before} → ${cov()})`);
+    ok($('[data-testid="cell-cover-1"]').textContent !== before, `applying the pattern moved week-1 coverage (${before} → ${$('[data-testid="cell-cover-1"]').textContent})`);
   });
 
   await t("7 — a Digital Workflow channel has no concurrency + hours SLA; a queue attached inherits it", async () => {
     await goto("Simulation Settings");
     setV($('[data-testid="channel-name"]'), "Complaints");
-    setV(gid("channel-preset"), "digitalWorkflow"); await settle(60);
+    setV(gid("channel-preset"), "cp_digitalWorkflow"); await settle(60);
     click($('[data-testid="add-channel"]')); await settle(200);
     const rows = $$('#panel-settings [data-testid^="chdef-ch_"]');
     const row = rows.find((r) => { const inp = r.querySelector('input[aria-label="Channel name"]'); return inp && inp.value === "Complaints"; });

@@ -188,32 +188,24 @@ function migrateR3(cfg) {
   return out;
 }
 
-/* §24 (R3c) live preset references. Seasonality and arrival patterns are edited
-   as a library in Settings; a queue (or the system) that APPLIES a pattern
-   stores the pattern id, and this resolver bakes the library's CURRENT values
-   into the config the engine simulates — so editing a pattern in Settings flows
-   into every queue that uses it on the next re-simulation. Pure; returns
-   content-identical config when no references are present. */
-export function resolvePresets(cfg, seasPresets, arrPresets) {
-  const seas = cfg.seasonality || {};
-  let system = seas.system;
-  if (seas.systemPresetId) {
-    const p = (seasPresets || []).find((x) => x.id === seas.systemPresetId);
-    if (p && Array.isArray(p.months)) system = p.months;
-  }
-  const queues = cfg.queues.map((q) => {
-    let nq = q;
-    if (q.seasonalPresetId && q.overrides && q.overrides.seasonality) {
-      const p = (seasPresets || []).find((x) => x.id === q.seasonalPresetId);
-      if (p && Array.isArray(p.months)) nq = { ...nq, seasonal: p.months };
-    }
-    if (q.arrivalPresetId) {
-      const p = (arrPresets || []).find((x) => x.id === q.arrivalPresetId);
-      if (p && Array.isArray(p.curve)) nq = { ...nq, profile: p.curve };
-    }
-    return nq;
-  });
-  return { ...cfg, seasonality: { ...seas, system }, queues };
+/* §26.6 copy-on-apply. Applying a pattern COPIES its values into the config and
+   stores provenance {presetId, presetName, appliedAt}; the engine reads the
+   copied values, never the live library — so a landing edit to a global preset
+   never silently mutates a simulation or its Runs. Re-sync (per applied use)
+   is the only path that pulls new values in. This resolver is therefore an
+   identity passthrough: the config the engine simulates is exactly the stored
+   config. Kept as a named export so the workspace sim path is unchanged.
+   (Superseded the R3c live-baking resolver — see PROGRESS R4-B.) */
+export function resolvePresets(cfg) {
+  return cfg;
+}
+
+/* Does a preset's live values differ from the copy a use currently holds?
+   Drives the "Re-sync from global" affordance (§26.6). Compares element-wise. */
+export function patternDiffers(applied, live) {
+  if (!Array.isArray(applied) || !Array.isArray(live)) return false;
+  if (applied.length !== live.length) return true;
+  return applied.some((v, i) => Math.abs((v || 0) - (live[i] || 0)) > 1e-9);
 }
 
 /* Pure: a queue inheriting a channel definition's template sections (type,
@@ -573,10 +565,14 @@ export function useConfigOps(setConfig) {
   const patchChannel = useCallback((ch, path, value) => setConfig((c) => ({ ...c, channels: setPath(c.channels || { voice: {}, digital: {}, support: {} }, [ch, ...path], value) })), [setConfig]);
 
   // ---- §24.5/§7 channel definitions (name + preset-seeded template) ----
-  const addChannel = useCallback((name, presetKind) => {
-    const preset = CHANNEL_PRESETS[presetKind] || CHANNEL_PRESETS.voice;
+  // §26.6: `preset` is a global channel-preset object {kind, group, template,
+  // name|label} (copy-on-apply — later preset edits never touch this channel).
+  // A bare CHANNEL_PRESETS key is still accepted for back-compat.
+  const addChannel = useCallback((name, preset) => {
+    const p = typeof preset === "string" ? CHANNEL_PRESETS[preset] : preset;
+    const src = p || CHANNEL_PRESETS.voice;
     const id = "ch_" + uid();
-    setConfig((c) => ({ ...c, channelDefs: [...(c.channelDefs || []), { id, name: name || preset.label, kind: preset.kind, group: preset.group, builtin: false, template: JSON.parse(JSON.stringify(preset.template)) }] }));
+    setConfig((c) => ({ ...c, channelDefs: [...(c.channelDefs || []), { id, name: name || src.name || src.label, kind: src.kind, group: src.group, builtin: false, template: JSON.parse(JSON.stringify(src.template)) }] }));
     return id;
   }, [setConfig]);
   const patchChannelDef = useCallback((id, path, value) => setConfig((c) => ({ ...c, channelDefs: (c.channelDefs || []).map((d) => (d.id === id ? setPath(d, path, value) : d)) })), [setConfig]);
@@ -708,6 +704,23 @@ export function useConfigOps(setConfig) {
     ...c, queues: c.queues.map((q) => (q.id === qid ? { ...q, subtype } : q)),
   })), [setConfig]);
 
+  // ---- §26.6 copy-on-apply: apply / re-sync a global pattern to a use ----
+  // Applying (and re-syncing — same op) copies the preset's CURRENT values into
+  // the config and stamps provenance {presetId, presetName, appliedAt}. The
+  // engine reads the copy; editing the global preset later does nothing until
+  // the next apply/re-sync. Hand-editing a value clears provenance (patchQueue).
+  const prov = (preset) => ({ presetId: preset.id, presetName: preset.name, appliedAt: new Date().toISOString() });
+  const applyQueuePattern = useCallback((qid, kind, preset) => setConfig((c) => ({
+    ...c, queues: c.queues.map((q) => {
+      if (q.id !== qid) return q;
+      if (kind === "arrival") return { ...q, profile: [...preset.curve], arrivalProv: prov(preset), arrivalPresetId: preset.id };
+      return { ...q, seasonal: [...preset.months], seasonalProv: prov(preset), seasonalPresetId: preset.id };
+    }),
+  })), [setConfig]);
+  const applySystemPattern = useCallback((preset) => setConfig((c) => ({
+    ...c, seasonality: { ...c.seasonality, system: [...preset.months], systemProv: prov(preset), systemPresetId: preset.id },
+  })), [setConfig]);
+
   return useMemo(() => ({
     patch, patchQueue, addQueue, duplicateQueue, deleteQueue,
     addHire, patchHire, deleteHire,
@@ -726,5 +739,6 @@ export function useConfigOps(setConfig) {
     setSharing, patchSharing, toggleSharesWith, patchKnock,
     patchCapSegment, patchCapBrand, patchCapTotal,
     setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype,
-  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, addChannel, patchChannelDef, deleteChannelDef, attachQueueChannel, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype]);
+    applyQueuePattern, applySystemPattern,
+  }), [patch, patchQueue, addQueue, duplicateQueue, deleteQueue, addHire, patchHire, deleteHire, addServiceTeam, patchServiceTeam, deleteServiceTeam, addScenario, addUnifiedScenario, patchScenario, deleteScenario, addView, renameView, toggleViewScenario, deleteView, addGroup, renameGroup, deleteGroup, toggleGroupScenario, addBrand, patchBrand, deleteBrand, setQueueBrand, toggleBrandTraining, addPool, renamePool, deletePool, setPoolMember, patchPoolMember, patchChannel, setOverride, addChannel, patchChannelDef, deleteChannelDef, attachQueueChannel, setResourcing, addSupport, patchSupport, deleteSupport, addStrategy, duplicateStrategy, deleteStrategy, patchStrategy, addSegment, patchSegment, deleteSegment, saveScheduleAsStrategy, setSharing, patchSharing, toggleSharesWith, patchKnock, patchCapSegment, patchCapBrand, patchCapTotal, setWeekOneDate, setQueueVolume, patchWeeklyVolume, patchGroupScope, toggleGroupScopeTarget, addFactor, setQueueSubtype, applyQueuePattern, applySystemPattern]);
 }

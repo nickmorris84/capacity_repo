@@ -401,6 +401,30 @@ table.data td.col-input { background: var(--accent-tint-2); }
 .set-h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--accent-text); margin: 0 0 10px; }
 .set-h4 + .fieldrow { margin-bottom: 14px; }
 
+/* ---- §26.7 Compare ---- */
+.cmp-picker { display: flex; flex-direction: column; gap: 6px; }
+.cmp-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 8px; border-radius: var(--r-btn); cursor: pointer; }
+.cmp-opt.on { background: var(--surface-alt); font-weight: 600; }
+.cmp-chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+.cmp-chip.sm { width: 9px; height: 9px; margin-right: 5px; vertical-align: -1px; }
+.cmp-headline { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.cmp-card { border: 1px solid var(--border); border-top: 3px solid var(--ink-subtle); border-radius: var(--r-card); background: var(--surface); padding: 14px; }
+.cmp-card.best { background: var(--accent-tint-2); border-color: var(--accent-border); }
+.cmp-card-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.cmp-card-h strong { font-size: 14px; }
+.cmp-kpis { display: flex; gap: 16px; flex-wrap: wrap; }
+.cmp-kpis .stat { min-width: 72px; }
+.cmp-verdict { font-size: 12.5px; color: var(--ink-muted); margin: 12px 0 8px; line-height: 1.5; }
+.cmp-refpick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ink-muted); cursor: pointer; }
+.cmp-diff { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.cmp-diff li { display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; }
+.cmp-diff-k { min-width: 190px; color: var(--ink-muted); }
+.cmp-diff-v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.delta-chip { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 6px; padding: 1px 6px; border-radius: var(--r-chip); background: var(--surface-alt); color: var(--ink-subtle); }
+.delta-chip.delta-bad { color: var(--risk-text); background: var(--risk-tint); }
+.delta-chip.delta-good { color: var(--green-text); background: var(--green-tint); }
+.delta-chip.flat { color: var(--ink-subtle); }
+
 /* ═══ Print (Definitive guide): A4 portrait, ink economy, greyscale-safe ═══ */
 @page { size: A4 portrait; margin: 14mm 15mm; }
 @media print {

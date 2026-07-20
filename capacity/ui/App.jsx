@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { makeBlankConfig } from "../engine/engine.js";
 import { migrateConfig } from "./config-ops.js";
-import { INTRADAY_PRESETS, SEASONALITY_PRESETS } from "./presets.js";
+import { INTRADAY_PRESETS, SEASONALITY_PRESETS, CHANNEL_PRESET_LIBRARY } from "./presets.js";
 import { makeStorageAdapter, KEYS } from "./storage.js";
-import { loadOrMigrate, loadRecord, saveRecord, deleteRecord, renameRecord, duplicateRecord, makeSimRecord } from "./sim-store.js";
+import { loadOrMigrate, loadRecord, saveRecord, deleteRecord, renameRecord, duplicateRecord, makeSimRecord, simsUsingPreset } from "./sim-store.js";
 import { Landing } from "./components/Landing.jsx";
 import { NewSimWizard } from "./components/NewSimWizard.jsx";
+import { GlobalPresets } from "./components/GlobalPresets.jsx";
+import { Compare } from "./components/Compare.jsx";
 import Workspace from "./Workspace.jsx";
 
 /* §26.1 two-level app root. Level 1 is the Landing (the app opens here);
@@ -23,19 +25,21 @@ export default function App() {
   const [compareSel, setCompareSel] = useState([]); // ticked run ids on the landing
   const [intradayPresets, setIntradayPresets] = useState(INTRADAY_PRESETS);
   const [seasonalityPresets, setSeasonalityPresets] = useState(SEASONALITY_PRESETS);
+  const [channelPresets, setChannelPresets] = useState(CHANNEL_PRESET_LIBRARY);
   const hydrated = useRef(false);
   const recordRef = useRef(null);
 
-  // Boot: user presets + the §26.2 storage migration / first-run bootstrap.
+  // Boot: global preset libraries + the §26.2 storage migration / bootstrap.
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [ip, sp, list] = await Promise.all([
-        storage.get(KEYS.intraday), storage.get(KEYS.seasonality), loadOrMigrate(storage),
+      const [ip, sp, cp, list] = await Promise.all([
+        storage.get(KEYS.intraday), storage.get(KEYS.seasonality), storage.get(KEYS.channelPresets), loadOrMigrate(storage),
       ]);
       if (!alive) return;
       if (Array.isArray(ip) && ip.length) setIntradayPresets([...INTRADAY_PRESETS, ...ip]);
       if (Array.isArray(sp) && sp.length) setSeasonalityPresets([...SEASONALITY_PRESETS, ...sp]);
+      if (Array.isArray(cp) && cp.length) setChannelPresets([...CHANNEL_PRESET_LIBRARY, ...cp]);
       setSims(list);
       hydrated.current = true;
     })();
@@ -44,6 +48,10 @@ export default function App() {
 
   useEffect(() => { if (hydrated.current) storage.set(KEYS.intraday, intradayPresets.filter((p) => !p.builtin)); }, [intradayPresets, storage]);
   useEffect(() => { if (hydrated.current) storage.set(KEYS.seasonality, seasonalityPresets.filter((p) => !p.builtin)); }, [seasonalityPresets, storage]);
+  useEffect(() => { if (hydrated.current) storage.set(KEYS.channelPresets, channelPresets.filter((p) => !p.builtin)); }, [channelPresets, storage]);
+
+  // §26.6 delete-in-use guard: which loaded simulations reference a preset.
+  const presetUsage = useCallback((presetId) => simsUsingPreset(records, presetId), [records]);
 
   // The landing cards list each simulation's runs — load full records for it.
   useEffect(() => {
@@ -135,10 +143,26 @@ export default function App() {
     return (
       <NewSimWizard
         baseConfig={screen.baseConfig} startStep={screen.startStep} defaultName={screen.name}
-        seasonalityPresets={seasonalityPresets}
+        seasonalityPresets={seasonalityPresets} channelPresets={channelPresets}
         onFinish={finishWizard} onCancel={backToLanding}
       />
     );
+  }
+
+  if (screen.view === "presets") {
+    return (
+      <GlobalPresets
+        onBack={backToLanding} eng={{ dayStart: 8, intervalMin: 30 }}
+        channelPresets={channelPresets} setChannelPresets={setChannelPresets}
+        intradayPresets={intradayPresets} setIntradayPresets={setIntradayPresets}
+        seasonalityPresets={seasonalityPresets} setSeasonalityPresets={setSeasonalityPresets}
+        usageOf={presetUsage}
+      />
+    );
+  }
+
+  if (screen.view === "compare") {
+    return <Compare sims={sims} records={records} onBack={backToLanding} />;
   }
 
   if (screen.view === "workspace" && record) {
@@ -147,6 +171,7 @@ export default function App() {
         key={record.id} record={record} onPersist={persistPartial} onBack={backToLanding}
         intradayPresets={intradayPresets} setIntradayPresets={setIntradayPresets}
         seasonalityPresets={seasonalityPresets} setSeasonalityPresets={setSeasonalityPresets}
+        channelPresets={channelPresets}
       />
     );
   }
@@ -157,6 +182,7 @@ export default function App() {
       compareSel={compareSel} setCompareSel={setCompareSel}
       onOpen={openSim} onRename={doRename} onDuplicate={doDuplicate} onDelete={doDelete} onDeleteRun={doDeleteRun}
       onNewSim={(name) => startWizard("scratch", null, name)} onNewInherit={onNewInherit}
+      onOpenPresets={() => setScreen({ view: "presets" })} onOpenCompare={() => setScreen({ view: "compare" })}
     />
   );
 }

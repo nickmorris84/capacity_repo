@@ -1,4 +1,5 @@
 import { SEASONAL_PRESETS, DEFAULT_PROFILE, uid } from "../engine/engine.js";
+import { CHANNEL_PRESETS } from "./config-ops.js";
 
 /* Intraday arrival-pattern presets (SPEC §1). Each curve has one value per
    30-min interval across the 08:00–20:00 window (24 points). Curves are relative
@@ -26,3 +27,18 @@ export const SEASONALITY_PRESETS = Object.entries(SEASONAL_PRESETS).map(([name, 
 
 export const makeIntradayPreset = (name, curve) => ({ id: "ip_" + uid(), name, builtin: false, curve: [...curve] });
 export const makeSeasonalityPreset = (name, months) => ({ id: "sp_" + uid(), name, builtin: false, months: [...months] });
+
+/* §26.6 Channel presets — a global library (built-ins + user-created), the ONLY
+   place channel templates are created or edited. Creating a channel inside a
+   simulation copies the chosen preset's template (copy-on-apply). The four
+   built-ins come from CHANNEL_PRESETS (single source of truth for their
+   mechanics); users add their own from any of the four kinds. */
+export const CHANNEL_PRESET_LIBRARY = Object.entries(CHANNEL_PRESETS).map(([key, v]) => ({
+  id: "cp_" + key, name: v.label, builtin: true, kind: v.kind, group: v.group,
+  template: JSON.parse(JSON.stringify(v.template)),
+}));
+
+export const makeChannelPreset = (name, kind) => {
+  const base = CHANNEL_PRESETS[kind] || CHANNEL_PRESETS.voice;
+  return { id: "cp_" + uid(), name: name || base.label, builtin: false, kind: base.kind, group: base.group, template: JSON.parse(JSON.stringify(base.template)) };
+};

@@ -2,9 +2,40 @@ import { useState } from "react";
 import { NumField, TextField, SelectField, Card, Hint } from "../components/primitives.jsx";
 import { ApplyPreset, IntradaySliders } from "./PresetBar.jsx";
 import { DependencyView } from "../components/DependencyView.jsx";
+import { patternDiffers } from "../config-ops.js";
 import { supportersOf, channelOf, generateWeeklySeries } from "../../engine/engine.js";
 import { buildWeeklyRows, assumptionsColumns } from "../reporting.js";
 import { MONTHS } from "../format.js";
+
+/* §26.6 per-use "Re-sync from global". `applied` is the copy the use currently
+   holds; `preset` (found by provenance id in the global library) may have moved
+   on. When they diverge, offer a diff preview then apply. Landing edits never
+   silently mutate a simulation — this is the only pull-through. */
+function ReSync({ prov, presets, applied, valuesOf, onApply, unit = "%", testid }) {
+  const [open, setOpen] = useState(false);
+  if (!prov || !prov.presetId) return null;
+  const preset = (presets || []).find((p) => p.id === prov.presetId);
+  if (!preset) return <span className="pill" data-testid={testid + "-orphan"}>from “{prov.presetName}” (deleted)</span>;
+  const live = valuesOf(preset);
+  const differs = patternDiffers(applied, live);
+  if (!differs) return <span className="pill" data-testid={testid + "-insync"}>synced · {preset.name}</span>;
+  const changed = live.map((v, i) => ({ i, from: applied[i], to: v })).filter((d) => Math.abs((d.from || 0) - (d.to || 0)) > 1e-9);
+  return (
+    <span className="rowflex" style={{ gap: 8 }}>
+      <button type="button" className="btn sm" onClick={() => setOpen(!open)} data-testid={testid + "-open"}>Re-sync from global</button>
+      {open && (
+        <div className="pop" style={{ position: "static" }} data-testid={testid + "-diff"}>
+          <div className="lab" style={{ marginBottom: 6 }}>“{preset.name}” has changed — {changed.length} value(s):</div>
+          <div style={{ maxWidth: 360, fontSize: 12, lineHeight: 1.6 }}>
+            {changed.slice(0, 8).map((d) => <span key={d.i} className="pill" style={{ marginRight: 6 }}>#{d.i + 1}: {Math.round((d.from || 0) * (unit === "%" ? 100 : 1))}{unit === "%" ? "%" : ""}→{Math.round((d.to || 0) * (unit === "%" ? 100 : 1))}{unit === "%" ? "%" : ""}</span>)}
+            {changed.length > 8 && <span className="pill">+{changed.length - 8} more</span>}
+          </div>
+          <button type="button" className="btn sm primary" style={{ marginTop: 8 }} onClick={() => { onApply(preset); setOpen(false); }} data-testid={testid + "-apply"}>Apply update</button>
+        </div>
+      )}
+    </span>
+  );
+}
 
 const RES_OPTIONS = [
   { value: "dedicated", label: "Dedicated" },
@@ -268,10 +299,11 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
           <summary><strong>Arrival pattern</strong></summary>
           <div className="acc-b">
             <div className="rowflex">
-              <ApplyPreset presets={intradayPresets} onApply={(p) => { ops.patchQueue(q.id, ["profile"], [...p.curve]); ops.patchQueue(q.id, ["arrivalPresetId"], p.id); }} label="Apply arrival pattern" />
-              <span className="note" style={{ padding: "6px 10px" }}>Apply a pattern to link it live; editing that pattern in Settings re-simulates this queue. Hand-tuning below unlinks it.</span>
+              <ApplyPreset presets={intradayPresets} onApply={(p) => ops.applyQueuePattern(q.id, "arrival", p)} label="Apply arrival pattern" />
+              <ReSync prov={q.arrivalProv} presets={intradayPresets} applied={q.profile} valuesOf={(p) => p.curve} unit="x" onApply={(p) => ops.applyQueuePattern(q.id, "arrival", p)} testid={"arrival-resync-" + q.id} />
+              <span className="note" style={{ padding: "6px 10px" }}>Applying copies the pattern's values (copy-on-apply). Edit patterns on the landing → Global presets; Re-sync to pull changes. Hand-tuning below unlinks it.</span>
             </div>
-            <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => { ops.patchQueue(q.id, ["profile"], next); ops.patchQueue(q.id, ["arrivalPresetId"], null); }} />
+            <IntradaySliders curve={q.profile} eng={eng} onChange={(next) => { ops.patchQueue(q.id, ["profile"], next); ops.patchQueue(q.id, ["arrivalProv"], null); ops.patchQueue(q.id, ["arrivalPresetId"], null); }} />
           </div>
         </details>
 
@@ -282,7 +314,7 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
             <div className="fieldrow">
               <NumField label="Agent cost" unit="/mo" value={q.agentCostMonthly != null ? q.agentCostMonthly : (q.agentCost != null ? Math.round(q.agentCost / 12) : 0)} onChange={(v) => { ops.patchQueue(q.id, ["agentCostMonthly"], v); ops.patchQueue(q.id, ["agentCost"], v * 12); }} hint="Fully-loaded monthly cost per agent. The engine works weekly (× 12 ÷ 52)." />
               <NumField label="Shrinkage" unit="%" value={+(q.shrinkage * 100).toFixed(1)} onChange={(v) => ops.patchQueue(q.id, ["shrinkage"], v / 100)} hint="Paid time not on contacts — leave, sickness, meetings." />
-              <NumField label="Attrition" unit="%/mo" value={+(wf.attrition * 100).toFixed(2)} onChange={(v) => ops.patchQueue(q.id, ["wf", "attrition"], v / 100)} />
+              <NumField label="Attrition" unit="%/mo" value={+(wf.attrition * 100).toFixed(2)} onChange={(v) => ops.patchQueue(q.id, ["wf", "attrition"], v / 100)} id={"q-attrition-" + q.id} />
             </div>
             <div className="fieldrow">
               <NumField label="Req-to-start" unit="wk" value={wf.reqToStart} onChange={(v) => ops.patchQueue(q.id, ["wf", "reqToStart"], v)} />
@@ -385,10 +417,11 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
               <>
                 <div className="rowflex" style={{ marginBottom: 8 }}>
                   <button type="button" className="btn sm" onClick={() => ops.patchQueue(q.id, ["seasonal"], Array.isArray(q.seasonal) ? q.seasonal : new Array(12).fill(1))}>Initialise overlay</button>
-                  <ApplyPreset presets={seasonalityPresets} onApply={(p) => { ops.patchQueue(q.id, ["seasonal"], [...p.months]); ops.patchQueue(q.id, ["seasonalPresetId"], p.id); }} label="Apply seasonality pattern" />
-                  {q.seasonalPresetId ? <span className="pill" data-testid={"q-seasonal-linked-" + q.id}>linked</span> : <span className="note" style={{ padding: "6px 10px" }}>Multiplies on top of the system pattern. Apply a pattern to link it live.</span>}
+                  <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.applyQueuePattern(q.id, "seasonal", p)} label="Apply seasonality pattern" />
+                  <ReSync prov={q.seasonalProv} presets={seasonalityPresets} applied={q.seasonal} valuesOf={(p) => p.months} onApply={(p) => ops.applyQueuePattern(q.id, "seasonal", p)} testid={"q-seasonal-resync-" + q.id} />
+                  {!q.seasonalProv && <span className="note" style={{ padding: "6px 10px" }}>Multiplies on top of the system pattern. Applying copies a pattern's values (copy-on-apply).</span>}
                 </div>
-                {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); ops.patchQueue(q.id, ["seasonalPresetId"], null); }} /></div>)}</div>}
+                {Array.isArray(q.seasonal) && <div className="fieldrow">{q.seasonal.map((v, i) => <div key={i} style={{ width: 72 }}><NumField label={"M" + (i + 1)} unit="%" value={+(v * 100).toFixed(0)} onChange={(nv) => { const n = q.seasonal.slice(); n[i] = nv / 100; ops.patchQueue(q.id, ["seasonal"], n); ops.patchQueue(q.id, ["seasonalProv"], null); ops.patchQueue(q.id, ["seasonalPresetId"], null); }} /></div>)}</div>}
               </>
             ) : <p className="note">Inheriting the system seasonality only. Turn on Override to add a queue overlay.</p>}
           </div>
@@ -411,20 +444,18 @@ function QueueCard({ config, q, ops, sim, intradayPresets, seasonalityPresets, d
 // System seasonality — the multiplier applied to every queue.
 function SystemSeasonality({ config, ops, seasonalityPresets }) {
   const seas = config.seasonality;
-  const usingPreset = seas.systemPresetId ? seasonalityPresets.find((p) => p.id === seas.systemPresetId) : null;
   return (
-    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Apply a pattern to link it live — editing that pattern in Settings then re-simulates every queue. Hand-editing a month unlinks it.">
+    <Card title="System seasonality" hint="One multiplier per calendar month, applied to every queue from the week-1 date across the horizon. Applying a pattern copies its values (copy-on-apply); edit patterns on the landing → Global presets and Re-sync to pull changes. Hand-editing a month unlinks it.">
       <div className="rowflex" style={{ marginBottom: 12 }}>
-        <ApplyPreset presets={seasonalityPresets} onApply={(p) => { ops.patch(["seasonality", "system"], [...p.months]); ops.patch(["seasonality", "systemPresetId"], p.id); }} label="Apply seasonality pattern" id="system-seasonality-apply" />
-        {usingPreset
-          ? <span className="pill" data-testid="system-seasonality-linked">Linked · {usingPreset.name}</span>
-          : <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns in Settings → Seasonality patterns.</span>}
+        <ApplyPreset presets={seasonalityPresets} onApply={(p) => ops.applySystemPattern(p)} label="Apply seasonality pattern" id="system-seasonality-apply" />
+        <ReSync prov={seas.systemProv} presets={seasonalityPresets} applied={seas.system} valuesOf={(p) => p.months} onApply={(p) => ops.applySystemPattern(p)} testid="system-seasonality-resync" />
+        {!seas.systemProv && <span className="note" style={{ padding: "6px 10px" }}>Create and edit patterns on the landing → Global presets.</span>}
       </div>
       <div className="fieldrow">
         {MONTHS.map((m, i) => (
           <div key={m} style={{ width: 82 }}>
             <NumField label={m} unit="%" value={+((seas.system[i] || 0) * 100).toFixed(0)}
-              onChange={(v) => { const n = seas.system.slice(); n[i] = v / 100; ops.patch(["seasonality", "system"], n); ops.patch(["seasonality", "systemPresetId"], null); }} />
+              onChange={(v) => { const n = seas.system.slice(); n[i] = v / 100; ops.patch(["seasonality", "system"], n); ops.patch(["seasonality", "systemProv"], null); ops.patch(["seasonality", "systemPresetId"], null); }} />
           </div>
         ))}
       </div>

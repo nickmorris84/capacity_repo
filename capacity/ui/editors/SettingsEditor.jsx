@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { NumField, TextField, SelectField, Hint } from "../components/primitives.jsx";
 import { FilesCard } from "../components/FilesCard.jsx";
-import { PresetLibrary } from "./PresetLibrary.jsx";
-import { CHANNEL_PRESET_LIST } from "../config-ops.js";
 import { clamp } from "../../engine/engine.js";
 
 const CHANNELS = [{ key: "voice", label: "Voice" }, { key: "digital", label: "Digital" }, { key: "support", label: "Support" }];
@@ -59,18 +57,21 @@ function ChannelTemplateFields({ d, ops }) {
   );
 }
 
-function ChannelsManager({ config, ops }) {
+function ChannelsManager({ config, ops, channelPresets }) {
   const [name, setName] = useState("");
-  const [preset, setPreset] = useState("voice");
+  const lib = channelPresets && channelPresets.length ? channelPresets : [];
+  const [presetId, setPresetId] = useState(lib[0] ? lib[0].id : "");
+  const chosen = lib.find((p) => p.id === presetId) || lib[0];
   return (
     <>
       <div className="rowflex" style={{ marginBottom: 10 }}>
         <input type="text" className="inp" style={{ maxWidth: 200 }} placeholder="new channel name" value={name} onChange={(e) => setName(e.target.value)} data-testid="channel-name" />
         <div style={{ minWidth: 210 }}>
-          <SelectField label="Preset" value={preset} onChange={setPreset} options={CHANNEL_PRESET_LIST} id="channel-preset" />
+          <SelectField label="From global channel preset" value={presetId} onChange={setPresetId} options={lib.map((p) => ({ value: p.id, label: p.name }))} id="channel-preset" />
         </div>
-        <button type="button" className="btn sm primary" style={{ alignSelf: "flex-end" }} onClick={() => { ops.addChannel(name.trim() || undefined, preset); setName(""); }} data-testid="add-channel">+ Add channel</button>
+        <button type="button" className="btn sm primary" style={{ alignSelf: "flex-end" }} onClick={() => { ops.addChannel(name.trim() || undefined, chosen); setName(""); }} data-testid="add-channel">+ Add channel</button>
       </div>
+      <p className="note" style={{ marginBottom: 10 }}>Channel presets are created and edited on the landing under Global presets. Adding a channel copies the chosen preset — later preset edits don't touch it.</p>
       <div className="rows">
         {(config.channelDefs || []).map((d) => {
           const count = (config.queues || []).filter((q) => q.channelId === d.id).length;
@@ -166,7 +167,7 @@ function CapsMatrix({ config, ops }) {
 /* Simulation Settings (§26.4) — full-width collapsible sections, all collapsed
    by default except Start. The preset libraries and the Files card remain
    reachable here until the Session-B landing libraries take over. */
-export function SettingsEditor({ config, ops, intradayPresets, setIntradayPresets, seasonalityPresets, setSeasonalityPresets, sim, sims, activeStrategy, activeGroupId, onImportConfig }) {
+export function SettingsEditor({ config, ops, channelPresets, sim, sims, activeStrategy, activeGroupId, onImportConfig }) {
   const eng = config.engine, hir = config.hiring, costs = config.costs, cx = config.cx, loops = config.loops;
   const set = config.settings || {};
   const cal = set.calendar || {};
@@ -220,8 +221,8 @@ export function SettingsEditor({ config, ops, intradayPresets, setIntradayPreset
       </Sec>
 
       <Sec title="Channels" testid="settings-sec-channels"
-        hint="Create a channel from a preset — its template carries the mechanics of that kind. Queues attach to a channel on the Queues tab and inherit its sections.">
-        <ChannelsManager config={config} ops={ops} />
+        hint="Create a channel from a global channel preset — its template carries the mechanics of that kind. Queues attach to a channel on the Queues tab and inherit its sections.">
+        <ChannelsManager config={config} ops={ops} channelPresets={channelPresets} />
       </Sec>
 
       <Sec title="Hiring caps" sub="brand × channel matrix" testid="settings-sec-caps"
@@ -299,14 +300,6 @@ export function SettingsEditor({ config, ops, intradayPresets, setIntradayPreset
             <div style={{ width: 96 }}><NumField label="≥ weeks" value={(risk.unmannedStarvation || {}).weeks} onChange={(v) => S(["risk", "unmannedStarvation", "weeks"], v)} /></div>
           </div>
         </div>
-      </Sec>
-
-      <Sec title="Preset libraries" sub="moving to the landing in part B" testid="settings-sec-presets"
-        hint="Named seasonality and arrival patterns, shared by every simulation. Apply a pattern to the system or a queue on the Queues tab.">
-        <h4 className="set-h4">Seasonality patterns</h4>
-        <PresetLibrary kind="seasonality" presets={seasonalityPresets} setPresets={setSeasonalityPresets} eng={config.engine} />
-        <h4 className="set-h4" style={{ marginTop: 16 }}>Arrival patterns</h4>
-        <PresetLibrary kind="arrival" presets={intradayPresets} setPresets={setIntradayPresets} eng={config.engine} />
       </Sec>
 
       <Sec title="Files & import/export" testid="settings-sec-files">
