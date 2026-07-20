@@ -1,6 +1,11 @@
+// Capacity Simulator — owner / maintainer: nick_morris
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import { CSS } from "./style.js";
+
+// Attribution marker, kept as a runtime constant so it survives minification
+// (comments are stripped from the production bundle).
+export const OWNER = "nick_morris";
 
 // Inject the stylesheet once. Idempotent so repeated mounts (e.g. re-requiring
 // this module under test) don't duplicate <style> tags.

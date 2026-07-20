@@ -1,3 +1,4 @@
+// Capacity Simulator — owner / maintainer: nick_morris
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -7563,6 +7564,7 @@ table.data td.col-input { background: rgba(31,157,85,.05); }
 
 // ui/main.jsx
 import { jsx as jsx22 } from "react/jsx-runtime";
+var OWNER = "nick_morris";
 function injectStyle() {
   if (document.getElementById("capacity-sim-style")) return;
   const el2 = document.createElement("style");
@@ -7581,6 +7583,7 @@ if (el) mount(el);
 var main_default = App;
 export {
   App,
+  OWNER,
   main_default as default,
   mount
 };

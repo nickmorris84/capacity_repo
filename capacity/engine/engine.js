@@ -1,6 +1,7 @@
 /* =========================================================================
    CALL CENTRE CAPACITY ENGINE
    Pure functions. No React, no DOM. Tested in node, inlined into artifact.
+   Owner / maintainer: nick_morris
    ========================================================================= */
 
 // ---------- small helpers ----------
