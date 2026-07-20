@@ -193,3 +193,16 @@ New tests, hand-computed where marked:
 
 ### §24 gate tests (hand-computed where marked)
 Legacy knock-on reproduced exactly post-migration; sharing — donor spare 10h at 60% share, recipients deficits 6:3 draw 6h split 4:2 (hand); cap trimming — segment grants then a binding total ceiling trims lowest-marginal first (hand); S3 forwardMonths=1 vs 6 changes req timing in the right direction; workflow subtype — 24h SLA maths on a hand-built backlog case; series anchoring — seasonality wizard week 1 uses the Settings date's month; monthly→weekly cost conversion exact; blank config simulates without crashing (empty world = empty results, no NaN). Plus the ENTIRE existing battery, unmodified.
+
+## SPEC §25 — Revision 3d: Digital Customer under Erlang
+
+§25.1 Model. Digital Customer queues are LIVE interactions and now use the validated Erlang A solver: servers = agents × concurrency (fractional blending already exists), AHT unchanged, with a patience parameter (default 180s) and abandonment output. SLA "X% within Y minutes" maps directly to the Erlang service-level at Y×60 seconds. The carrying backlog is REMOVED for this subtype — abandonment replaces it. Digital Workflow and Service Workflow keep the fluid backlog model unchanged; this split is the point: live work abandons, deferred work queues.
+
+§25.2 Requirement. Minimal-server search (existing) on effective servers; required agents = N_servers ÷ concurrency.
+
+§25.3 Knock-on. For Digital Customer, converts-to-calls now triggers on abandoned volume × convert % (was backlog excess); repeat % applies to abandons. State in Model notes that the servers=agents×concurrency treatment is the standard chat approximation and mildly optimistic about juggling costs.
+
+§25.4 Migration. Existing Digital Customer queues gain patience=180s and maxAbandon=5% defaults; backlogLimit is retired for them (retained on Workflow). PROGRESS.md must record: "numeric results for Digital Customer queues intentionally changed at R3d-A."
+
+### §25 gate tests (hand-computed where marked)
+10 agents × concurrency 2.5 ⇒ results identical to voiceRaw at N=25 with the same A/AHT/patience/target (hand); requirement search returns agents such that ceil(agents×2.5) is minimal-N (hand); a Workflow queue's results are bit-identical before/after this change (regression isolation); abandoned-chat conversion feeds the target voice queue next day (adapt the existing deflection round-trip test); small-team scale penalty visible: 4 agents @2.5 vs 10 agents @1.0 same offered load — the 4-agent case shows worse SL (economies of scale now real). ENTIRE existing battery green except any test that asserted digital-customer backlog behaviour — those may be UPDATED to the new physics but each change must be listed in PROGRESS.md with one-line justification.

@@ -29,11 +29,14 @@ function digitalRig() {
   cfg.queues = [];
   return cfg;
 }
-// A digital queue whose requirement is exactly `reqHoursPerDay` hours/day:
-// dailyVolume × 3600s AHT ÷ conc 1 ÷ 3600 ÷ ceil 1 = dailyVolume hours.
+// A digital WORKFLOW queue whose requirement is exactly `reqHoursPerDay`
+// hours/day: dailyVolume × 3600s AHT ÷ 3600 ÷ ceil 1 = dailyVolume hours. The
+// workflow subtype keeps this linear, Erlang-free scaffold (R3d-A moved the
+// Digital *Customer* subtype to Erlang A, which is not linear); every hand
+// number in this file is a supply-ladder quantity, subtype-agnostic.
 function dq(cfg, id, reqHoursPerDay, over = {}) {
   const q = {
-    id, name: id, type: "digital", dailyVolume: reqHoursPerDay, aht: 3600, concurrency: 1,
+    id, name: id, type: "digital", subtype: "workflow", dailyVolume: reqHoursPerDay, aht: 3600, concurrency: 1,
     profile: new Array(24).fill(1), digitalSlaMinutes: 60, digitalSlaPct: 0.8, backlogLimit: 1e9,
     deflectsTo: null, shrinkage: 0, fte: 0, agentCost: 30000, crossSkill: [], supports: [],
     weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90,

@@ -283,6 +283,7 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-all { font-weight: 700; font-size: 13px; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+.mx-autopick { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; font-style: italic; }
 
 /* §24 holistic hierarchy blocks + filter chips */
 .holo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }

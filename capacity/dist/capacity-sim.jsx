@@ -1,3 +1,4 @@
+// Capacity Simulator — owner / maintainer: nick_morris
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -207,12 +208,18 @@ var require_engine = __commonJS({
       if (_rcCache.size < 1e5) _rcCache.set(key, out);
       return out;
     }
-    function reqCurveDigital(q, volume, eng, cache) {
-      const key = "d" + profileId(q.profile) + "|" + Math.round(volume) + "|" + q.aht + "|" + q.concurrency + "|" + eng.occupancyCeiling + "|" + eng.intervalMin;
+    function reqCurveDigitalCustomer(q, volume, eng, cache) {
+      const conc = q.concurrency > 0 ? q.concurrency : 1;
+      const pat = customerPatience(q), maxAb = customerMaxAbandon(q);
+      const target = q.digitalSlaMinutes * 60;
+      const key = "dc" + profileId(q.profile) + "|" + Math.round(volume) + "|" + q.aht + "|" + conc + "|" + q.digitalSlaMinutes + "|" + pat + "|" + maxAb + "|" + eng.occupancyCeiling + "|" + eng.intervalMin;
       const hit = _rcCache.get(key);
       if (hit) return hit;
       const p = norm(q.profile), iSec = eng.intervalMin * 60, iHrs = eng.intervalMin / 60;
-      const agents = p.map((share) => volume * share * q.aht / (q.concurrency * iSec * eng.occupancyCeiling));
+      const agents = p.map((share) => {
+        const nServers = requiredAgentsInterval(volume * share, iSec, q.aht, pat, target, maxAb, eng.occupancyCeiling);
+        return nServers / conc;
+      });
       const out = { agents, hours: sum(agents) * iHrs };
       if (_rcCache.size < 1e5) _rcCache.set(key, out);
       return out;
@@ -229,7 +236,11 @@ var require_engine = __commonJS({
       return out;
     }
     var digitalSubtype = (q) => q.type === "digital" ? q.subtype === "workflow" ? "workflow" : "customer" : null;
-    var reqCurve = (q, v, eng, cache) => q.type === "voice" ? reqCurveVoice(q, v, eng, cache) : q.subtype === "workflow" ? reqCurveWorkflow(q, v, eng, cache) : reqCurveDigital(q, v, eng, cache);
+    var CUSTOMER_PATIENCE_DEFAULT = 180;
+    var CUSTOMER_MAXABANDON_DEFAULT = 0.05;
+    var customerPatience = (q) => q.patience != null ? q.patience : CUSTOMER_PATIENCE_DEFAULT;
+    var customerMaxAbandon = (q) => q.maxAbandon != null ? q.maxAbandon : CUSTOMER_MAXABANDON_DEFAULT;
+    var reqCurve = (q, v, eng, cache) => q.type === "voice" ? reqCurveVoice(q, v, eng, cache) : q.subtype === "workflow" ? reqCurveWorkflow(q, v, eng, cache) : reqCurveDigitalCustomer(q, v, eng, cache);
     var _normCache = /* @__PURE__ */ new WeakMap();
     function normProfile(profile) {
       let n = _normCache.get(profile);
@@ -306,6 +317,39 @@ var require_engine = __commonJS({
         sl: tv > 0 ? inSla / tv : 1,
         respMin: tv > 0 ? respW / tv : 0,
         endBacklog: B,
+        occ: occD > 0 ? occN / occD : 0,
+        byInterval
+      };
+    }
+    function runDigitalCustomerDay(q, volume, productiveHours, eng, rc, lite) {
+      const iSec = eng.intervalMin * 60;
+      const cover = rc.hours > 0 ? productiveHours / rc.hours : 1;
+      const p = normProfile(q.profile);
+      const conc = q.concurrency > 0 ? q.concurrency : 1;
+      const pat = customerPatience(q), target = q.digitalSlaMinutes * 60;
+      let tv = 0, wAsa = 0, wSl = 0, wAb = 0, occN = 0, occD = 0;
+      const byInterval = lite ? null : [];
+      for (let i = 0; i < p.length; i++) {
+        const arrivals = volume * p[i];
+        const agents = rc.agents[i] * cover;
+        const servers = agents * conc;
+        const r = voiceInterval(servers, arrivals, iSec, q.aht, pat, target);
+        if (!lite) byInterval.push({ i, arrivals, agents, servers, req: rc.agents[i], ...r });
+        tv += arrivals;
+        wAsa += r.asa * arrivals;
+        wSl += r.sl * arrivals;
+        wAb += r.abandon * arrivals;
+        occN += r.occ * servers;
+        occD += servers;
+      }
+      const asa = tv > 0 ? wAsa / tv : 0;
+      return {
+        volume: tv,
+        cover,
+        asa,
+        sl: tv > 0 ? wSl / tv : 1,
+        abandon: tv > 0 ? wAb / tv : 0,
+        respMin: asa / 60,
         occ: occD > 0 ? occN / occD : 0,
         byInterval
       };
@@ -1251,7 +1295,7 @@ var require_engine = __commonJS({
             const poolWeekHrs = t.size * t.maxHoursPerWeek * t.proficiency;
             let left = Math.max(0, poolWeekHrs - (svcUsed[t.id] || 0));
             const cand = (t.coversQueues || []).map((id) => cfg.queues.find((q) => q.id === id)).filter(Boolean).map((q) => {
-              const preview = q.type === "voice" ? runVoiceDay(st[q.id].eq, vol[q.id], hrs[q.id], eng, rc[q.id], true) : runDigitalDay(st[q.id].eq, vol[q.id], hrs[q.id], st[q.id].backlog, eng, rc[q.id], true);
+              const preview = q.type === "voice" ? runVoiceDay(st[q.id].eq, vol[q.id], hrs[q.id], eng, rc[q.id], true) : q.subtype === "workflow" ? runWorkflowDay(st[q.id].eq, vol[q.id], hrs[q.id], st[q.id].backlog, eng, rc[q.id], true) : runDigitalCustomerDay(st[q.id].eq, vol[q.id], hrs[q.id], eng, rc[q.id], true);
               return { q, deficit: Math.max(0, req[q.id] - hrs[q.id]), occ: preview.occ };
             }).filter((c) => c.deficit > 0 && c.occ >= t.triggerOccupancy).sort((a, b) => b.deficit - a.deficit);
             for (const c of cand) {
@@ -1268,27 +1312,45 @@ var require_engine = __commonJS({
             if (q.type !== "digital") continue;
             const s = st[q.id];
             const kn = knMap[q.id];
-            let r;
-            const m = s.dm;
-            if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes && m.backlog0 === s.backlog) {
-              r = m.r;
+            if (q.subtype === "workflow") {
+              let r;
+              const m = s.dm;
+              if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes && m.backlog0 === s.backlog) {
+                r = m.r;
+              } else {
+                r = runWorkflowDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
+                s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, backlog0: s.backlog, r };
+              }
+              let deflected = 0;
+              const excess = Math.max(0, r.endBacklog - q.backlogLimit);
+              if (excess > 0) {
+                deflected = excess * kn.spillPct;
+                s.backlog = r.endBacklog - deflected;
+              } else s.backlog = r.endBacklog;
+              if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
+              let repeats = 0;
+              if (kn.repeatPct > 0) {
+                repeats = r.volume * (1 - r.sl) * kn.repeatPct;
+                s.repeatNext += repeats;
+              }
+              dayRes[q.id] = { ...r, deflected, repeats };
             } else {
-              r = q.subtype === "workflow" ? runWorkflowDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0) : runDigitalDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
-              s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, backlog0: s.backlog, r };
+              let r;
+              const m = s.dm;
+              if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes) {
+                r = m.r;
+              } else {
+                r = runDigitalCustomerDay(s.eq, vol[q.id], hrs[q.id], eng, rc[q.id], d !== 0);
+                s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, r };
+              }
+              const abandoned = r.volume * r.abandon;
+              let deflected = kn.spillPct > 0 ? abandoned * kn.spillPct : 0;
+              if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
+              let repeats = kn.repeatPct > 0 ? abandoned * kn.repeatPct : 0;
+              if (repeats > 0) s.repeatNext += repeats;
+              s.backlog = 0;
+              dayRes[q.id] = { ...r, deflected, repeats };
             }
-            let deflected = 0;
-            const excess = Math.max(0, r.endBacklog - q.backlogLimit);
-            if (excess > 0) {
-              deflected = excess * kn.spillPct;
-              s.backlog = r.endBacklog - deflected;
-            } else s.backlog = r.endBacklog;
-            if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
-            let repeats = 0;
-            if (kn.repeatPct > 0) {
-              repeats = r.volume * (1 - r.sl) * kn.repeatPct;
-              s.repeatNext += repeats;
-            }
-            dayRes[q.id] = { ...r, deflected, repeats };
           }
           for (const q of cfg.queues) {
             if (q.type !== "voice") continue;
@@ -1348,6 +1410,10 @@ var require_engine = __commonJS({
               a.redial += r.repeats || 0;
               a.deflected += r.deflected || 0;
               a.backlog = st[q.id].backlog;
+              if (r.abandon != null) {
+                a.asaW += r.asa * v;
+                a.abW += r.abandon * v;
+              }
             }
           }
           if (d === 0) firstDayIntraday = { hrs: { ...hrs }, vol: { ...vol }, res: dayRes };
@@ -1392,7 +1458,7 @@ var require_engine = __commonJS({
           const asaT = q.asaTarget * (s.wkSlaMult || 1);
           const wfQ = q.type === "digital" && q.subtype === "workflow";
           const wfPct = q.workflowSlaPct != null ? q.workflowSlaPct : 0.9;
-          const ok = q.type === "voice" ? asa <= asaT && ab <= q.maxAbandon : wfQ ? sl >= wfPct && a.backlog <= (q.backlogLimit != null ? q.backlogLimit : Infinity) : sl >= q.digitalSlaPct && a.backlog <= q.backlogLimit;
+          const ok = q.type === "voice" ? asa <= asaT && ab <= q.maxAbandon : wfQ ? sl >= wfPct && a.backlog <= (q.backlogLimit != null ? q.backlogLimit : Infinity) : sl >= q.digitalSlaPct;
           const near = q.type === "voice" ? asa <= asaT * 1.5 && ab <= q.maxAbandon * 1.5 : wfQ ? sl >= wfPct * 0.9 : sl >= q.digitalSlaPct * 0.9;
           const status = ok ? "green" : near ? "amber" : "red";
           const otCost = a.otHours * hourly * set.ot.premium;
@@ -1631,8 +1697,10 @@ var require_engine = __commonJS({
         queues: [
           { id: v1, name: "Voice \u2014 Billing", type: "voice", brandId: "b1", channel: "voice", priority: 1, dailyVolume: 2e3, aht: 300, profile: [...DEFAULT_PROFILE2], asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, fte: 63, agentCost: 32e3, crossSkill: [v2], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
           { id: v2, name: "Voice \u2014 Technical", type: "voice", brandId: "b1", channel: "voice", priority: 2, dailyVolume: 900, aht: 420, profile: [...DEFAULT_PROFILE2], asaTarget: 45, maxAbandon: 0.06, patience: 100, shrinkage: 0.3, fte: 47, agentCost: 32e3, crossSkill: [], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
-          { id: d1, name: "WhatsApp \u2014 Service", type: "digital", brandId: "b1", channel: "digital", priority: 3, dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE2], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
-          { id: d2, name: "Chat \u2014 Sales", type: "digital", brandId: "b1", channel: "digital", priority: 4, dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE2], concurrency: 2, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() }
+          // §25.4: Digital Customer chat patience defaults to 180 s (people wait
+          // longer on an async-feeling chat than on a phone line); maxAbandon 5%.
+          { id: d1, name: "WhatsApp \u2014 Service", type: "digital", brandId: "b1", channel: "digital", priority: 3, dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE2], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 180, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+          { id: d2, name: "Chat \u2014 Sales", type: "digital", brandId: "b1", channel: "digital", priority: 4, dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE2], concurrency: 2, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 3e4, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 180, resourcing: "resourced", supports: [], wf: wf(), burn: burn() }
         ],
         serviceTeams: [{ id: "st_1", name: "Flex pool", size: 12, premiumPct: 0.2, proficiency: 0.8, triggerOccupancy: 0.9, maxHoursPerWeek: 20, agentCost: 32e3, coversQueues: [v1, v2] }],
         costs: { managerCost: 48e3, managerRatio: 12 },
@@ -1842,6 +1910,11 @@ var require_engine = __commonJS({
             spillTargetQueue: knock.convertTarget,
             sharing: q.sharing || shareOf[q.id] || null,
             subtype: q.type === "digital" ? q.subtype || "customer" : q.subtype,
+            // §25.4: Digital Customer queues gain patience 180 s + maxAbandon 5%
+            // defaults (Erlang inputs); backlogLimit is retired for them (the field
+            // may linger but the engine ignores it) — Workflow keeps it.
+            patience: q.type === "digital" && (q.subtype || "customer") === "customer" ? q.patience != null ? q.patience : 180 : q.patience,
+            maxAbandon: q.type === "digital" && (q.subtype || "customer") === "customer" ? q.maxAbandon != null ? q.maxAbandon : 0.05 : q.maxAbandon,
             agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? q.agentCost / 12 : null,
             slaAttainmentTarget: q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9
           };
@@ -1917,7 +1990,12 @@ var require_engine = __commonJS({
       generateWeeklySeries: generateWeeklySeries2,
       primaryVoiceQueue: primaryVoiceQueue2,
       groupScopeQueueIds,
-      applyGroupScope: applyGroupScope2
+      applyGroupScope: applyGroupScope2,
+      // Revision 3d (SPEC §25) — Digital Customer under Erlang
+      runDigitalCustomerDay,
+      reqCurveDigitalCustomer,
+      customerPatience,
+      customerMaxAbandon
     };
   }
 });
@@ -2113,6 +2191,24 @@ function runMatrix(config) {
     }
   }
   return { hash: simHash(config), cells };
+}
+function bestCell(matrix) {
+  if (!matrix || !matrix.cells) return null;
+  let best = null;
+  const better = (a, b) => {
+    if (a.holds !== b.holds) return a.holds;
+    if (a.holds) return a.allIn < b.allIn;
+    if (a.redWeeks !== b.redWeeks) return a.redWeeks < b.redWeeks;
+    return a.allIn < b.allIn;
+  };
+  for (const gid of Object.keys(matrix.cells)) {
+    for (const sid of Object.keys(matrix.cells[gid])) {
+      const c = matrix.cells[gid][sid];
+      const cand = { gid, sid, allIn: c.allIn, redWeeks: c.redWeeks, holds: c.redWeeks === 0 };
+      if (!best || better(cand, best)) best = cand;
+    }
+  }
+  return best ? { gid: best.gid, sid: best.sid } : null;
 }
 
 // ui/config-ops.js
@@ -2350,10 +2446,11 @@ function useConfigOps(setConfig) {
       return { ...c, queues: nextQueues };
     });
   }, [setConfig]);
-  const addQueue = useCallback(() => {
+  const addQueue = useCallback((brandId) => {
     setConfig((c) => {
       const q = blankQueue(c.queues.length + 1);
-      q.brandId = c.brands && c.brands[0] && c.brands[0].id || "b1";
+      const has = brandId && (c.brands || []).some((b) => b.id === brandId);
+      q.brandId = has ? brandId : c.brands && c.brands[0] && c.brands[0].id || "b1";
       q.channel = "voice";
       q.priority = c.queues.reduce((m, x) => Math.max(m, x.priority || 0), 0) + 1;
       q.resourcing = "dedicated";
@@ -2941,7 +3038,10 @@ var KEYS = {
   run: (slug) => "sim-" + slug,
   intraday: "presets-intraday",
   seasonality: "presets-seasonality",
-  views: "views"
+  views: "views",
+  // R3d-B: last decision-matrix result (hash + cells) plus the selected
+  // (group × strategy) pair, so a reopen can auto-select or restore.
+  matrix: "matrix-state"
 };
 
 // ui/saved-runs.js
@@ -3458,17 +3558,24 @@ function columnsFor(queue, cur = "\xA3") {
   const N0 = (v) => num(v, 0);
   const N1 = (v) => num(v, 1);
   const M = (v) => money(cur, v);
+  const workflow = queue.type === "digital" && queue.subtype === "workflow";
   const service = queue.type === "voice" ? [
     { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
     { key: "asa", label: "ASA (s)", group: "Service", fmt: (v) => secs(v) },
     { key: "sl", label: "SL", group: "Service", fmt: P0 },
     { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
     { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
-  ] : [
+  ] : workflow ? [
     { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
     { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
     { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
     { key: "backlog", label: "Backlog", group: "Service", fmt: N0 },
+    { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
+  ] : [
+    { key: "cover", label: "Coverage", group: "Service", fmt: P0 },
+    { key: "respMin", label: "Response (m)", group: "Service", fmt: N1 },
+    { key: "sl", label: "In SLA", group: "Service", fmt: P0 },
+    { key: "abandon", label: "Abandon", group: "Service", fmt: P1 },
     { key: "occ", label: "Occupancy", group: "Service", fmt: P0 }
   ];
   return [
@@ -3766,11 +3873,12 @@ var Stat = ({ l, v, sub }) => /* @__PURE__ */ jsxs4("div", { className: "stat", 
     ] }) : null
   ] })
 ] });
-function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }) {
+function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy, autoPicked }) {
   const cur = config.engine.currency;
   const groups = groupList(config);
   const strategies = strategyList(config);
   return /* @__PURE__ */ jsxs4(Card, { title: "Decision matrix", sub: "groups \xD7 strategies", hint: "Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.", children: [
+    autoPicked && !matrixStale && /* @__PURE__ */ jsx5("div", { className: "mx-autopick", "data-testid": "matrix-autopick-note", children: "Selected the most favourable cell \u2014 based on your last matrix run." }),
     matrixStale && /* @__PURE__ */ jsxs4("div", { className: "mx-stale", "data-testid": "matrix-stale", children: [
       /* @__PURE__ */ jsx5("span", { children: matrix ? "Config changed \u2014 the matrix is stale." : "Matrix not yet computed." }),
       /* @__PURE__ */ jsx5("button", { type: "button", className: "btn sm primary", onClick: onRunMatrix, "data-testid": "run-matrix", children: "Run matrix" })
@@ -3821,7 +3929,7 @@ function QueueSummaryTable({ sim, config }) {
   ];
   return /* @__PURE__ */ jsx5(HierTable, { config, testid: "queue-summary", columns, metric: (q) => queueSummaryMetric(sim, q), aggregate: sumQueueSummary });
 }
-function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
+function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell, autoPicked }) {
   const cur = config.engine.currency;
   const verdict = buildVerdict(sims, activeStrategy, activeGroupId, config);
   const blocks = buildAudienceBlocks(sim, config);
@@ -3844,7 +3952,7 @@ function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId
       groupName(config, activeGroupId),
       ". Print or save to PDF from the context bar above."
     ] }) }),
-    /* @__PURE__ */ jsx5(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }),
+    /* @__PURE__ */ jsx5(DecisionMatrix, { config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy, autoPicked }),
     /* @__PURE__ */ jsxs4(Card, { title: "Verdict & key findings", children: [
       /* @__PURE__ */ jsx5("p", { style: { margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }, children: verdict.paragraph }),
       /* @__PURE__ */ jsxs4("div", { className: "findings", children: [
@@ -4661,6 +4769,7 @@ function Findings({ findings }) {
 }
 function QueueCard({ q, s }) {
   const voice = q.type === "voice";
+  const customer = q.type === "digital" && q.subtype !== "workflow";
   return /* @__PURE__ */ jsxs9("div", { className: "qcard " + s.status, children: [
     /* @__PURE__ */ jsxs9("div", { className: "qn", children: [
       /* @__PURE__ */ jsx10("span", { children: q.name }),
@@ -4681,6 +4790,15 @@ function QueueCard({ q, s }) {
         /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
           /* @__PURE__ */ jsx10("div", { className: "l", children: "ASA" }),
           /* @__PURE__ */ jsx10("div", { className: "v", children: secs(s.asa) })
+        ] }),
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "Abandon" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.abandon, 1) })
+        ] })
+      ] }) : customer ? /* @__PURE__ */ jsxs9(Fragment3, { children: [
+        /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
+          /* @__PURE__ */ jsx10("div", { className: "l", children: "In SLA" }),
+          /* @__PURE__ */ jsx10("div", { className: "v", children: pct(s.sl) })
         ] }),
         /* @__PURE__ */ jsxs9("div", { className: "kpi", children: [
           /* @__PURE__ */ jsx10("div", { className: "l", children: "Abandon" }),
@@ -5259,7 +5377,7 @@ function IntradayTab({ sim }) {
   const week = sim.weeks[Math.min(wk, sim.weeks.length - 1)];
   const day = week.intraday;
   const byInterval = day && day.res[q.id] && day.res[q.id].byInterval || [];
-  const voice = q.type === "voice";
+  const erlang = q.type === "voice" || q.type === "digital" && q.subtype !== "workflow";
   const data = byInterval.map((iv) => ({
     t: intervalLabel(iv.i, eng),
     required: +iv.req.toFixed(2),
@@ -5315,7 +5433,7 @@ function IntradayTab({ sim }) {
         /* @__PURE__ */ jsx12("th", { children: "Arrivals" }),
         /* @__PURE__ */ jsx12("th", { children: "Required" }),
         /* @__PURE__ */ jsx12("th", { children: "Available" }),
-        voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+        erlang ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
           /* @__PURE__ */ jsx12("th", { children: "ASA" }),
           /* @__PURE__ */ jsx12("th", { children: "Abandon" }),
           /* @__PURE__ */ jsx12("th", { children: "SL" })
@@ -5332,7 +5450,7 @@ function IntradayTab({ sim }) {
           /* @__PURE__ */ jsx12("td", { children: Math.round(iv.arrivals) }),
           /* @__PURE__ */ jsx12("td", { children: num(iv.req, 1) }),
           /* @__PURE__ */ jsx12("td", { children: num(iv.agents, 1) }),
-          voice ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
+          erlang ? /* @__PURE__ */ jsxs11(Fragment5, { children: [
             /* @__PURE__ */ jsx12("td", { children: secs(iv.asa) }),
             /* @__PURE__ */ jsx12("td", { children: pct(iv.abandon, 1) }),
             /* @__PURE__ */ jsx12("td", { children: pct(iv.sl) })
@@ -6049,7 +6167,7 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
             "Attaching a channel sets this queue's channel group (",
             chLabel,
             ") and inherits its template sections. Create channels in Settings \u2192 Channels.",
-            isDigital ? workflow ? " Workflow: backlog processing \u2014 no concurrency; SLA in hours." : " Customer: live interaction \u2014 concurrency and a minutes SLA." : ""
+            isDigital ? workflow ? " Workflow: backlog processing \u2014 no concurrency; SLA in hours." : " Customer: live interaction modelled as Erlang A with servers = agents \xD7 concurrency \u2014 the standard chat approximation, mildly optimistic about the cost of juggling several conversations at once." : ""
           ] })
         ] })
       ] }),
@@ -6114,12 +6232,16 @@ function QueueCard2({ config, q, ops, sim, intradayPresets, seasonalityPresets, 
             /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "h", value: q.workflowSlaHours != null ? q.workflowSlaHours : 24, onChange: (v) => ops.patchQueue(q.id, ["workflowSlaHours"], v), id: "q-sla-hours-" + q.id }),
             /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +((q.workflowSlaPct != null ? q.workflowSlaPct : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["workflowSlaPct"], v / 100) }),
             /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
-          ] }) : /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
-            /* @__PURE__ */ jsx17(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v), id: "q-concurrency-" + q.id }),
-            /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
-            /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
-            /* @__PURE__ */ jsx17(NumField, { label: "Backlog limit", value: q.backlogLimit, onChange: (v) => ops.patchQueue(q.id, ["backlogLimit"], v) })
-          ] }),
+          ] }) : (
+            // §25 Digital Customer (Erlang): concurrency + minutes SLA + patience
+            // (drives abandonment). No backlog limit — the backlog is retired.
+            /* @__PURE__ */ jsxs16("div", { className: "fieldrow", children: [
+              /* @__PURE__ */ jsx17(NumField, { label: "Concurrency", value: q.concurrency, onChange: (v) => ops.patchQueue(q.id, ["concurrency"], v), id: "q-concurrency-" + q.id }),
+              /* @__PURE__ */ jsx17(NumField, { label: "SLA within", unit: "min", value: q.digitalSlaMinutes, onChange: (v) => ops.patchQueue(q.id, ["digitalSlaMinutes"], v) }),
+              /* @__PURE__ */ jsx17(NumField, { label: "SLA target", unit: "%", value: +(q.digitalSlaPct * 100).toFixed(1), onChange: (v) => ops.patchQueue(q.id, ["digitalSlaPct"], v / 100) }),
+              /* @__PURE__ */ jsx17(NumField, { label: "Patience", unit: "s", value: q.patience != null ? q.patience : 180, onChange: (v) => ops.patchQueue(q.id, ["patience"], v), id: "q-patience-" + q.id, hint: "Average seconds a customer waits before abandoning the chat \u2014 drives abandonment; behaviour, not a target." })
+            ] })
+          ),
           /* @__PURE__ */ jsx17("div", { className: "fieldrow", style: { maxWidth: 220 }, children: /* @__PURE__ */ jsx17(NumField, { label: "SLA attainment target", unit: "%", value: +((q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9) * 100).toFixed(0), onChange: (v) => ops.patchQueue(q.id, ["slaAttainmentTarget"], v / 100), hint: "Share of weeks that must hold SLA for the Business box to read green." }) })
         ] })
       ] }),
@@ -6236,13 +6358,20 @@ function QueuesEditor({ config, ops, sim, intradayPresets, setIntradayPresets, s
       }) })
     ] }, label) : null;
     return /* @__PURE__ */ jsxs16("div", { className: "grid", style: { gap: 8 }, "data-testid": "brand-section-" + b.id, children: [
-      /* @__PURE__ */ jsxs16("div", { className: "section-title", style: { fontSize: 15, color: "var(--ink)" }, children: [
-        "Brand \xB7 ",
-        b.name,
-        " ",
-        /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
-          qs.length,
-          " queue(s)"
+      /* @__PURE__ */ jsxs16("div", { className: "section-title rowflex", style: { fontSize: 15, color: "var(--ink)", alignItems: "center" }, children: [
+        /* @__PURE__ */ jsxs16("span", { children: [
+          "Brand \xB7 ",
+          b.name,
+          " ",
+          /* @__PURE__ */ jsxs16("span", { className: "pill", children: [
+            qs.length,
+            " queue(s)"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx17("span", { className: "spacer" }),
+        /* @__PURE__ */ jsxs16("button", { type: "button", className: "btn sm primary", onClick: () => ops.addQueue(b.id), "data-testid": "brand-add-queue-" + b.id, children: [
+          "+ Add queue to ",
+          b.name
         ] })
       ] }),
       ["voice", "digital", "support"].map((ch) => chBlock(ch.charAt(0).toUpperCase() + ch.slice(1), byCh(ch))),
@@ -6886,13 +7015,55 @@ function App() {
   const simSet = useStrategySims(simConfig, safeStrategy, safeGroup);
   const { activeSim, pending } = simSet;
   const [matrix, setMatrix] = useState18(null);
+  const [autoPicked, setAutoPicked] = useState18(false);
   const liveHash = useMemo3(() => simHash(simConfig), [simConfig]);
+  const liveHashRef = useRef4(liveHash);
+  liveHashRef.current = liveHash;
+  const matrixHydrated = useRef4(false);
   const matrixStale = !matrix || matrix.hash !== liveHash;
-  const onRunMatrix = useCallback4(() => setMatrix(runMatrix(simConfig)), [simConfig]);
+  const onRunMatrix = useCallback4(() => {
+    setMatrix(runMatrix(simConfig));
+    setAutoPicked(false);
+  }, [simConfig]);
   const onSelectCell = useCallback4((gid, sid) => {
     setActiveGroupId(gid);
     setActiveStrategyId(sid);
+    setAutoPicked(false);
   }, []);
+  useEffect4(() => {
+    let alive = true;
+    (async () => {
+      const ms = await storage.get(KEYS.matrix);
+      if (!alive) return;
+      if (ms) {
+        if (ms.cells) setMatrix({ hash: ms.hash, cells: ms.cells });
+        if (ms.cells && ms.hash === liveHashRef.current) {
+          const pick = bestCell({ hash: ms.hash, cells: ms.cells });
+          if (pick) {
+            setActiveGroupId(pick.gid);
+            setActiveStrategyId(pick.sid);
+            setAutoPicked(true);
+          }
+        } else if (ms.selected && ms.selected.gid) {
+          setActiveGroupId(ms.selected.gid);
+          setActiveStrategyId(ms.selected.sid);
+        }
+      }
+      matrixHydrated.current = true;
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [storage]);
+  useEffect4(() => {
+    if (!matrixHydrated.current) return;
+    const payload = { selected: { gid: safeGroup, sid: safeStrategy } };
+    if (matrix) {
+      payload.hash = matrix.hash;
+      payload.cells = matrix.cells;
+    }
+    storage.set(KEYS.matrix, payload);
+  }, [matrix, safeGroup, safeStrategy, storage]);
   const saveSnapshot = useCallback4(async (name) => {
     if (!activeSim) return;
     const rec = makeSavedRun(name, activeSim.config, activeSim);
@@ -6942,6 +7113,7 @@ function App() {
     matrixStale,
     onRunMatrix,
     onSelectCell,
+    autoPicked,
     intradayPresets,
     setIntradayPresets,
     seasonalityPresets,
@@ -7016,7 +7188,7 @@ function TabBody(props) {
   const { id, simSet, activeSim, config, ops } = props;
   switch (id) {
     case "summary":
-      return /* @__PURE__ */ jsx21(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell });
+      return /* @__PURE__ */ jsx21(SummaryTab, { sim: activeSim, sims: simSet.sims, stratIds: simSet.stratIds, config, activeStrategy: props.activeStrategy, activeGroupId: props.activeGroupId, onSetActive: props.onSetActive, matrix: props.matrix, matrixStale: props.matrixStale, onRunMatrix: props.onRunMatrix, onSelectCell: props.onSelectCell, autoPicked: props.autoPicked });
     case "strategies":
       return /* @__PURE__ */ jsx21(StrategiesTab, { simSet, config, activeStrategy: props.activeStrategy, ops });
     case "plan":
@@ -7338,6 +7510,7 @@ table.matrix th.row-h { text-align: right; white-space: nowrap; }
 .mx-cell .mx-all { font-weight: 700; font-size: 13px; }
 .mx-cell .mx-flags { font-size: 10px; color: var(--muted); margin-top: 2px; }
 .mx-stale { background: var(--amber-s); color: #8a5a06; border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+.mx-autopick { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; font-style: italic; }
 
 /* \xA724 holistic hierarchy blocks + filter chips */
 .holo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
@@ -7391,6 +7564,7 @@ table.data td.col-input { background: rgba(31,157,85,.05); }
 
 // ui/main.jsx
 import { jsx as jsx22 } from "react/jsx-runtime";
+var OWNER = "nick_morris";
 function injectStyle() {
   if (document.getElementById("capacity-sim-style")) return;
   const el2 = document.createElement("style");
@@ -7409,6 +7583,7 @@ if (el) mount(el);
 var main_default = App;
 export {
   App,
+  OWNER,
   main_default as default,
   mount
 };

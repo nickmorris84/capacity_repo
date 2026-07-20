@@ -25,6 +25,8 @@ function Findings({ findings }) {
 // uses Active (§14.6).
 function QueueCard({ q, s }) {
   const voice = q.type === "voice";
+  // §25: Digital Customer (live chat, not workflow) is Erlang — it abandons.
+  const customer = q.type === "digital" && q.subtype !== "workflow";
   return (
     <div className={"qcard " + s.status}>
       <div className="qn">
@@ -39,6 +41,11 @@ function QueueCard({ q, s }) {
         {voice ? (
           <>
             <div className="kpi"><div className="l">ASA</div><div className="v">{secs(s.asa)}</div></div>
+            <div className="kpi"><div className="l">Abandon</div><div className="v">{pct(s.abandon, 1)}</div></div>
+          </>
+        ) : customer ? (
+          <>
+            <div className="kpi"><div className="l">In SLA</div><div className="v">{pct(s.sl)}</div></div>
             <div className="kpi"><div className="l">Abandon</div><div className="v">{pct(s.abandon, 1)}</div></div>
           </>
         ) : (

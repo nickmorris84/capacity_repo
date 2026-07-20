@@ -138,29 +138,34 @@ t("seasonality flips exactly at month boundaries and nowhere else", () => {
   ok([...Array(26).keys()].some((w) => w > 0 && E.monthOfWeek(w, 0) !== E.monthOfWeek(w - 1, 0)), "no boundary found in 26 weeks?");
 });
 
-/* ---------------- 8. Deflection round trip ---------------- */
-console.log("\n[8] Deflection round trip — starved digital raises next-day voice");
-t("day-2 voice volume = base + (backlog excess × deflection %)", () => {
+/* ---------------- 8. Conversion round trip (§25) ---------------- */
+// R3d-A: Digital Customer is now Erlang A — converts-to-calls fire on ABANDONED
+// volume (was backlog excess) and there is no carrying backlog. Adapted from the
+// legacy deflection round-trip test (numbers intentionally changed at R3d-A).
+console.log("\n[8] Conversion round trip — abandoned chat raises next-day voice");
+t("day-2 voice volume = base + (day-1 abandoned × convert %); chat carries no backlog", () => {
   const cfg = E.makeDefaultConfig();
   cfg.engine.daysPerWeek = 2;
-  cfg.engine.horizonWeeks = 1;
+  cfg.engine.horizonWeeks = 1; // resolveHorizon clamps to ≥24; only week 0 is read
   cfg.scenarios.forEach((s) => (s.enabled = false));
   cfg.serviceTeams = [];
   cfg.queues.forEach((q) => { q.crossSkill = []; });
-  const wa = cfg.queues.find((x) => x.id === "q_wapp");
+  const wa = cfg.queues.find((x) => x.id === "q_wapp"); // digital customer
   const bill = cfg.queues.find((x) => x.id === "q_bill");
-  wa.fte = 0; // zero capacity: everything backlogs
+  // Isolate q_wapp as the only converter into bill (the other chat queue now
+  // shows its own tiny Erlang abandonment, so neutralise its conversion target).
+  cfg.queues.forEach((q) => { if (q.type === "digital" && q.id !== wa.id) q.deflectsTo = null; });
+  wa.fte = 0; // zero servers → every contact abandons (abandon = 1)
+  wa.profile = [1]; // single interval so the daily total is exact (no norm epsilon)
   const sim = E.simulate(cfg, { captureDaily: true, strategy: "S4" });
   const d1 = sim.weeks[0].days[0], d2 = sim.weeks[0].days[1];
   const dailyArr = wa.dailyVolume;
-  const excess1 = Math.max(0, dailyArr - wa.backlogLimit);
-  const expDefl1 = excess1 * cfg.loops.deflection;
-  eq(d1[wa.id].deflected, expDefl1, 1e-6, "day-1 deflection");
-  eq(d2[bill.id].vol, bill.dailyVolume + expDefl1, 1e-6, "day-2 voice volume");
-  // carried backlog: day2 excess = (carry + arrivals) − limit
-  const carry1 = dailyArr - expDefl1 - wa.backlogLimit + wa.backlogLimit; // end backlog after deflection
-  const expDefl2 = Math.max(0, carry1 + dailyArr - wa.backlogLimit) * cfg.loops.deflection;
-  eq(d2[wa.id].deflected, expDefl2, 1e-6, "day-2 deflection with carried backlog");
+  const expDefl = dailyArr * cfg.loops.deflection; // abandoned (= all) × convert %
+  eq(d1[wa.id].deflected, expDefl, 1e-6, "day-1 conversion = abandoned × convert %");
+  eq(d1[wa.id].backlog, 0, 1e-9, "Digital Customer carries no backlog");
+  eq(d2[bill.id].vol, bill.dailyVolume + expDefl, 1e-6, "day-2 voice volume lifted by the conversion");
+  // No backlog accumulation now, so day-2 conversion equals day-1's (steady).
+  eq(d2[wa.id].deflected, expDefl, 1e-6, "day-2 conversion steady (no carried backlog)");
 });
 
 /* ---------------- 9. Redial fixed point ---------------- */

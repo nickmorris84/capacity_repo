@@ -1,6 +1,7 @@
 /* =========================================================================
    CALL CENTRE CAPACITY ENGINE
    Pure functions. No React, no DOM. Tested in node, inlined into artifact.
+   Owner / maintainer: nick_morris
    ========================================================================= */
 
 // ---------- small helpers ----------
@@ -170,6 +171,10 @@ function reqCurveVoice(q, volume, eng, cache) {
   if (_rcCache.size < 100000) _rcCache.set(key, out);
   return out;
 }
+// RETIRED at R3d-A (§25): the fluid Digital Customer requirement. `reqCurve` no
+// longer routes to it (customer → reqCurveDigitalCustomer); kept for reference
+// alongside its day-model pair runDigitalDay, which the P1 conservation test
+// still exercises directly.
 function reqCurveDigital(q, volume, eng, cache) {
   const key = "d" + profileId(q.profile) + "|" + Math.round(volume) + "|" + q.aht + "|" + q.concurrency + "|" + eng.occupancyCeiling + "|" + eng.intervalMin;
   const hit = _rcCache.get(key); if (hit) return hit;
@@ -177,6 +182,29 @@ function reqCurveDigital(q, volume, eng, cache) {
   // Async channels queue rather than block, so there is no Erlang scale effect:
   // capacity must simply exceed demand by the occupancy headroom.
   const agents = p.map((share) => (volume * share * q.aht) / (q.concurrency * iSec * eng.occupancyCeiling));
+  const out = { agents, hours: sum(agents) * iHrs };
+  if (_rcCache.size < 100000) _rcCache.set(key, out);
+  return out;
+}
+/* §25 Digital Customer requirement: live chat is an Erlang A queue with
+   servers = agents × concurrency (each simultaneous conversation is one
+   server; AHT unchanged). The existing minimal-server search runs on the
+   effective servers, then §25.2 divides back: required agents = N_servers ÷
+   concurrency. The SLA "% within Y minutes" is the Erlang service level at
+   Y×60 s; patience defaults to 180 s and abandonment is a real output — so
+   quiet intervals need proportionally more agents (economies of scale), and
+   there is no carrying backlog. */
+function reqCurveDigitalCustomer(q, volume, eng, cache) {
+  const conc = q.concurrency > 0 ? q.concurrency : 1;
+  const pat = customerPatience(q), maxAb = customerMaxAbandon(q);
+  const target = q.digitalSlaMinutes * 60;
+  const key = "dc" + profileId(q.profile) + "|" + Math.round(volume) + "|" + q.aht + "|" + conc + "|" + q.digitalSlaMinutes + "|" + pat + "|" + maxAb + "|" + eng.occupancyCeiling + "|" + eng.intervalMin;
+  const hit = _rcCache.get(key); if (hit) return hit;
+  const p = norm(q.profile), iSec = eng.intervalMin * 60, iHrs = eng.intervalMin / 60;
+  const agents = p.map((share) => {
+    const nServers = requiredAgentsInterval(volume * share, iSec, q.aht, pat, target, maxAb, eng.occupancyCeiling);
+    return nServers / conc; // §25.2: required agents = minimal N servers ÷ concurrency
+  });
   const out = { agents, hours: sum(agents) * iHrs };
   if (_rcCache.size < 100000) _rcCache.set(key, out);
   return out;
@@ -195,14 +223,20 @@ function reqCurveWorkflow(q, volume, eng, cache) {
   return out;
 }
 
-// §24.5: digital queues carry a subtype — customer (live interaction, the
-// legacy digital model) or workflow (backlog processing). Absent = customer.
+// §24.5: digital queues carry a subtype — customer (live interaction) or
+// workflow (backlog processing). Absent = customer. §25: the customer subtype
+// is now an Erlang A queue (was the fluid backlog model).
 const digitalSubtype = (q) => (q.type === "digital" ? (q.subtype === "workflow" ? "workflow" : "customer") : null);
+// §25.1/§25.4 Digital Customer defaults: patience 180 s, maxAbandon 5% when the
+// queue carries no explicit value (voice always sets both explicitly).
+const CUSTOMER_PATIENCE_DEFAULT = 180, CUSTOMER_MAXABANDON_DEFAULT = 0.05;
+const customerPatience = (q) => (q.patience != null ? q.patience : CUSTOMER_PATIENCE_DEFAULT);
+const customerMaxAbandon = (q) => (q.maxAbandon != null ? q.maxAbandon : CUSTOMER_MAXABANDON_DEFAULT);
 
 const reqCurve = (q, v, eng, cache) =>
   q.type === "voice" ? reqCurveVoice(q, v, eng, cache)
   : q.subtype === "workflow" ? reqCurveWorkflow(q, v, eng, cache)
-  : reqCurveDigital(q, v, eng, cache);
+  : reqCurveDigitalCustomer(q, v, eng, cache); // §25: customer = Erlang A
 
 // ---------- DAY MODELS ----------
 // Normalised-profile cache, keyed by the profile array object. Profile arrays
@@ -242,7 +276,10 @@ function runVoiceDay(q, volume, productiveHours, eng, rc, lite) {
   };
 }
 
-/* Digital: fluid capacity-vs-demand with concurrency and a carrying backlog.
+/* RETIRED from the customer simulate path at R3d-A (§25 — Digital Customer is
+   now Erlang A, see runDigitalCustomerDay). Retained + exported because the P1
+   conservation/SLA-ramp tests drive it directly; it is the reference fluid model.
+   Digital: fluid capacity-vs-demand with concurrency and a carrying backlog.
    Contacts never abandon; they wait. Within an interval, arrivals are uniform,
    so the wait of a contact arriving at time t is (backlog at t)/(service rate).
    Waits therefore run linearly from wStart (t=0) to wEnd (t=end), which gives
@@ -279,6 +316,43 @@ function runDigitalDay(q, volume, productiveHours, startBacklog, eng, rc, lite) 
     sl: tv > 0 ? inSla / tv : 1,
     respMin: tv > 0 ? respW / tv : 0,
     endBacklog: B,
+    occ: occD > 0 ? occN / occD : 0,
+    byInterval,
+  };
+}
+
+/* §25 Digital Customer day: live chat as Erlang A. Staffed agents are laid
+   along the requirement curve (cover = productiveHours / reqHours); in each
+   interval the effective servers = staffed agents × concurrency feed the same
+   voiceInterval() solver voice uses (fractional blending included). AHT is
+   unchanged; the SLA window is digitalSlaMinutes × 60 s; patience defaults to
+   180 s. Abandonment is a real output and there is NO carrying backlog —
+   abandonment replaces it. The servers = agents × concurrency treatment is the
+   standard chat approximation and is mildly optimistic about juggling costs. */
+function runDigitalCustomerDay(q, volume, productiveHours, eng, rc, lite) {
+  const iSec = eng.intervalMin * 60;
+  const cover = rc.hours > 0 ? productiveHours / rc.hours : 1;
+  const p = normProfile(q.profile);
+  const conc = q.concurrency > 0 ? q.concurrency : 1;
+  const pat = customerPatience(q), target = q.digitalSlaMinutes * 60;
+  let tv = 0, wAsa = 0, wSl = 0, wAb = 0, occN = 0, occD = 0;
+  const byInterval = lite ? null : [];
+  for (let i = 0; i < p.length; i++) {
+    const arrivals = volume * p[i];
+    const agents = rc.agents[i] * cover;
+    const servers = agents * conc; // §25.1 servers = agents × concurrency
+    const r = voiceInterval(servers, arrivals, iSec, q.aht, pat, target);
+    if (!lite) byInterval.push({ i, arrivals, agents, servers, req: rc.agents[i], ...r });
+    tv += arrivals; wAsa += r.asa * arrivals; wSl += r.sl * arrivals; wAb += r.abandon * arrivals;
+    occN += r.occ * servers; occD += servers;
+  }
+  const asa = tv > 0 ? wAsa / tv : 0;
+  return {
+    volume: tv, cover,
+    asa,
+    sl: tv > 0 ? wSl / tv : 1,
+    abandon: tv > 0 ? wAb / tv : 0,
+    respMin: asa / 60,
     occ: occD > 0 ? occN / occD : 0,
     byInterval,
   };
@@ -1348,7 +1422,9 @@ function simulate(cfg, opts = {}) {
           .map((q) => {
             const preview = q.type === "voice"
               ? runVoiceDay(st[q.id].eq, vol[q.id], hrs[q.id], eng, rc[q.id], true)
-              : runDigitalDay(st[q.id].eq, vol[q.id], hrs[q.id], st[q.id].backlog, eng, rc[q.id], true);
+              : q.subtype === "workflow"
+              ? runWorkflowDay(st[q.id].eq, vol[q.id], hrs[q.id], st[q.id].backlog, eng, rc[q.id], true)
+              : runDigitalCustomerDay(st[q.id].eq, vol[q.id], hrs[q.id], eng, rc[q.id], true);
             return { q, deficit: Math.max(0, req[q.id] - hrs[q.id]), occ: preview.occ };
           })
           .filter((c) => c.deficit > 0 && c.occ >= t.triggerOccupancy)
@@ -1366,35 +1442,50 @@ function simulate(cfg, opts = {}) {
         if (q.type !== "digital") continue;
         const s = st[q.id];
         const kn = knMap[q.id];
-        // Day-memo: a day's result is a pure function of (volume, hours, AHT/
-        // SLA in effect, start backlog). Days 1–6 of a steady week reuse day
-        // 0's computation exactly; any input change misses. Day 0 always
-        // computes fresh (it carries the intraday detail).
-        let r;
-        const m = s.dm;
-        if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes && m.backlog0 === s.backlog) {
-          r = m.r;
+        if (q.subtype === "workflow") {
+          // §24.5 Digital/Service Workflow — unchanged fluid backlog model.
+          // Day-memo: a day's result is a pure function of (volume, hours, AHT/
+          // SLA in effect, start backlog). Days 1–6 of a steady week reuse day
+          // 0's computation exactly; day 0 always computes fresh (intraday).
+          let r;
+          const m = s.dm;
+          if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes && m.backlog0 === s.backlog) {
+            r = m.r;
+          } else {
+            r = runWorkflowDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
+            s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, backlog0: s.backlog, r };
+          }
+          // §18 spill: over-limit backlog overflows to the spill target next day.
+          let deflected = 0;
+          const excess = Math.max(0, r.endBacklog - q.backlogLimit);
+          if (excess > 0) { deflected = excess * kn.spillPct; s.backlog = r.endBacklog - deflected; }
+          else s.backlog = r.endBacklog;
+          if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
+          // §18 repeat: SLA-breached contacts re-contact next day (legacy default 0).
+          let repeats = 0;
+          if (kn.repeatPct > 0) { repeats = r.volume * (1 - r.sl) * kn.repeatPct; s.repeatNext += repeats; }
+          dayRes[q.id] = { ...r, deflected, repeats };
         } else {
-          // §24.5: workflow-subtype queues run the backlog-processing day model;
-          // customer subtype (and legacy queues with no subtype) run the
-          // digital fluid model unchanged.
-          r = q.subtype === "workflow"
-            ? runWorkflowDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0)
-            : runDigitalDay(s.eq, vol[q.id], hrs[q.id], s.backlog, eng, rc[q.id], d !== 0);
-          s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, backlog0: s.backlog, r };
+          // §25 Digital Customer — Erlang A, no carrying backlog. §25.3:
+          // converts-to-calls fire on ABANDONED volume × convert %; the repeat %
+          // applies to abandons too (both land next day). No same-day fixed
+          // point — repeats/converts are deferred to the following day.
+          let r;
+          const m = s.dm;
+          if (d !== 0 && m && m.vol === vol[q.id] && m.hrs === hrs[q.id] && m.aht === s.eq.aht && m.slaMin === s.eq.digitalSlaMinutes) {
+            r = m.r;
+          } else {
+            r = runDigitalCustomerDay(s.eq, vol[q.id], hrs[q.id], eng, rc[q.id], d !== 0);
+            s.dm = { vol: vol[q.id], hrs: hrs[q.id], aht: s.eq.aht, slaMin: s.eq.digitalSlaMinutes, r };
+          }
+          const abandoned = r.volume * r.abandon;
+          let deflected = kn.spillPct > 0 ? abandoned * kn.spillPct : 0;
+          if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
+          let repeats = kn.repeatPct > 0 ? abandoned * kn.repeatPct : 0;
+          if (repeats > 0) s.repeatNext += repeats;
+          s.backlog = 0; // §25.4: backlog retired for Digital Customer
+          dayRes[q.id] = { ...r, deflected, repeats };
         }
-        // §18 spill: over-limit backlog overflows to the spill target next day
-        // (legacy digital deflection, generalised — rate/target resolved).
-        let deflected = 0;
-        const excess = Math.max(0, r.endBacklog - q.backlogLimit);
-        if (excess > 0) { deflected = excess * kn.spillPct; s.backlog = r.endBacklog - deflected; }
-        else s.backlog = r.endBacklog;
-        if (deflected > 0 && kn.spillTargetQueue && st[kn.spillTargetQueue]) st[kn.spillTargetQueue].deflectIn += deflected;
-        // §18 repeat: SLA-breached contacts re-contact next day (rate resolved;
-        // legacy digital default 0).
-        let repeats = 0;
-        if (kn.repeatPct > 0) { repeats = r.volume * (1 - r.sl) * kn.repeatPct; s.repeatNext += repeats; }
-        dayRes[q.id] = { ...r, deflected, repeats };
       }
       for (const q of cfg.queues) {
         if (q.type !== "voice") continue;
@@ -1438,7 +1529,11 @@ function simulate(cfg, opts = {}) {
         a.slW += r.sl * v; a.occW += r.occ * v; a.occDen += v;
         a.repeatAdd = sc.repeatAdd;
         if (q.type === "voice") { a.asaW += r.asa * v; a.abW += r.abandon * v; a.redial += r.redial || 0; a.deflected += r.deflected || 0; }
-        else { a.respW += r.respMin * v; a.redial += r.repeats || 0; a.deflected += r.deflected || 0; a.backlog = st[q.id].backlog; }
+        else {
+          a.respW += r.respMin * v; a.redial += r.repeats || 0; a.deflected += r.deflected || 0; a.backlog = st[q.id].backlog;
+          // §25: Digital Customer reports Erlang ASA + abandonment (workflow r has neither).
+          if (r.abandon != null) { a.asaW += r.asa * v; a.abW += r.abandon * v; }
+        }
       }
       if (d === 0) firstDayIntraday = { hrs: { ...hrs }, vol: { ...vol }, res: dayRes };
       if (opts.captureDaily) dayTrace.push(Object.fromEntries(cfg.queues.map((q) => [q.id, { vol: vol[q.id], deflected: dayRes[q.id].deflected || 0, redial: dayRes[q.id].redial || 0, backlog: q.type === "digital" ? st[q.id].backlog : 0 }])));
@@ -1495,7 +1590,9 @@ function simulate(cfg, opts = {}) {
       const wfPct = q.workflowSlaPct != null ? q.workflowSlaPct : 0.9;
       const ok = q.type === "voice" ? asa <= asaT && ab <= q.maxAbandon
         : wfQ ? sl >= wfPct && a.backlog <= (q.backlogLimit != null ? q.backlogLimit : Infinity)
-        : sl >= q.digitalSlaPct && a.backlog <= q.backlogLimit;
+        // §25.4: Digital Customer — the SLA is the whole story (backlog retired);
+        // abandonment is captured by the Erlang SL, not a separate limit.
+        : sl >= q.digitalSlaPct;
       const near = q.type === "voice" ? asa <= asaT * 1.5 && ab <= q.maxAbandon * 1.5
         : wfQ ? sl >= wfPct * 0.9
         : sl >= q.digitalSlaPct * 0.9;
@@ -1713,8 +1810,10 @@ function makeDefaultConfig() {
     queues: [
       { id: v1, name: "Voice — Billing", type: "voice", brandId: "b1", channel: "voice", priority: 1, dailyVolume: 2000, aht: 300, profile: [...DEFAULT_PROFILE], asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, fte: 63, agentCost: 32000, crossSkill: [v2], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
       { id: v2, name: "Voice — Technical", type: "voice", brandId: "b1", channel: "voice", priority: 2, dailyVolume: 900, aht: 420, profile: [...DEFAULT_PROFILE], asaTarget: 45, maxAbandon: 0.06, patience: 100, shrinkage: 0.3, fte: 47, agentCost: 32000, crossSkill: [], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
-      { id: d1, name: "WhatsApp — Service", type: "digital", brandId: "b1", channel: "digital", priority: 3, dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 30000, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
-      { id: d2, name: "Chat — Sales", type: "digital", brandId: "b1", channel: "digital", priority: 4, dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE], concurrency: 2.0, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 30000, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 90, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+      // §25.4: Digital Customer chat patience defaults to 180 s (people wait
+      // longer on an async-feeling chat than on a phone line); maxAbandon 5%.
+      { id: d1, name: "WhatsApp — Service", type: "digital", brandId: "b1", channel: "digital", priority: 3, dailyVolume: 1400, aht: 420, profile: [...DEFAULT_PROFILE], concurrency: 2.5, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: v1, shrinkage: 0.3, fte: 20, agentCost: 30000, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 180, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
+      { id: d2, name: "Chat — Sales", type: "digital", brandId: "b1", channel: "digital", priority: 4, dailyVolume: 700, aht: 360, profile: [...DEFAULT_PROFILE], concurrency: 2.0, digitalSlaMinutes: 3, digitalSlaPct: 0.8, backlogLimit: 80, deflectsTo: v1, shrinkage: 0.3, fte: 11, agentCost: 30000, crossSkill: [], weeklyVolumes: null, seasonal: null, asaTarget: 30, maxAbandon: 0.05, patience: 180, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
     ],
     serviceTeams: [{ id: "st_1", name: "Flex pool", size: 12, premiumPct: 0.2, proficiency: 0.8, triggerOccupancy: 0.9, maxHoursPerWeek: 20, agentCost: 32000, coversQueues: [v1, v2] }],
     costs: { managerCost: 48000, managerRatio: 12 },
@@ -1961,6 +2060,13 @@ function migrateConfigR3(cfg) {
         spillTargetQueue: knock.convertTarget,
         sharing: q.sharing || shareOf[q.id] || null,
         subtype: q.type === "digital" ? (q.subtype || "customer") : q.subtype,
+        // §25.4: Digital Customer queues gain patience 180 s + maxAbandon 5%
+        // defaults (Erlang inputs); backlogLimit is retired for them (the field
+        // may linger but the engine ignores it) — Workflow keeps it.
+        patience: q.type === "digital" && (q.subtype || "customer") === "customer"
+          ? (q.patience != null ? q.patience : 180) : q.patience,
+        maxAbandon: q.type === "digital" && (q.subtype || "customer") === "customer"
+          ? (q.maxAbandon != null ? q.maxAbandon : 0.05) : q.maxAbandon,
         agentCostMonthly: q.agentCostMonthly != null ? q.agentCostMonthly : q.agentCost != null ? q.agentCost / 12 : null,
         slaAttainmentTarget: q.slaAttainmentTarget != null ? q.slaAttainmentTarget : 0.9,
       };
@@ -1998,4 +2104,6 @@ module.exports = {
   migrateConfigR3, makeBlankConfig, runWorkflowDay, digitalSubtype,
   monthForWeek, generateWeeklySeries, primaryVoiceQueue,
   groupScopeQueueIds, applyGroupScope,
+  // Revision 3d (SPEC §25) — Digital Customer under Erlang
+  runDigitalCustomerDay, reqCurveDigitalCustomer, customerPatience, customerMaxAbandon,
 };

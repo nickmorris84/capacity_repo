@@ -38,9 +38,13 @@ function rigCfg(over = {}) {
     ...over,
   };
 }
+// Digital WORKFLOW rig: the subtype keeps requirement linear (req h/day =
+// dailyVolume), Erlang-free — R3d-A moved the Digital *Customer* subtype to
+// Erlang A. Hand numbers here are supply-ladder quantities (subtype-agnostic);
+// tests that need the customer subtype pin it explicitly (test 8).
 function dq(cfg, id, reqHoursPerDay, over = {}) {
   const q = {
-    id, name: id, type: "digital", brandId: "b1", channel: "digital", priority: 5,
+    id, name: id, type: "digital", subtype: "workflow", brandId: "b1", channel: "digital", priority: 5,
     dailyVolume: reqHoursPerDay, aht: 3600, concurrency: 1,
     profile: new Array(24).fill(1), digitalSlaMinutes: 60, digitalSlaPct: 0.8, backlogLimit: 1e9,
     deflectsTo: null, shrinkage: 0, fte: 0, agentCost: 30000, crossSkill: [], supports: [],
@@ -300,8 +304,8 @@ t("SLA window in hours is live: 48h doubles the inside-SLA share; workflowSlaPct
   eq(wq(mk(48), 0, "qw").sl, 2 / 7, 1e-9, "48h window admits two days of arrivals");
   ok(wq(mk(24, 0.1), 0, "qw").status === "green", "attainment 1/7 ≥ 10% target → green");
   const customer = rigCfg({ settings: { ot: { weeklyCeiling: 0 }, training: { shrinkagePct: 0 } } });
-  dq(customer, "qc", 100, { fte: 6.25 }); // same book, customer subtype
-  ok(Math.abs(wq(E.simulate(customer), 0, "qc").sl - 1 / 7) > 0.01, "customer subtype runs the fluid model, not the day-grain workflow maths");
+  dq(customer, "qc", 100, { fte: 6.25, subtype: "customer" }); // same book, Erlang customer subtype
+  ok(Math.abs(wq(E.simulate(customer), 0, "qc").sl - 1 / 7) > 0.01, "customer subtype runs the Erlang model (R3d-A), not the day-grain workflow maths");
 });
 
 /* ---------------- 9. §24.6 series anchoring — wizard week 1 uses the Settings date's month ---------------- */

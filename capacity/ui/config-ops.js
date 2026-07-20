@@ -238,10 +238,13 @@ export function useConfigOps(setConfig) {
     });
   }, [setConfig]);
 
-  const addQueue = useCallback(() => {
+  // Optionally pre-select a brand (a per-brand "Add queue" button passes its own
+  // brand id); otherwise the new queue defaults to the first brand.
+  const addQueue = useCallback((brandId) => {
     setConfig((c) => {
       const q = blankQueue(c.queues.length + 1);
-      q.brandId = (c.brands && c.brands[0] && c.brands[0].id) || "b1";
+      const has = brandId && (c.brands || []).some((b) => b.id === brandId);
+      q.brandId = has ? brandId : ((c.brands && c.brands[0] && c.brands[0].id) || "b1");
       q.channel = "voice";
       q.priority = c.queues.reduce((m, x) => Math.max(m, x.priority || 0), 0) + 1;
       q.resourcing = "dedicated";

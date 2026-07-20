@@ -14,12 +14,17 @@ const Stat = ({ l, v, sub }) => (
    all-in £ + flags. Computed on demand ("Run matrix"), cached, greyed with a
    "stale — re-run" banner on any config change. The selected cell (group ×
    strategy) is the global context pair rendered live on every tab. */
-function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy }) {
+function DecisionMatrix({ config, matrix, matrixStale, onRunMatrix, onSelectCell, activeGroupId, activeStrategy, autoPicked }) {
   const cur = config.engine.currency;
   const groups = groupList(config);
   const strategies = strategyList(config);
   return (
     <Card title="Decision matrix" sub="groups × strategies" hint="Every scenario group against every hiring strategy. Rows and columns stay in definition order. Click a cell to make that pair the live context across all tabs.">
+      {autoPicked && !matrixStale && (
+        <div className="mx-autopick" data-testid="matrix-autopick-note">
+          Selected the most favourable cell — based on your last matrix run.
+        </div>
+      )}
       {(matrixStale) && (
         <div className="mx-stale" data-testid="matrix-stale">
           <span>{matrix ? "Config changed — the matrix is stale." : "Matrix not yet computed."}</span>
@@ -80,7 +85,7 @@ function QueueSummaryTable({ sim, config }) {
   return <HierTable config={config} testid="queue-summary" columns={columns} metric={(q) => queueSummaryMetric(sim, q)} aggregate={sumQueueSummary} />;
 }
 
-export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell }) {
+export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, activeGroupId, onSetActive, matrix, matrixStale, onRunMatrix, onSelectCell, autoPicked }) {
   const cur = config.engine.currency;
   const verdict = buildVerdict(sims, activeStrategy, activeGroupId, config);
   const blocks = buildAudienceBlocks(sim, config);
@@ -103,7 +108,7 @@ export function SummaryTab({ sim, sims, stratIds, config, activeStrategy, active
         <span className="note" style={{ padding: "6px 10px" }}>Leadership one-pager — {resolveStrategyName(config, activeStrategy)} · group {groupName(config, activeGroupId)}. Print or save to PDF from the context bar above.</span>
       </div>
 
-      <DecisionMatrix config={config} matrix={matrix} matrixStale={matrixStale} onRunMatrix={onRunMatrix} onSelectCell={onSelectCell} activeGroupId={activeGroupId} activeStrategy={activeStrategy} />
+      <DecisionMatrix config={config} matrix={matrix} matrixStale={matrixStale} onRunMatrix={onRunMatrix} onSelectCell={onSelectCell} activeGroupId={activeGroupId} activeStrategy={activeStrategy} autoPicked={autoPicked} />
 
       <Card title="Verdict & key findings">
         <p style={{ margin: "0 0 12px", fontSize: 14, lineHeight: 1.55 }}>{verdict.paragraph}</p>

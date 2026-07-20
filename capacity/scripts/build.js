@@ -12,6 +12,8 @@ const esbuild = require("esbuild");
 const ROOT = path.join(__dirname, "..");
 const ENTRY = path.join(ROOT, "ui", "main.jsx");
 const PROD = { "process.env.NODE_ENV": '"production"' };
+// Owner / maintainer stamped into both deliverables.
+const OWNER = "nick_morris";
 
 function buildHtmlBundle() {
   const res = esbuild.buildSync({
@@ -34,10 +36,12 @@ function htmlDocument(js) {
   // Escape any </script> so the inlined bundle can't close the tag early.
   const safe = js.replace(/<\/script>/gi, "<\\/script>");
   return `<!doctype html>
+<!-- Capacity Simulator — owner / maintainer: ${OWNER} -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="author" content="${OWNER}" />
 <title>Capacity Simulator</title>
 </head>
 <body>
@@ -52,7 +56,7 @@ function buildAll(outDir = path.join(ROOT, "dist")) {
   fs.mkdirSync(outDir, { recursive: true });
   const htmlJs = buildHtmlBundle();
   const html = htmlDocument(htmlJs);
-  const jsx = buildJsxBundle();
+  const jsx = `// Capacity Simulator — owner / maintainer: ${OWNER}\n` + buildJsxBundle();
   const htmlPath = path.join(outDir, "capacity-sim.html");
   const jsxPath = path.join(outDir, "capacity-sim.jsx");
   fs.writeFileSync(htmlPath, html);

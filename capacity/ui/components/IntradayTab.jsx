@@ -16,7 +16,9 @@ export function IntradayTab({ sim }) {
   const week = sim.weeks[Math.min(wk, sim.weeks.length - 1)];
   const day = week.intraday;
   const byInterval = (day && day.res[q.id] && day.res[q.id].byInterval) || [];
-  const voice = q.type === "voice";
+  // §25: Digital Customer is Erlang — its intervals carry ASA/abandon/SL like
+  // voice (no backlog). Only Workflow keeps the backlog-style columns.
+  const erlang = q.type === "voice" || (q.type === "digital" && q.subtype !== "workflow");
 
   const data = byInterval.map((iv) => ({
     t: intervalLabel(iv.i, eng),
@@ -79,7 +81,7 @@ export function IntradayTab({ sim }) {
                 <th>Arrivals</th>
                 <th>Required</th>
                 <th>Available</th>
-                {voice ? <><th>ASA</th><th>Abandon</th><th>SL</th></> : <><th>Backlog</th><th>Response</th><th>Served</th></>}
+                {erlang ? <><th>ASA</th><th>Abandon</th><th>SL</th></> : <><th>Backlog</th><th>Response</th><th>Served</th></>}
                 <th>Occupancy</th>
               </tr>
             </thead>
@@ -90,7 +92,7 @@ export function IntradayTab({ sim }) {
                   <td>{Math.round(iv.arrivals)}</td>
                   <td>{num(iv.req, 1)}</td>
                   <td>{num(iv.agents, 1)}</td>
-                  {voice ? (
+                  {erlang ? (
                     <>
                       <td>{secs(iv.asa)}</td>
                       <td>{pct(iv.abandon, 1)}</td>
