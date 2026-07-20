@@ -1017,3 +1017,113 @@ The §25.3 model note ("servers = agents × concurrency … the standard chat
 approximation, mildly optimistic about juggling costs") is now surfaced on the Digital
 Customer card's description (the E1–E3 prose card was dissolved into inline hints in the
 P7b restructure, so the caveat lives where the planner configures the chat queue).
+
+## R4-A (SPEC §26.1–§26.5 — multi-simulation shell; UI only)
+New gate `tests/r4a.test.js` (12 tests, R4-A / §26 GATE: GREEN) with the ENTIRE
+battery green — P1 20 · R1 19 · R2 27 · R3a 20 · R3d-A 5 · P7b 20 · R3b 9 ·
+R3c 9 · R3d-B 6 · **R4-A 12** · §13 harness 20 = **167 tests, 0 failures**.
+Engine untouched (`git diff engine/` empty, per the R4 hard gate). `/dist`
+rebuilt. Zero console noise (including React act warnings) across every suite.
+
+1. **Two-level shell (§26.1).** `ui/App.jsx` is now the Root: Landing (level 1,
+   the app opens here) ↔ per-simulation Workspace (level 2, `ui/Workspace.jsx`,
+   the old App). The workspace header carries "← Simulations" back-navigation;
+   the top-right New-simulation menu is gone (the landing owns creation). The
+   blank-world empty state's "Load the demo defaults" now fills the CURRENT
+   simulation (`loadDefaults`) instead of the retired workspace new-sim menu.
+2. **Storage schema + migration (§26.2).** `ui/sim-store.js`: `sim-list` index
+   (denormalised card entries) + `simulation-<id>` records {id, name, createdAt,
+   updatedAt, config, matrixCache, selectedPair, runs[], lastAllIn}. A Run
+   carries the full config (strategies/schedules/scenario groups/selected pair),
+   the compact results for the selected pair, and the matrix cache when fresh.
+   The live config auto-saves continuously (400ms debounce, updatedAt stamped;
+   the mount hydration is skipped so merely opening doesn't stamp). One-time
+   migration: legacy `sim-index`/`sim-<slug>` snapshots convert verbatim to Runs
+   and `matrix-state` becomes matrixCache + selectedPair on "Simulation 1";
+   legacy keys are left in place (zero data loss, gate-tested); a truly fresh
+   store bootstraps the same "Simulation 1" from the default world.
+3. **Landing (§26.3).** Card per simulation (name, updatedAt, run count,
+   headline: horizon/brands/queues/last all-in when cached) with Open, Rename,
+   Duplicate, Delete (typed-confirmation — the exact name enables the
+   destructive button). Cards list their Runs (tick-to-compare renders the
+   extracted §10 compare blocks — `ui/components/RunCompare.jsx` — as an interim
+   until §26.7); Compare and Global presets have visible part-B stub states.
+4. **Workspace changes (§26.4).** Snapshots tab REMOVED; the context bar gains
+   **Save** (name prompt defaulting to a timestamp → creates a Run) and its
+   Snapshot selector becomes the read-only **Run** viewer (same §20 semantics).
+   Settings → **Simulation Settings**, restructured into full-width collapsible
+   sections, all collapsed except the first: Start (global HC + week-1 date),
+   Simulation window & currency, then Organisation & brands and Channels
+   (kept — the spec order is preserved as a subsequence), Hiring caps,
+   Workforce physics, Knock-on defaults, CX economics, Risk parameters, plus
+   Preset libraries (staying until the §26.6 landing libraries land in B) and
+   Files & import/export (§14.8 says Files must remain reachable from Settings —
+   with Snapshots gone this is its single home).
+5. **New-simulation flows (§26.5).** Landing chooser: (a) inherit settings →
+   wizard from the Brands step over a blank world carrying the source's
+   engine/settings/costs/cx/loops (+cap total; per-brand cap cells are cleared —
+   they reference source brand ids); (b) full inherit → config copy without runs
+   or matrix cache, name prompt, straight into the workspace; (c) from-scratch
+   wizard (`ui/components/NewSimWizard.jsx`): Settings (inline defaults) →
+   Brands → Channels (from the four global channel presets) → Queues (name,
+   brand, channel, one weekly figure spread by `generateWeeklySeries` with an
+   optional seasonality pattern). Back/next, progress chips, escape-to-landing
+   (button + Escape key).
+6. **Style guides applied.** `ui/style.js` rewritten to the approved Grey &
+   Yellow system (charcoal gradient header with yellow logo mark and accent tab
+   underline, white context strip with accent-tint chips, bordered cards with
+   no shadows, accent totals rows, the selected matrix cell as accent tint +
+   2px accent border + 800 weight, status colours only ever meaning RAG/risk,
+   Public Sans with system-ui fallback — no webfont fetch, the build stays
+   offline). Print follows the Definitive print guide: `@page` A4 portrait
+   14/15mm, print-safe token overrides, all chrome hidden, break-inside
+   protection, ≥11pt body, meanings that survive greyscale (rules + weight,
+   not tint). All pre-existing class names kept.
+7. **Normal-form fix (real defect found by the gate).** Queues created
+   in-session (`blankQueue`) lacked the migrate-normal-form keys
+   (repeatPct/spillPct/spillTargetQueue/channelId), and custom backfill
+   strategies lacked forwardMonths — a reload re-migrated the config to a
+   different `simHash`, silently reading the persisted matrix cache as stale
+   and losing startup auto-selection. Both creators now emit normal form.
+
+### Existing tests updated to the two-level shell (each justified, per R4)
+The R4 header's "battery passes unmodified" holds for every engine suite
+(engine/r1/r2/r3/r3d untouched). The UI suites drive the exact chrome §26.4
+removes, so each got the minimum mechanical adaptation — behavioural
+assertions unchanged:
+* ALL UI suites — a 2-line preamble opening "Simulation 1" from the landing
+  (the app opens on the landing per §26.1, tests drove the workspace directly);
+  final settles lengthened so the debounced §26.2 auto-save flushes inside
+  `act`; `goto("Settings")` → `goto("Simulation Settings")` (§26.4 rename).
+* `tests/r1ui.test.js` — EXPECTED_TABS 9→8 without Snapshots; panel lookup via
+  `aria-controls` (the label "Simulation Settings" no longer lowercases to its
+  panel id); the snapshot read-only test saves via the context-bar Save
+  (§26.2) instead of the removed tab; workbook-export and params-CSV-import
+  selectors moved `#panel-snapshots` → `#panel-settings` (§14.8 home).
+* `tests/r3ui.test.js` — the §24.9 blank-start test now reaches the blank world
+  through the landing wizard finished with nothing added (the workspace
+  new-sim menu is removed by §26.4) and restores via the empty state's
+  "Load the demo defaults".
+* `tests/r3c.test.js` — preamble + tab rename only.
+* `tests/r3dui.test.js` — the matrix persistence tests read/tamper the
+  simulation record (`simulation-<id>`) instead of the retired `matrix-state`
+  key; `mountFresh` enters the workspace from the fresh instance's landing;
+  the "reset to defaults" step is gone (auto-save makes a remount hydrate the
+  exact config the matrix ran against — which is the behaviour under test).
+* `tests/harness.test.js` — §13 checklist: snapshot save/tick/compare became
+  context-bar Save → landing tick → compare blocks; "compare survives a tab
+  switch" became "survives a workspace round-trip"; exports/import moved to
+  Simulation Settings; the html-target mount asserts the landing + card
+  (8 workspace tabs asserted after opening); settles added for the async
+  landing bootstrap and auto-save flush.
+
+Files: new `ui/sim-store.js`, `ui/Workspace.jsx`, `ui/components/Landing.jsx`,
+`ui/components/NewSimWizard.jsx`, `ui/components/RunCompare.jsx`,
+`tests/r4a.test.js`; rewritten `ui/App.jsx` (Root shell), `ui/style.js`,
+`ui/components/ContextBar.jsx`, `ui/editors/SettingsEditor.jsx`; edited
+`ui/storage.js` (KEYS), `ui/config-ops.js` (blankQueue/applyChannelTemplate
+exports + normal form); deleted `ui/components/SnapshotsTab.jsx`;
+`package.json` (wire r4a); `/dist` rebuilt. Deferred to R4-B: §26.6 global
+preset libraries on the landing (workspace libraries + in-sim preset
+affordances removed there), §26.7 verdict-first Compare (the landing's interim
+tick-compare panel is its placeholder).

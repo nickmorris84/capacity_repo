@@ -31,8 +31,17 @@ async function checklist(label, ctx) {
   const { doc, click, setValue, settle, fileInput, downloads, getPrinted } = ctx;
   const tabs = () => [...doc.querySelectorAll('[role="tab"]')];
   const goto = async (lbl) => { click(tabs().find((x) => x.textContent === lbl)); await settle(60); };
+  // R4 §26.1 two-level shell: the app opens on the landing; the checklist
+  // moves between the landing and the bootstrap simulation's workspace.
+  const enterWorkspace = async () => {
+    const open = doc.querySelector('[data-testid^="sim-open-"]');
+    if (open) { click(open); await settle(300); }
+  };
+  const backToLanding = async () => { click(doc.querySelector('[data-testid="back-to-landing"]')); await settle(300); };
 
   await t(`[${label}] every tab renders its panel`, async () => {
+    await enterWorkspace();
+    eq(tabs().length, 8, "eight workspace tabs (Runs/Snapshots moved to the landing)");
     for (const tabEl of tabs()) {
       click(tabEl);
       await settle(40);
@@ -76,34 +85,41 @@ async function checklist(label, ctx) {
     eq(toggle.checked, !checked, "factor toggled");
   });
 
-  await t(`[${label}] save a snapshot, tick it, per-queue comparison renders`, async () => {
-    await goto("Snapshots");
-    setValue(doc.querySelector("[data-testid=snapshot-name]"), "Baseline " + label);
-    click(doc.querySelector("[data-testid=save-snapshot]"));
-    await settle(200);
-    const rows = doc.querySelectorAll("#panel-snapshots [data-testid=snapshots-table] tbody tr");
-    ok(rows.length >= 1 && !rows[0].querySelector(".empty"), "saved snapshot appears");
-    const tick = doc.querySelector("#panel-snapshots [data-testid=snapshots-table] tbody input[type=checkbox]");
+  await t(`[${label}] save a Run (context bar), tick it on the landing, per-queue comparison renders`, async () => {
+    // R4 §26.2/§26.4: the Snapshots tab is gone — Save lives in the context
+    // bar and run management + comparison live on the landing.
+    click(doc.querySelector('.ctxbar [data-testid="save-run-open"]'));
+    await settle(80);
+    setValue(doc.querySelector("[data-testid=run-name]"), "Baseline " + label);
+    click(doc.querySelector("[data-testid=save-run]"));
+    await settle(700);
+    await backToLanding();
+    const rows = doc.querySelectorAll('[data-testid^="runs-table-"] tbody tr');
+    ok(rows.length >= 1, "the saved run appears on its simulation card");
+    const tick = doc.querySelector('[data-testid^="tick-"]');
     ok(tick, "compare tick exists");
     click(tick);
-    await settle(150);
+    await settle(250);
     ok(doc.querySelector("[data-testid=per-queue-compare]"), "per-queue comparison renders");
     ok(doc.querySelector("[data-testid=totals-delta]"), "totals delta renders");
   });
 
-  await t(`[${label}] compare selection survives a tab switch`, async () => {
+  await t(`[${label}] compare selection survives a workspace round-trip`, async () => {
+    await enterWorkspace();
     await goto("Plan");
-    await goto("Snapshots");
-    const tick = doc.querySelector("#panel-snapshots [data-testid=snapshots-table] tbody input[type=checkbox]");
-    ok(tick && tick.checked, "tick still set after switching tabs and back");
+    await backToLanding();
+    const tick = doc.querySelector('[data-testid^="tick-"]');
+    ok(tick && tick.checked, "tick still set after entering the workspace and returning");
+    click(tick); await settle(100); // untick to leave the landing clean
   });
 
-  await t(`[${label}] fire every export (Files, on Snapshots)`, async () => {
-    await goto("Snapshots");
+  await t(`[${label}] fire every export (Files, in Simulation Settings)`, async () => {
+    await enterWorkspace();
+    await goto("Simulation Settings");
     const ids = ["export-workbook", "export-config", "export-run", "export-params-csv", "export-volumes-csv"];
     const before = downloads.length;
     for (const id of ids) {
-      const btn = doc.querySelector(`#panel-snapshots [data-testid=${id}]`);
+      const btn = doc.querySelector(`#panel-settings [data-testid=${id}]`);
       ok(btn, id + " button exists");
       click(btn);
       await settle(20);
@@ -118,8 +134,8 @@ async function checklist(label, ctx) {
     const baseCell = () => doc.querySelector("#panel-data [data-testid=data-table] tbody tr td:nth-child(2)");
     const before = Number(digits(baseCell()));
     ok(before > 0, "baseline base vol read");
-    await goto("Snapshots");
-    const input = doc.querySelector("#panel-snapshots [data-testid=import-params-csv]");
+    await goto("Simulation Settings");
+    const input = doc.querySelector("#panel-settings [data-testid=import-params-csv]");
     ok(input, "params-CSV input exists");
     await fileInput(input, PARAMS_CSV, "params.csv", "text/csv");
     await settle(350);
@@ -130,7 +146,7 @@ async function checklist(label, ctx) {
   });
 
   await t(`[${label}] the context-bar print action fires from every tab`, async () => {
-    for (const lbl of ["Summary", "Plan", "Data", "Settings"]) {
+    for (const lbl of ["Summary", "Plan", "Data", "Simulation Settings"]) {
       await goto(lbl);
       const pb = doc.querySelector('.ctxbar [data-testid="print-page"]');
       ok(pb, "print action present on " + lbl);
@@ -210,8 +226,9 @@ async function runSourceTarget() {
     },
     downloads, getPrinted: () => window.__printed || 0,
   };
+  await ctx.settle(400); // let the landing bootstrap (async storage) finish
   await checklist("source", ctx);
-  await ctx.settle(100);
+  await ctx.settle(700); // flush the debounced auto-save inside act
   await t("[source] zero unexpected console output across the checklist", () => eq(consoleEvents.length, 0, "console: " + consoleEvents.slice(0, 8).join(" | ")));
 
   // restore console
@@ -243,7 +260,8 @@ async function runHtmlTarget(html) {
 
   await t("[html] standalone HTML mounts clean in JSDOM", () => {
     ok(doc.getElementById("root").children.length > 0, "rendered");
-    ok(doc.querySelectorAll('[role="tab"]').length === 9, "all tabs present");
+    ok(doc.querySelector('[data-testid="landing"]'), "opens on the landing (R4 §26.1)");
+    ok(doc.querySelector('[data-testid^="sim-open-"]'), "the bootstrap simulation card is present");
     eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
   });
 

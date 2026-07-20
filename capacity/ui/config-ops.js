@@ -6,7 +6,7 @@ import { uid, effectiveSupports, R2_DEFAULTS, resolveKnockOn, channelOf, primary
 // settings block (every value equals a default, so the engine is unchanged).
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
-const blankQueue = (n) => ({
+export const blankQueue = (n) => ({
   id: "q_" + uid(), name: "New queue " + n, type: "voice",
   dailyVolume: 500, aht: 300, profile: new Array(24).fill(1),
   asaTarget: 30, maxAbandon: 0.05, patience: 90,
@@ -15,7 +15,12 @@ const blankQueue = (n) => ({
   weeklyVolumes: null, seasonal: null,
   concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 100, deflectsTo: null,
   // §24.1 knock-on (two figures), §24.2 sharing, §24.5 subtype, §24.10 SLA target.
+  // The legacy mirror keys (repeatPct/spillPct/spillTargetQueue) and channelId
+  // are pre-filled so a new queue is already in migrateConfig's normal form —
+  // otherwise a reload re-migrates to a different simHash and the persisted
+  // matrix cache (§26.2) would silently read as stale.
   knock: { repeatPct: 0, convertPct: 0, convertTarget: null },
+  repeatPct: 0, spillPct: 0, spillTargetQueue: null, channelId: "ch_voice",
   sharing: null, subtype: "customer",
   workflowSlaHours: 24, workflowSlaPct: 0.9, slaAttainmentTarget: 0.9,
   wf: { attrition: 0.04, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [0.6, 0.75, 0.9, 1.0], hires: [] },
@@ -37,7 +42,7 @@ const SCENARIO_DEFAULTS = {
 const STRATEGY_DEFAULTS = {
   meet: { name: "Custom meet", baseType: "meet" },
   buffer: { name: "Custom buffer", baseType: "buffer", bufferPct: 0.1 },
-  backfill: { name: "Custom backfill", baseType: "backfill" },
+  backfill: { name: "Custom backfill", baseType: "backfill", forwardMonths: 3 },
   manual: { name: "Custom manual", baseType: "manual" },
   schedule: { name: "Custom schedule", baseType: "schedule", segments: [{ fromWeek: 1, strategyId: "S1" }] },
 };
@@ -209,6 +214,17 @@ export function resolvePresets(cfg, seasPresets, arrPresets) {
     return nq;
   });
   return { ...cfg, seasonality: { ...seas, system }, queues };
+}
+
+/* Pure: a queue inheriting a channel definition's template sections (type,
+   subtype and the SLA fields for its kind). Used by attachQueueChannel and the
+   §26.5 new-simulation wizard. */
+export function applyChannelTemplate(q, def) {
+  const t = def.template || {};
+  const nq = { ...q, channelId: def.id, channel: def.group, type: t.type || q.type };
+  if (t.subtype !== undefined) nq.subtype = t.subtype;
+  ["asaTarget", "maxAbandon", "patience", "concurrency", "digitalSlaMinutes", "digitalSlaPct", "workflowSlaHours", "workflowSlaPct"].forEach((k) => { if (t[k] != null) nq[k] = t[k]; });
+  return nq;
 }
 
 function mergeSettings(base, over) {
@@ -574,17 +590,7 @@ export function useConfigOps(setConfig) {
   const attachQueueChannel = useCallback((qid, defId) => setConfig((c) => {
     const def = (c.channelDefs || []).find((d) => d.id === defId);
     if (!def) return c;
-    const t = def.template || {};
-    return {
-      ...c,
-      queues: c.queues.map((q) => {
-        if (q.id !== qid) return q;
-        const nq = { ...q, channelId: def.id, channel: def.group, type: t.type || q.type };
-        if (t.subtype !== undefined) nq.subtype = t.subtype;
-        ["asaTarget", "maxAbandon", "patience", "concurrency", "digitalSlaMinutes", "digitalSlaPct", "workflowSlaHours", "workflowSlaPct"].forEach((k) => { if (t[k] != null) nq[k] = t[k]; });
-        return nq;
-      }),
-    };
+    return { ...c, queues: c.queues.map((q) => (q.id === qid ? applyChannelTemplate(q, def) : q)) };
   }), [setConfig]);
 
   // ---- §16 section-level inheritance flags (queue overrides a channel/brand default) ----

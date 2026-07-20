@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/r1.test.js && node tests/r2.test.js && node tests/r3.test.js && node tests/r3d.test.js && node tests/r1ui.test.js && node tests/r3ui.test.js && node tests/r3c.test.js && node tests/r3dui.test.js && node tests/harness.test.js",
+    "test": "node tests/engine.test.js && node tests/r1.test.js && node tests/r2.test.js && node tests/r3.test.js && node tests/r3d.test.js && node tests/r1ui.test.js && node tests/r3ui.test.js && node tests/r3c.test.js && node tests/r3dui.test.js && node tests/r4a.test.js && node tests/harness.test.js",
     "test:engine": "node tests/engine.test.js",
     "test:r1": "node tests/r1.test.js",
     "test:r2": "node tests/r2.test.js",
@@ -13,6 +13,7 @@
     "test:r3c": "node tests/r3c.test.js",
     "test:r3dui": "node tests/r3dui.test.js",
     "test:r1ui": "node tests/r1ui.test.js",
+    "test:r4a": "node tests/r4a.test.js",
     "test:harness": "node tests/harness.test.js",
     "build:html": "node scripts/build.js",
     "build": "node scripts/build.js"

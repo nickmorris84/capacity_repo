@@ -61,7 +61,10 @@ const selWithOption = (root, val) => [...root.querySelectorAll("select")].find((
 const firstCard = () => { const c = document.querySelector("#panel-queues details.erow"); if (c) { c.setAttribute("open", ""); c.querySelectorAll("details.acc-sec").forEach((d) => d.setAttribute("open", "")); } return c; };
 
 async function run() {
-  await settle(300);
+  await settle(400);
+  // R4 §26.1: the app opens on the landing — open the bootstrap simulation.
+  click(document.querySelector('[data-testid^="sim-open-"]'));
+  await settle(400);
 
   await t("a strategy buffer edit changes that strategy's numbers (§24.4)", async () => {
     // Make S2 (built-in buffer) the active strategy via the context bar.
@@ -135,7 +138,7 @@ async function run() {
   });
 
   await t("caps matrix in Settings feeds the allocator trace (§24.3)", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     const cell = document.querySelector('[data-testid="cap-b1-voice"]');
     ok(cell, "caps matrix exposes the Brand 1 × Voice cell");
     setV(cell, 0); await settle(350); // 0 forces any voice want to bind
@@ -147,17 +150,25 @@ async function run() {
     ok(trace && /voice cap|Brand 1/.test(trace.textContent), "the trace names the binding segment level");
   });
 
-  await t("a truly-blank start renders the build-from-nothing empty state (§24.9)", async () => {
-    setV(document.querySelector('[data-testid="new-sim"]'), "blank"); await settle(350);
-    ok(document.querySelector('[data-testid="blank-empty-state"]'), "blank start shows the empty state");
+  await t("a truly-blank start renders the build-from-nothing empty state (§24.9/§26.5)", async () => {
+    // R4 §26.5: the workspace New-simulation menu is gone — a blank world now
+    // comes from the landing wizard, finished with nothing added.
+    click(document.querySelector('[data-testid="back-to-landing"]')); await settle(300);
+    click(document.querySelector('[data-testid="landing-new-sim"]')); await settle(100);
+    click(document.querySelector('[data-testid="new-scratch"]')); await settle(200);
+    for (let i = 0; i < 3; i++) { click(document.querySelector('[data-testid="wizard-next"]')); await settle(80); }
+    click(document.querySelector('[data-testid="wizard-finish"]')); await settle(500);
+    ok(document.querySelector('[data-testid="blank-empty-state"]'), "a wizard finished empty shows the blank empty state");
     // it simulates without crashing — Plan still renders, no console noise
     await goto("Plan");
     ok(document.querySelector('[data-testid="plan-panel"]'), "Plan renders on an empty world");
-    setV(document.querySelector('[data-testid="new-sim"]'), "defaults"); await settle(350); // restore
-    ok(!document.querySelector('[data-testid="blank-empty-state"]'), "defaults clears the empty state");
+    // the empty state's escape hatch fills THIS simulation with the demo defaults
+    const loadDefaults = [...document.querySelectorAll('[data-testid="blank-empty-state"] button')].find((b) => /demo defaults/.test(b.textContent));
+    click(loadDefaults); await settle(400);
+    ok(!document.querySelector('[data-testid="blank-empty-state"]'), "loading the defaults clears the empty state");
   });
 
-  await settle(200);
+  await settle(700); // flush the debounced auto-save inside act
   await t("zero unexpected console errors/warnings across the R3b run", () => eq(consoleEvents.length, 0, "console: " + consoleEvents.slice(0, 8).join(" | ")));
 
   console.log("\n═══════════════════════════════════");

@@ -69,10 +69,13 @@ const gid = (id) => document.getElementById(id);
 const openCard = (card) => { if (!card) return; card.setAttribute("open", ""); card.querySelectorAll("details.acc-sec").forEach((d) => d.setAttribute("open", "")); };
 
 async function run() {
-  await settle(300);
+  await settle(400);
+  // R4 §26.1: the app opens on the landing — open the bootstrap simulation.
+  click($('[data-testid^="sim-open-"]'));
+  await settle(400);
 
   await t("1 — a brand created in Settings takes a queue in the grouping and the Summary rollup", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     click($('#panel-settings [data-testid="add-brand"]')); await settle(150);
     await goto("Queues");
     // add a queue, then assign it to the new brand via its own selector
@@ -150,7 +153,7 @@ async function run() {
   });
 
   await t("6 — editing a preset's month in Settings moves a queue that uses it", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     setV($('[data-testid="preset-new-seasonality"]'), "R3c pattern");
     click($('[data-testid="preset-add-seasonality"]')); await settle(120);
     // both libraries render preset-item-* — pick the seasonality one by its name
@@ -164,14 +167,14 @@ async function run() {
     const cov = () => $('[data-testid="cell-cover-1"]').textContent;
     const before = cov();
     // now edit January of that pattern in Settings — a live-linked queue must move
-    await goto("Settings");
+    await goto("Simulation Settings");
     setV(gid("preset-months-" + pid + "-0"), 400); await settle(400);
     await goto("Data");
     ok(cov() !== before, `the linked pattern edit re-simulated the queue (${before} → ${cov()})`);
   });
 
   await t("7 — a Digital Workflow channel has no concurrency + hours SLA; a queue attached inherits it", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     setV($('[data-testid="channel-name"]'), "Complaints");
     setV(gid("channel-preset"), "digitalWorkflow"); await settle(60);
     click($('[data-testid="add-channel"]')); await settle(200);
@@ -189,7 +192,7 @@ async function run() {
     ok(!gid("q-concurrency-q_wapp"), "the attached queue no longer has a concurrency field");
   });
 
-  await settle(200);
+  await settle(700); // flush the debounced auto-save inside act
   await t("zero unexpected console errors/warnings across the R3c run", () => eq(consoleEvents.length, 0, "console: " + consoleEvents.slice(0, 8).join(" | ")));
 
   console.log("\n═══════════════════════════════════");

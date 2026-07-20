@@ -1,16 +1,27 @@
+import { useState } from "react";
 import { useDisclosure } from "../hooks.js";
 import { PrintButton } from "../print.jsx";
 import { strategyList, strategyObj, isSchedule, scheduleSummary, groupList } from "../views.js";
 
-/* Global context bar (§20) — under the header on every tab. Three selectors, in
-   this order, drive every number rendered below: Strategy · Scenario-group ·
-   Snapshot. The strategy chip also edits an active schedule's segments inline.
-   Selecting a snapshot switches the whole app into read-only mode; "Live"
-   returns to the current model. Plus the Print / PDF this page action. */
-export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, activeGroupId, onSetActiveGroup, ops, snapshots, viewingSlug, onSelectSnapshot, pending }) {
+const stamp = () => { const d = new Date(); const p = (n) => String(n).padStart(2, "0"); return `Run ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+
+/* Global context bar (§20/§26.4) — under the header on every tab. Three
+   selectors drive every number rendered below: Strategy · Scenario-group ·
+   Run. Selecting a saved Run switches the whole app into read-only mode;
+   "Live" returns to the current model. Plus Save (creates a named Run —
+   §26.2; the name prompt defaults to a timestamp) and Print / PDF. */
+export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, activeGroupId, onSetActiveGroup, ops, runs, viewingRunId, onSelectRun, pending, onSaveRun }) {
   const strat = strategyObj(config, activeStrategyId);
   const sched = isSchedule(strat) ? scheduleSummary(config, strat) : "";
   const disc = useDisclosure();
+  const saveDisc = useDisclosure();
+  const [runName, setRunName] = useState("");
+
+  const doSave = () => {
+    onSaveRun((runName || "").trim() || stamp());
+    setRunName("");
+    saveDisc.toggle();
+  };
 
   return (
     <div className="ctxbar" role="region" aria-label="Plan context">
@@ -34,7 +45,7 @@ export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, acti
                 <div className="lab" style={{ marginBottom: 6 }}>Segments</div>
                 {(strat.segments || []).map((seg, i) => (
                   <div className="rowflex" key={i} style={{ marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "#c9d6de" }}>from wk</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-muted)" }}>from wk</span>
                     <input type="number" className="inp" style={{ width: 64 }} min={1} value={seg.fromWeek}
                       onChange={(e) => ops.patchSegment(strat.id, i, "fromWeek", Math.max(1, Number(e.target.value) || 1))} data-testid={"seg-week-" + i} />
                     <select className="inp" style={{ flex: 1 }} value={seg.strategyId} onChange={(e) => ops.patchSegment(strat.id, i, "strategyId", e.target.value)} data-testid={"seg-strat-" + i}>
@@ -46,7 +57,7 @@ export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, acti
                 <button type="button" className="btn sm" onClick={() => ops.addSegment(strat.id)} data-testid="seg-add">+ Segment</button>
               </div>
             )}
-            <p className="note" style={{ marginTop: 10, background: "rgba(255,255,255,.06)", borderColor: "rgba(255,255,255,.12)", color: "#c9d6de" }}>
+            <p className="note" style={{ marginTop: 10 }}>
               Build reusable schedules on the Strategies tab. The active plan drives every tab.
             </p>
           </div>
@@ -61,11 +72,27 @@ export function ContextBar({ config, activeStrategyId, onSetActiveStrategy, acti
       </div>
 
       <div className="ctx-item">
-        <span className="ctx-label">Snapshot</span>
-        <select className="ctx-select" value={viewingSlug || ""} onChange={(e) => onSelectSnapshot(e.target.value || null)} aria-label="View snapshot" data-testid="ctx-snapshot">
+        <span className="ctx-label">Run</span>
+        <select className="ctx-select" value={viewingRunId || ""} onChange={(e) => onSelectRun(e.target.value || null)} aria-label="View saved run" data-testid="ctx-snapshot">
           <option value="">— Live —</option>
-          {snapshots.map((r) => <option key={r.slug} value={r.slug}>{r.name}</option>)}
+          {(runs || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
+      </div>
+
+      <div className="ctx-item ctx-save" ref={saveDisc.ref}>
+        <button type="button" className="btn sm primary" aria-expanded={saveDisc.open} onClick={() => { setRunName(stamp()); saveDisc.toggle(); }} data-testid="save-run-open">Save</button>
+        {saveDisc.open && (
+          <div className="pop ctx-pop" role="dialog" aria-label="Save a run">
+            <label className="field">
+              <span className="lab">Run name</span>
+              <input type="text" value={runName} onChange={(e) => setRunName(e.target.value)} data-testid="run-name" />
+            </label>
+            <div className="btnbar" style={{ marginTop: 8 }}>
+              <button type="button" className="btn sm primary" onClick={doSave} data-testid="save-run">Save run</button>
+            </div>
+            <p className="note" style={{ marginTop: 8 }}>A Run freezes the full configuration and the current results. Manage and compare runs on the landing.</p>
+          </div>
+        )}
       </div>
 
       <span className="spacer" />

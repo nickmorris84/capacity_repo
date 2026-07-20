@@ -58,12 +58,15 @@ export const slugify = (s) =>
   (String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48)) || "item";
 
 export const KEYS = {
+  // Legacy (pre-§26) single-simulation keys — still read by the one-time
+  // migration in sim-store.js, never written after it.
   index: "sim-index",
   run: (slug) => "sim-" + slug,
+  matrix: "matrix-state",
   intraday: "presets-intraday",
   seasonality: "presets-seasonality",
   views: "views",
-  // R3d-B: last decision-matrix result (hash + cells) plus the selected
-  // (group × strategy) pair, so a reopen can auto-select or restore.
-  matrix: "matrix-state",
+  // §26.2 multi-simulation shell.
+  simList: "sim-list",
+  simulation: (id) => "simulation-" + id,
 };

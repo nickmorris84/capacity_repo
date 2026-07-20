@@ -66,15 +66,19 @@ const goto = async (l) => { click(tabByLabel(l)); await settle(80); };
 const planAllIn = () => document.querySelector('[data-testid="plan-panel"]').getAttribute("data-active-allin");
 const selWithOption = (root, val) => [...root.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === val));
 
-const EXPECTED_TABS = ["Summary", "Strategies", "Plan", "Data", "Intraday", "Queues", "Scenarios", "Snapshots", "Settings"];
+// R4 §26.4: the Snapshots tab moved to the landing; Settings is renamed.
+const EXPECTED_TABS = ["Summary", "Strategies", "Plan", "Data", "Intraday", "Queues", "Scenarios", "Simulation Settings"];
 
 async function run() {
-  await settle(300);
+  await settle(400);
+  // R4 §26.1: the app opens on the landing — open the bootstrap simulation.
+  click(document.querySelector('[data-testid^="sim-open-"]'));
+  await settle(400);
 
-  await t("exact 9-tab order; Seasonality dissolved (§20)", () => {
+  await t("exact 8-tab order; Seasonality dissolved (§20), Snapshots moved to the landing (§26.4)", () => {
     const labels = [...document.querySelectorAll('[role="tab"]')].map((x) => x.textContent);
     eq(labels.join(" · "), EXPECTED_TABS.join(" · "), "tab order");
-    ok(!labels.includes("Seasonality") && !labels.includes("Workforce") && !labels.includes("Report"), "removed tabs absent");
+    ok(!labels.includes("Seasonality") && !labels.includes("Workforce") && !labels.includes("Report") && !labels.includes("Snapshots"), "removed tabs absent");
   });
 
   // Rule 9 — every table sits in a width-capped wrapper and every chart in a
@@ -83,7 +87,7 @@ async function run() {
   await t("every table has a width-capped wrapper; every chart a .chart (Rule 9)", async () => {
     for (const label of EXPECTED_TABS) {
       await goto(label);
-      const panel = document.getElementById("panel-" + label.toLowerCase());
+      const panel = document.getElementById(tabByLabel(label).getAttribute("aria-controls"));
       ok(panel, "panel for " + label);
       for (const tbl of panel.querySelectorAll("table")) {
         ok(tbl.closest(".tbl-wrap, .ribbon-wrap"), `a table on ${label} lacks a width-capped wrapper`);
@@ -110,10 +114,10 @@ async function run() {
       ok(bar, "context bar on " + label);
       ok(bar.querySelector('[data-testid="ctx-strategy"]'), "strategy selector on " + label);
       ok(bar.querySelector('[data-testid="ctx-group"]'), "scenario-group selector on " + label);
-      ok(bar.querySelector('[data-testid="ctx-snapshot"]'), "snapshot selector on " + label);
+      ok(bar.querySelector('[data-testid="ctx-snapshot"]'), "run selector on " + label);
       const pb = bar.querySelector('[data-testid="print-page"]');
       ok(pb, "print action on " + label);
-      if (["Data", "Queues", "Settings"].includes(label)) { const before = window.__printed || 0; click(pb); if ((window.__printed || 0) === before + 1) printed++; }
+      if (["Data", "Queues", "Simulation Settings"].includes(label)) { const before = window.__printed || 0; click(pb); if ((window.__printed || 0) === before + 1) printed++; }
     }
     eq(printed, 3, "print fired from three tabs");
   });
@@ -151,7 +155,7 @@ async function run() {
     click(document.querySelector('[data-testid="run-matrix"]'));
     await settle(300);
     ok(!document.querySelector('[data-testid="matrix-stale"]'), "matrix fresh after running");
-    await goto("Settings");
+    await goto("Simulation Settings");
     const cap = [...document.querySelectorAll("#panel-settings input[type=number]")].find((i) => i.previousSibling); // any numeric edit
     setV(document.getElementById("horizon-input") || cap, 60); // horizon edit is a real sim change
     await settle(250);
@@ -165,7 +169,7 @@ async function run() {
     const rows = () => document.querySelectorAll('[data-testid="risk-table"] tbody tr').length;
     const before = rows();
     ok(before > 0, "some risks present at default thresholds, got " + before);
-    await goto("Settings");
+    await goto("Simulation Settings");
     setV(document.getElementById("risk-otstreak-amber"), 40); // above the default peak streak (8) → drops OT risks
     await settle(200);
     await goto("Summary");
@@ -175,7 +179,7 @@ async function run() {
   });
 
   await t("horizon input clamps to [24, 78] (§16)", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     const h = document.getElementById("horizon-input");
     ok(h, "horizon input present");
     setV(h, 5); await settle(120);
@@ -186,7 +190,7 @@ async function run() {
   });
 
   await t("brand creation lives in Settings and a queue adopts the new brand (§15/§24)", async () => {
-    await goto("Settings");
+    await goto("Simulation Settings");
     const before = [...document.querySelectorAll('#panel-settings input[aria-label="Brand name"]')].length;
     click(document.querySelector('#panel-settings [data-testid="add-brand"]'));
     await settle(200);
@@ -291,18 +295,19 @@ async function run() {
     ok(Number(ahtWk1) > 300, `AHT in effect reflects the scenario (${ahtWk1} > base 300)`);
   });
 
-  await t("snapshot selection switches to read-only and Live restores it (§20)", async () => {
-    await goto("Snapshots");
-    setV(document.querySelector('[data-testid="snapshot-name"]'), "Frozen");
-    click(document.querySelector('[data-testid="save-snapshot"]'));
-    await settle(300);
+  await t("run selection switches to read-only and Live restores it (§20/§26.4)", async () => {
+    // R4 §26.4: the Snapshots tab is gone — the context-bar Save creates a Run.
+    click(document.querySelector('[data-testid="save-run-open"]')); await settle(80);
+    setV(document.querySelector('[data-testid="run-name"]'), "Frozen");
+    click(document.querySelector('[data-testid="save-run"]'));
+    await settle(600);
     const snapSel = document.querySelector('[data-testid="ctx-snapshot"]');
     const slug = [...snapSel.options].map((o) => o.value).find((v) => v);
-    ok(slug, "a snapshot appears in the context-bar selector");
+    ok(slug, "the run appears in the context-bar selector");
     setV(snapSel, slug);
     await settle(250);
     ok(document.querySelector('[data-testid="readonly-banner"]'), "read-only banner shown");
-    await goto("Settings");
+    await goto("Simulation Settings");
     // Editors are wrapped in a disabled <fieldset> in read-only mode.
     ok(document.querySelector(".ro-fieldset").disabled, "the editor fieldset is disabled in read-only mode");
     ok(document.querySelector("#panel-settings [data-testid=global-hc]"), "the editor field is present but inert");
@@ -313,10 +318,10 @@ async function run() {
   });
 
   await t("Excel package includes the four §20 sheets and re-imports a parameter", async () => {
-    // DOM export fires from the Files card on Snapshots…
-    await goto("Snapshots");
+    // R4 §26.4: the Files card lives in Simulation Settings now (§14.8).
+    await goto("Simulation Settings");
     const before = downloads.length;
-    click(document.querySelector("#panel-snapshots [data-testid=export-workbook]"));
+    click(document.querySelector("#panel-settings [data-testid=export-workbook]"));
     await settle(60);
     ok(downloads.length > before && downloads.some((d) => d.name === "capacity-plan.xlsx"), "workbook download fired");
     // …and the workbook itself carries Brands / Pools / Profiles / Groups + round-trips Parameters.
@@ -334,8 +339,8 @@ async function run() {
   });
 
   await t("import a params CSV flows into the Data table", async () => {
-    await goto("Snapshots");
-    const input = document.querySelector("#panel-snapshots [data-testid=import-params-csv]");
+    await goto("Simulation Settings");
+    const input = document.querySelector("#panel-settings [data-testid=import-params-csv]");
     const file = new window.File(["Path,Setting,Value\nqueues.q_bill.dailyVolume,v,7000\n"], "p.csv", { type: "text/csv" });
     Object.defineProperty(input, "files", { value: [file], configurable: true });
     await act(async () => { input.dispatchEvent(new window.Event("change", { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); });
@@ -347,7 +352,7 @@ async function run() {
     eq(base, "49000", "imported daily volume (7000 × 7) flows into the Data table");
   });
 
-  await settle(200);
+  await settle(700); // flush the debounced auto-save inside act
   await t("zero unexpected console errors/warnings across the P7b run", () => eq(consoleEvents.length, 0, "console: " + consoleEvents.slice(0, 8).join(" | ")));
 
   console.log("\n═══════════════════════════════════");

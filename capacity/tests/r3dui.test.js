@@ -57,15 +57,25 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const gid = (id) => document.getElementById(id);
 
-// Mount a FRESH app instance into a new container (drives startup hydration from
-// the current localStorage). Returns the container.
+// Mount a FRESH app instance into a new container (drives startup hydration
+// from the current localStorage). R4 §26.1: fresh instances open on the
+// landing, so enter the (only) simulation's workspace before returning.
 async function mountFresh(ms = 400) {
   const c = document.createElement("div");
   document.body.appendChild(c);
   act(() => { appMod.exports.mount(c); });
   await settle(ms);
+  const open = c.querySelector('[data-testid^="sim-open-"]');
+  ok(open, "the fresh instance shows a sim card to open");
+  act(() => { open.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); });
+  await settle(ms);
   return c;
 }
+// R4 §26.2 storage schema helpers (matrix cache + selected pair live on the
+// simulation record now, not a standalone matrix-state key).
+const simId = () => JSON.parse(localStorage.getItem("sim-list"))[0].id;
+const readRec = () => JSON.parse(localStorage.getItem("simulation-" + simId()));
+const writeRec = (rec) => localStorage.setItem("simulation-" + simId(), JSON.stringify(rec));
 // bestCell replicated in plain JS (matches sim-set.bestCell) so the test knows
 // which cell the app should auto-select.
 function bestCell(cells) {
@@ -85,12 +95,15 @@ function bestCell(cells) {
 }
 
 async function run() {
-  await settle(300);
+  await settle(400);
+  // R4 §26.1: the app opens on the landing — open the bootstrap simulation.
+  click($('[data-testid^="sim-open-"]'));
+  await settle(400);
 
   /* ---- Task 1: brand fix (surgical) ---- */
   await t("Queues → Brand 2 section → its Add-queue button files the new queue under Brand 2", async () => {
     // Create Brand 2 in Settings (the exact user path).
-    await goto("Settings");
+    await goto("Simulation Settings");
     click($('#panel-settings [data-testid="add-brand"]')); await settle(150);
     await goto("Queues");
     // Find the Brand 2 section (the one that isn't Brand 1's default "b1").
@@ -132,23 +145,23 @@ async function run() {
   /* ---- Task 2: startup matrix persistence + auto-selection ---- */
   let realCells = null;
   await t("a cached matrix matching the config auto-selects the best cell with a note (never auto-runs)", async () => {
-    // Reset #root to the default config so its matrix hash matches a fresh mount.
-    setV($('[data-testid="new-sim"]'), "defaults"); await settle(300);
-    // Run the matrix once — this persists {hash, cells, selected} to storage.
+    // Run the matrix once — the auto-save persists {matrixCache, selectedPair}
+    // onto the simulation record (§26.2); a fresh mount re-hydrates the same
+    // auto-saved config, so the cache hash still matches.
     await goto("Summary");
-    click($('[data-testid="run-matrix"]')); await settle(400);
-    const ms = JSON.parse(localStorage.getItem("matrix-state"));
-    ok(ms && ms.cells && ms.hash, "the matrix run persisted a hash + cells");
-    realCells = ms.cells;
+    click($('[data-testid="run-matrix"]')); await settle(700);
+    const rec = readRec();
+    ok(rec.matrixCache && rec.matrixCache.cells && rec.matrixCache.hash, "the matrix run persisted a hash + cells");
+    realCells = rec.matrixCache.cells;
     // Compute the expected best cell, and seed a DIFFERENT last-selected pair so
     // "auto-pick" is distinguishable from "restore the last pair".
-    const best = bestCell(ms.cells);
+    const best = bestCell(realCells);
     ok(best, "a best cell exists");
     let other = null;
-    for (const g of Object.keys(ms.cells)) for (const s of Object.keys(ms.cells[g])) if (g !== best.gid || s !== best.sid) other = { gid: g, sid: s };
+    for (const g of Object.keys(realCells)) for (const s of Object.keys(realCells[g])) if (g !== best.gid || s !== best.sid) other = { gid: g, sid: s };
     ok(other, "a non-best pair exists to seed as the last selection");
-    ms.selected = other;
-    localStorage.setItem("matrix-state", JSON.stringify(ms));
+    rec.selectedPair = other;
+    writeRec(rec);
     // Open a fresh instance — it must auto-select the BEST cell (not `other`).
     const B = await mountFresh();
     const sel = B.querySelector(".mx-cell.sel");
@@ -161,7 +174,10 @@ async function run() {
   await t("a stale/mismatched cache restores the last selected pair behind the stale banner (no note)", async () => {
     ok(realCells, "have real cells from the previous test");
     // Seed a matrix whose hash cannot match the live config, plus a specific pair.
-    localStorage.setItem("matrix-state", JSON.stringify({ hash: "STALE-HASH-does-not-match", cells: realCells, selected: { gid: "g_none", sid: "S3" } }));
+    const rec = readRec();
+    rec.matrixCache = { hash: "STALE-HASH-does-not-match", cells: realCells };
+    rec.selectedPair = { gid: "g_none", sid: "S3" };
+    writeRec(rec);
     const C = await mountFresh();
     ok(C.querySelector('[data-testid="matrix-stale"]'), "the stale banner shows for a mismatched cache");
     ok(!C.querySelector('[data-testid="matrix-autopick-note"]'), "no auto-pick note when the cache is stale");
@@ -193,7 +209,7 @@ async function run() {
     ok(wappCard && /Abandon/.test(wappCard.textContent), "the Digital Customer status card shows abandonment");
   });
 
-  await settle(150);
+  await settle(700); // flush the debounced auto-save inside act
   await t("zero unexpected console errors/warnings across the R3d-B run", () => eq(consoleEvents.length, 0, "console: " + consoleEvents.slice(0, 8).join(" | ")));
 
   console.log("\n═══════════════════════════════════");
