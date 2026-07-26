@@ -15,7 +15,9 @@ const pct = (n) => Math.round(n * 100) + "%";
 const RC = { green: "g", amber: "a", red: "r" };
 const GLYPH = { green: "●", amber: "▲", red: "✕", g: "●", a: "▲", r: "✕" };
 
-export default function ResultsPage({ model }) {
+const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
+
+export default function ResultsPage({ model, onNav = () => {} }) {
   const base = useMemo(() => computeBase(model), [model]);
   const [selected, setSelected] = useState(() => pickSelection(null, base));
   const sel = useMemo(() => pickSelection(selected, base), [selected, base]);
@@ -37,8 +39,9 @@ export default function ResultsPage({ model }) {
         <div className="brand"><div className="mark">C</div>
           <div><h1>{cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation"}</h1><small>Capacity Simulator</small></div></div>
         <div className="tabs" role="tablist" aria-label="Sections">
-          <button role="tab">Home</button><button role="tab">Setup</button><button role="tab">Levers</button>
-          <button role="tab" className="on" aria-selected="true">Results</button>
+          {NAV.map(([k, label]) => (
+            <button key={k} role="tab" className={k === "results" ? "on" : ""} aria-selected={k === "results"} onClick={() => onNav(k)}>{label}</button>
+          ))}
         </div>
       </header>
 

@@ -1,20 +1,16 @@
-/* v2.4 rebuild — standalone mount for the Levers page (Step 4). Runs the engine
- * matrix, so its model carries engineConfig — default to the migrated config.
+/* v2.4 rebuild — integrated app entry. Mounts the shell on a single v2 model
+ * seeded from the migrated default config (carries brands/queues/services/
+ * profiles for Setup + the engineConfig the adapter needs for Levers/Results).
  */
-import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import LeversPage from "./LeversPage.jsx";
+import App from "./App.jsx";
 import { CSS } from "./tokens.js";
 import { makeDefaultConfig } from "../../engine/engine.js";
 import { migrateV1ToV2 } from "../../model/migrate.js";
 
 export const OWNER = "nick_morris";
-export function defaultLeversModel() { return migrateV1ToV2(makeDefaultConfig()); }
 
-function StatefulLevers({ model: seed }) {
-  const [model, setModel] = useState(seed || defaultLeversModel());
-  return <LeversPage model={model} onModelChange={setModel} />;
-}
+export function seedModel() { return migrateV1ToV2(makeDefaultConfig()); }
 
 function injectStyle() {
   if (typeof document === "undefined" || document.getElementById("capacity-v2-style")) return;
@@ -27,13 +23,13 @@ function injectStyle() {
 export function mount(container, opts = {}) {
   injectStyle();
   const root = createRoot(container);
-  root.render(<StatefulLevers model={opts.model || defaultLeversModel()} />);
+  root.render(<App initialModel={opts.model || seedModel()} />);
   return root;
 }
 
-export { LeversPage };
+export { App };
 
 const el = typeof document !== "undefined" ? document.getElementById("root") : null;
 if (el) mount(el);
 
-export default LeversPage;
+export default App;

@@ -296,18 +296,35 @@ preserved engine; the derivation module + adapter carry the new domain model
 through it; Setup, Results, Levers, Home+Ecosystem are built to the mockups and
 verified in real Chromium; the template round-trips through real .xlsx.
 
-**Final integration (next phase, not a build-order step):**
-- One app shell (Home · Setup · Levers · Results tabs) threading a SINGLE v2
-  model across all four pages, replacing the per-page fixtures each `*-main.jsx`
-  currently mounts on (Setup on `sampleModel`; Results/Levers/Home on the
-  migrated default config). The plumbing exists — each page already takes its
-  model/simulations as props.
-- Wire Setup's Download/Upload buttons to `template-xlsx.js` (deferred here so
-  xlsx stays out of the other page bundles until the shell sets up code-split
-  lazy-loading — the engineering-debt "lazy-load SheetJS" item).
-- Move the derivation + matrix compute into a Web Worker (worker-ready boundary
-  already in `compute.js`); IndexedDB autosave/restore of the model.
-- Replace the shipping v1 `/dist` app with the v2 shell once integration lands.
+### Integration — app shell ✅ COMPLETE (new gate green)
+
+One shell, one model, four surfaces. The four v2 pages are now controlled
+components threaded from a single shared model.
+
+- `ui/v2/App.jsx` — the shell: owns the single v2 model, routes Home · Setup ·
+  Levers · Results, autosaves (debounced) and restores. Home is the launcher
+  (Open → the tabbed workspace); Setup/Levers/Results share the model, so a Setup
+  edit re-derives the Ecosystem and re-scores the Levers/Results matrix live.
+  Setup's Download/Upload are wired to `template-xlsx.js` (dynamic import — xlsx
+  loads only on click). `ui/v2/app-main.jsx` seeds from the migrated default.
+- `ui/v2/store.js` — model autosave/restore (localStorage interim; IndexedDB is a
+  drop-in behind the same load/save interface for P5).
+- `SetupPage`/`LeversPage` refactored to controlled (`model` + `onModelChange`);
+  each page's header tabs call an `onNav` prop; their `*-main.jsx` keep a small
+  stateful host so they still run standalone. `HomePage` gains `onOpen`.
+- `tests/app-ui.test.js` (6) — Home Open enters the workspace; the four tabs
+  navigate; **a Setup edit is reflected on Results (single shared model)**;
+  autosave persists and a fresh mount restores. Zero console noise. All four
+  page gates stay green after the controlled-component refactor.
+
+**Full suite now:** 20 gates green. Engine byte-untouched (`git diff engine/`
+empty). A self-contained browser build of the shell runs clean in real Chromium.
+
+**Remaining (smaller, optional):**
+- Move the compute into a real Web Worker thread (boundary ready in `compute.js`).
+- IndexedDB (swap `store.js`'s localStorage for the async KV) + import validation
+  report surfaced in the UI.
+- Replace the shipping v1 `/dist` with the v2 shell as the default export.
 
 ---
 

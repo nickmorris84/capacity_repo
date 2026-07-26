@@ -19,15 +19,16 @@ function useOpenSet(initial = []) {
   return [open, toggle];
 }
 
-export default function SetupPage({ initialModel }) {
-  const [model, setModel] = useState(initialModel || Ops.sampleModel());
+const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
+
+export default function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {} }) {
   const derived = useMemo(() => Ops.deriveModel(model), [model]);
   const [openSec, toggleSec] = useOpenSet(["s1"]);
   const [openBu, toggleBu] = useOpenSet(["bu_retail", "qg_ci_cards_voice", "qg_ci_cards_digital", "qg_shared"]);
   const [openCard, toggleCard] = useOpenSet(["pf_cards_voice"]);
   const [drawerQ, setDrawerQ] = useState(null);
 
-  const set = useCallback((next) => setModel(next), []);
+  const set = onModelChange;
 
   // ---- completion badges ----
   const struct = useMemo(() => {
@@ -53,10 +54,9 @@ export default function SetupPage({ initialModel }) {
           <div><h1>{model.brands[0] ? model.brands[0].name : "Simulation"}</h1><small>Capacity Simulator</small></div>
         </div>
         <div className="tabs" role="tablist" aria-label="Sections">
-          <button role="tab">Home</button>
-          <button role="tab" className="on" aria-selected="true">Setup</button>
-          <button role="tab">Levers</button>
-          <button role="tab">Results</button>
+          {NAV.map(([k, label]) => (
+            <button key={k} role="tab" className={k === "setup" ? "on" : ""} aria-selected={k === "setup"} onClick={() => onNav(k)}>{label}</button>
+          ))}
         </div>
       </header>
 
@@ -241,8 +241,8 @@ export default function SetupPage({ initialModel }) {
       <div className="importbox">
         <p><b>Load from the template.</b> Sheets mirror these sections — Structure, Queues, Services, Volume profiles. Download comes pre-filled; re-upload validates before anything changes.</p>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn sm">Download template</button>
-          <button className="btn sm primary">Upload data</button>
+          <button className="btn sm" onClick={() => onDownloadTemplate && onDownloadTemplate(model)}>Download template</button>
+          <button className="btn sm primary" onClick={() => onUploadTemplate && onUploadTemplate()}>Upload data</button>
         </div>
       </div>
 

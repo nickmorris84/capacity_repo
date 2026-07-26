@@ -13,14 +13,15 @@ const fmtM = (n) => "£" + (n / 1e6).toFixed(1) + "m";
 const pct = (n) => Math.round(n * 100) + "%";
 const GLYPH = { ok: "●", warn: "▲", bad: "✕" };
 
-export default function LeversPage({ model: initialModel }) {
-  const [model, setModel] = useState(initialModel);
+const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
+
+export default function LeversPage({ model, onModelChange, onNav = () => {} }) {
   const base = useMemo(() => computeBase(model), [model]);
   const [weight, setWeight] = useState(50);
   const [sel, setSel] = useState(null);
   const best = useMemo(() => bestUnderWeight(base, weight / 100), [base, weight]);
   const cfg = base.cfg;
-  const set = (m) => setModel(m);
+  const set = onModelChange;
 
   return (
     <div className="shell">
@@ -28,8 +29,9 @@ export default function LeversPage({ model: initialModel }) {
         <div className="brand"><div className="mark">C</div>
           <div><h1>{cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation"}</h1><small>Capacity Simulator</small></div></div>
         <div className="tabs" role="tablist" aria-label="Sections">
-          <button role="tab">Home</button><button role="tab">Setup</button>
-          <button role="tab" className="on" aria-selected="true">Levers</button><button role="tab">Results</button>
+          {NAV.map(([k, label]) => (
+            <button key={k} role="tab" className={k === "levers" ? "on" : ""} aria-selected={k === "levers"} onClick={() => onNav(k)}>{label}</button>
+          ))}
         </div>
       </header>
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/golden.test.js && node tests/derive.test.js && node tests/migrate.test.js && node tests/adapter.test.js && node tests/setup-ui.test.js && node tests/results-ui.test.js && node tests/levers-ui.test.js && node tests/home-ui.test.js && node tests/template.test.js && node tests/r1.test.js && node tests/r2.test.js && node tests/r3.test.js && node tests/r3d.test.js && node tests/r1ui.test.js && node tests/r3ui.test.js && node tests/r3c.test.js && node tests/r3dui.test.js && node tests/harness.test.js",
+    "test": "node tests/engine.test.js && node tests/golden.test.js && node tests/derive.test.js && node tests/migrate.test.js && node tests/adapter.test.js && node tests/setup-ui.test.js && node tests/results-ui.test.js && node tests/levers-ui.test.js && node tests/home-ui.test.js && node tests/template.test.js && node tests/app-ui.test.js && node tests/r1.test.js && node tests/r2.test.js && node tests/r3.test.js && node tests/r3d.test.js && node tests/r1ui.test.js && node tests/r3ui.test.js && node tests/r3c.test.js && node tests/r3dui.test.js && node tests/harness.test.js",
     "test:engine": "node tests/engine.test.js",
     "test:golden": "node tests/golden.test.js",
     "test:derive": "node tests/derive.test.js",
@@ -25,7 +25,8 @@
     "build": "node scripts/build.js",
     "test:levers": "node tests/levers-ui.test.js",
     "test:home": "node tests/home-ui.test.js",
-    "test:template": "node tests/template.test.js"
+    "test:template": "node tests/template.test.js",
+    "test:app": "node tests/app-ui.test.js"
   },
   "dependencies": {
     "react": "^19.2.7",

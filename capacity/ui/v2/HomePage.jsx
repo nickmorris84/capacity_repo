@@ -11,7 +11,7 @@ const fmtM = (n) => "£" + (n / 1e6).toFixed(1) + "m";
 const fmtN = (n) => Math.round(n).toLocaleString("en-GB");
 const RAG = { green: { cls: "ok", glyph: "●", label: "on track" }, amber: { cls: "warn", glyph: "▲", label: "at risk" }, red: { cls: "bad", glyph: "✕", label: "red risks" } };
 
-export default function HomePage({ simulations }) {
+export default function HomePage({ simulations, onOpen }) {
   const [modal, setModal] = useState(false);
   const [eco, setEco] = useState(null); // the sim whose ecosystem is open
   return (
@@ -35,7 +35,7 @@ export default function HomePage({ simulations }) {
       </div>
 
       <div className="grid">
-        {simulations.map((sim) => <SimCard key={sim.id} sim={sim} onEco={() => setEco(sim)} />)}
+        {simulations.map((sim) => <SimCard key={sim.id} sim={sim} onEco={() => setEco(sim)} onOpen={onOpen} />)}
         <button className="newcard" onClick={() => setModal(true)}>
           <span className="plus">+</span>New simulation<small>Ecosystem, subset, or single service</small>
         </button>
@@ -49,7 +49,7 @@ export default function HomePage({ simulations }) {
   );
 }
 
-function SimCard({ sim, onEco }) {
+function SimCard({ sim, onEco, onOpen }) {
   const h = sim.headline;
   const rag = RAG[h.worst];
   return (
@@ -71,7 +71,7 @@ function SimCard({ sim, onEco }) {
         <span className="chip money num">{fmtM(h.allIn)} all-in</span>
         <span className={"chip " + rag.cls}>{rag.glyph} {h.worst === "green" ? "on track" : rag.label}</span>
       </div>
-      <button className="btn open">Open</button>
+      <button className="btn open" onClick={onOpen}>Open</button>
     </article>
   );
 }

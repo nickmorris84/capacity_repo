@@ -2,12 +2,19 @@
  * ui/main.jsx pattern: inject the shared stylesheet once, export mount() for the
  * JSDOM gate and any standalone build, auto-mount #root in a browser.
  */
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import SetupPage from "./SetupPage.jsx";
 import { CSS } from "./tokens.js";
 import { sampleModel, blankModel } from "./model.js";
 
 export const OWNER = "nick_morris";
+
+// Standalone stateful host — the shell (App.jsx) owns the model in the app.
+function StatefulSetup({ model: seed }) {
+  const [model, setModel] = useState(seed || sampleModel());
+  return <SetupPage model={model} onModelChange={setModel} />;
+}
 
 function injectStyle() {
   if (typeof document === "undefined" || document.getElementById("capacity-v2-style")) return;
@@ -20,7 +27,7 @@ function injectStyle() {
 export function mount(container, opts = {}) {
   injectStyle();
   const root = createRoot(container);
-  root.render(<SetupPage initialModel={opts.model} />);
+  root.render(<StatefulSetup model={opts.model} />);
   return root;
 }
 
