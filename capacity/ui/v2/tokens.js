@@ -156,4 +156,71 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 
 .note{margin-top:18px; font-size:12.5px; color:var(--ink-3); border-top:0.5px solid var(--line); padding-top:12px}
 .note b{color:var(--ink-2); font-weight:600}
+
+/* ---- Results (results-page-v2.html) ---- */
+.ctx{display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#fff;
+  border:0.5px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:12px}
+.ctx label{font-size:11px; font-weight:600; color:var(--ink-3)}
+.ctx select{font:inherit; font-size:12.5px; padding:5px 8px; border:0.5px solid var(--line); border-radius:7px; background:#fff}
+.fresh{margin-left:auto; font-size:11.5px; font-weight:600; color:var(--green-ink); background:var(--green-bg); padding:3px 10px; border-radius:999px}
+.fresh.stale{color:var(--amber-ink); background:var(--amber-bg)}
+.sub{display:flex; gap:4px; margin-bottom:14px; overflow-x:auto}
+.sub button{border:none; background:none; font:inherit; font-size:13px; font-weight:500; color:var(--ink-2); padding:7px 13px; border-radius:9px; cursor:pointer; white-space:nowrap}
+.sub button.on{background:var(--blue); color:#fff}
+.sub button:focus-visible{outline:2px solid var(--blue); outline-offset:2px}
+.panel{background:#fff; border:0.5px solid var(--line); border-radius:14px; padding:16px; margin-bottom:12px}
+.panel h3{font-size:14px; font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center}
+.panel h3 small{font-size:11.5px; color:var(--ink-3); font-weight:400}
+.verdict{font-size:13.5px; color:var(--ink-2); border-left:3px solid var(--blue); padding-left:10px; margin-bottom:14px}
+.verdict b{color:var(--ink); font-weight:600}
+.weight{display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap}
+.weight label{font-size:11.5px; font-weight:500; color:var(--ink-2)}
+.weight input{flex:1; min-width:130px; accent-color:var(--blue)}
+.mx{width:100%; border-collapse:separate; border-spacing:4px}
+.mx th{font-size:10.5px; font-weight:600; color:var(--ink-3); text-align:center; padding:2px}
+.mx th.rh{text-align:left; font-size:11px; color:var(--ink-2); white-space:nowrap}
+.cell{border:0.5px solid var(--line); border-radius:9px; background:#fff; padding:7px 5px; font:inherit; cursor:pointer; width:100%; text-align:center; position:relative}
+.cell:hover{border-color:var(--blue-line)}
+.cell.sel{border-color:var(--blue); background:var(--blue-tint)}
+.cell:focus-visible{outline:2px solid var(--blue); outline-offset:1px}
+.cell .c1{font-size:12.5px; font-weight:600; color:var(--amber-ink)}
+.cell .c2{font-size:11px; color:var(--teal); font-weight:600}
+.cell .c3{font-size:10.5px; font-weight:600}
+.cell .c3.ok{color:var(--green-ink)} .cell .c3.warn{color:var(--amber-ink)} .cell .c3.bad{color:var(--red-ink)}
+.best{position:absolute; top:-8px; left:50%; transform:translateX(-50%); background:var(--blue); color:#fff; font-size:9px; font-weight:600; padding:2px 7px; border-radius:999px; white-space:nowrap}
+.fam6{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px}
+.fcard{background:#fff; border:0.5px solid var(--line); border-left-width:3px; padding:10px 12px; border-radius:8px}
+.fcard .fl{font-size:11px; font-weight:600}
+.fcard .fv{font-size:20px; font-weight:600; margin:1px 0}
+.fcard .fs{font-size:11px; color:var(--ink-2)}
+.risk{width:100%; border-collapse:collapse; font-size:12.5px}
+.risk th{font-size:11px; font-weight:600; color:var(--ink-3); text-align:left; padding:5px 6px; border-bottom:0.5px solid var(--line)}
+.risk td{padding:7px 6px; border-bottom:0.5px solid var(--line); vertical-align:top}
+.sev{font-size:10.5px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap}
+.sev.red{background:var(--red-bg); color:var(--red-ink)} .sev.amb{background:var(--amber-bg); color:var(--amber-ink)} .sev.grn{background:var(--green-bg); color:var(--green-ink)}
+.filters{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px}
+.filters select{font:inherit; font-size:12px; padding:4px 8px; border:0.5px solid var(--line); border-radius:7px; background:#fff}
+.filters label{font-size:11px; font-weight:600; color:var(--ink-3)}
+.ribwrap{overflow-x:auto}
+.ribbon{border-collapse:collapse}
+.ribbon th{font-size:10px; color:var(--ink-3); font-weight:500; padding:1px}
+.ribbon .qh{font-size:11.5px; font-weight:600; color:var(--ink-2); text-align:left; padding-right:8px; white-space:nowrap}
+.ribbon .gh{font-size:10.5px; font-weight:600; color:var(--blue-deep); text-align:left; padding:5px 0 2px}
+.rc{width:15px; height:17px; border:none; padding:0; cursor:pointer; font-size:8.5px; line-height:17px; text-align:center; border-radius:3px; color:#fff}
+.rc.g{background:#97C459; color:#27500A} .rc.a{background:#FAC775; color:#633806} .rc.r{background:#F09595; color:#501313}
+.rc.cur{outline:2px solid var(--blue); outline-offset:1px}
+.wklabel{font-size:12.5px; color:var(--ink-2); margin:8px 0}
+.wklabel b{color:var(--blue-deep); font-weight:600}
+.inherit{font-size:12px; color:var(--blue-deep); background:var(--blue-tint); display:inline-flex; gap:8px; align-items:center; padding:5px 10px; border-radius:999px; margin-bottom:10px}
+.inherit button{border:none; background:none; color:var(--blue); font-weight:600; cursor:pointer; font:inherit; font-size:12px; padding:0 4px}
+.dtab{width:100%; border-collapse:collapse; font-size:12px}
+.dtab th{padding:5px 8px; text-align:right; font-size:10.5px; font-weight:600; border-bottom:0.5px solid var(--line)}
+.dtab td{padding:6px 8px; text-align:right; border-bottom:0.5px solid var(--line)}
+.dtab .l{text-align:left}
+.gInp{color:var(--blue-deep)} .gPerf{color:var(--teal)} .gWf{color:var(--coral)} .gOut{color:var(--amber-ink)}
+.dtab .grp td{background:var(--canvas); font-size:11px; font-weight:600; color:var(--blue-deep); text-align:left}
+.flowctl{display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap}
+.flowctl input[type=range]{flex:1; min-width:120px; accent-color:var(--blue)}
+.flowctl .wk{font-size:12.5px; font-weight:600; color:var(--blue-deep); min-width:64px}
+.hide{display:none}
 `;

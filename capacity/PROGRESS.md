@@ -157,10 +157,52 @@ drawer; the live derivation is correct end-to-end (e.g. shared QA — Governance
 **Full suite now:** 15 gates green (adds **Setup 9**). `/dist` unchanged — the v2
 Setup is a standalone module, not yet wired into the shipping v1 app shell.
 
-**Next — Step 3:** consolidate Results (Summary · Plan · Intraday · Data · Flow)
-under one context bar + shared week cursor per results-page-v2.html, and move the
-derivation into a Web Worker (engineering-debt item), feeding the preserved engine
-through the adapter already built.
+### Step 3 — Results consolidation ✅ COMPLETE (new gate green)
+
+The Results page built to results-page-v2.html: one context bar, five lenses
+(Summary · Plan · Intraday · Data · Flow), one shared week cursor — driven by
+REAL engine output (v2 model → model/adapter.js → preserved engine).
+
+- `ui/v2/compute.js` — the worker-ready compute boundary. `computeBase(model)`
+  runs the decision matrix once (reusing the tested `runMatrix`/`bestCell` from
+  sim-set — the adapter yields exactly the v1 cfg they expect); `computeDetail`
+  runs the selected (group × strategy) with daily capture. `runResults` combines
+  them. Isolated behind a plain function so a Web Worker wrapper is a thin
+  drop-in (`runnerFor()`) — the actual Worker thread is deferred (JSDOM can't
+  exercise Workers; the compute is worker-ready and the inline path ships).
+- `ui/v2/ResultsPage.jsx` — context bar (strategy · scenario · save run ·
+  freshness) governing all lenses; the decision matrix (cost + red-weeks glyph
+  per cell, cost↔service weighting slider, Best-fit badge) sets the context;
+  verdict sentence; six KPI-family cards; risk register with BU/channel filters.
+  Plan's glyphed RAG ribbon sets the shared week cursor; Intraday and Flow
+  inherit it; Data is grouped by path with a template-compatible CSV export;
+  Flow is a proportional Sankey with play/scrubber animating cached weekly
+  results (no re-simulation). `ui/v2/results-main.jsx` mounts it on the migrated
+  default config (which carries the engineConfig the adapter needs).
+- `tests/results-ui.test.js` (10) — JSDOM gate on real engine output: matrix
+  renders with cost + red glyph and a Best-fit badge that follows the slider;
+  tapping a cell drives the context bar; the Plan ribbon sets the cursor and
+  Intraday/Flow inherit it (verified the cursor is shared across lens switches);
+  CSV export header; scenario change recomputes. Zero console noise (fixed two
+  keyless-fragment warnings found here). Awaited-test harness (exits non-zero on
+  failure).
+
+**Verified in real Chromium** (zero page errors): strong parity with
+results-page-v2.html; all figures are real — the matrix shows genuine per-cell
+costs/red-weeks (Forward-backfill legitimately reds out under-hiring), Best-fit
+lands on the bestCell (No scenarios × Buffer, £6.0m/0 red), six family cards
+(1.83m contacts · 100% SLA · 63% occ · 145 FTE · 1,484 lost · £6.0m), and the
+Plan ribbon + FTE chart read the same run.
+
+**Full suite now:** 16 gates green (adds **Results 10**). Engine untouched;
+golden/adapter/derivation all still green.
+
+**Next — Step 4:** Levers (levers-page-v2.html) — the decision matrix flanked by
+strategy + scenario-group cards, hiring caps (BU × channel). The matrix data is
+already computed (`computeBase`); Levers is the editing surface for the same
+matrix Results consumes. Then Step 5 (Home + Ecosystem) and Step 6 (template
+round-trip), and finally wiring the four v2 pages into one app shell threading a
+single model (currently each page runs on its appropriate fixture).
 
 ---
 
