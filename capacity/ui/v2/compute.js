@@ -75,6 +75,25 @@ export function pickSelection(selected, base) {
   return normalizeSel(selected, base.matrix, base.groups, base.strategies);
 }
 
+// Cheap per-simulation headline for a Home card: ONE run (S1 · plan of record),
+// not the 4×N matrix. Returns the chip figures + worst RAG for the card.
+export function quickHeadline(model) {
+  const cfg = v2ToEngineConfig(model);
+  const sim = simulate(cfg, { strategy: "S1" });
+  const w = sim.weeks;
+  const lastWk = w[w.length - 1];
+  const availFte = cfg.queues.reduce((a, q) => a + (lastWk.queues[q.id].active || 0), 0);
+  let worst = "green";
+  for (const wk of w) for (const q of cfg.queues) {
+    const st = wk.queues[q.id].status;
+    if (st === "red") worst = "red"; else if (st === "amber" && worst !== "red") worst = "amber";
+  }
+  return {
+    horizon: w.length, queues: cfg.queues.length,
+    allIn: sim.summary.allIn, availFte, worst, lost: sim.summary.lost,
+  };
+}
+
 function normalizeSel(selected, matrix, groups, strategies) {
   const gids = groups.map((g) => g.id), sids = strategies.map((s) => s.id);
   if (selected && gids.includes(selected.gid) && sids.includes(selected.sid)) return { gid: selected.gid, sid: selected.sid };

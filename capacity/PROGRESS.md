@@ -231,12 +231,44 @@ and look-ahead inputs and the caps grid are live.
 
 **Full suite now:** 17 gates green (adds **Levers 9**). Engine untouched.
 
-**Next — Step 5:** Home + Ecosystem (home-page-v2.html) — simulation cards with
-mini dependency-graph thumbnails, the create-fork modal, and the full-screen
-Ecosystem volume Sankey (brand → BU → channel → service mix → journey queues →
-outcome) built from the derivation module. Then Step 6 (template round-trip),
-and finally wiring the four v2 pages into one app shell threading a single model
-(each page currently runs on its own appropriate fixture).
+### Step 5 — Home + Ecosystem ✅ COMPLETE (new gate green)
+
+The Home page built to home-page-v2.html: simulation cards with mini
+dependency-graph thumbnails and KPI-family stat chips, the New-simulation fork
+modal, and the full-screen **Ecosystem volume Sankey** — the derivation module
+made visible.
+
+- `ui/v2/ecosystem.js` — `sankeyLayout(model)`: PURE, turns the model into a
+  proportional volume flow (brand → channel → service mix → journey queues →
+  outcome) straight from `derive()` — node heights ∝ volume, ribbon widths ∝
+  flow, governance stations tinted purple, an outcome column split
+  resolved/failed. Queue volumes are DERIVED and the picture proves it.
+- `ui/v2/compute.js` — `quickHeadline(model)`: one cheap sim (S1) for a card's
+  chips (horizon, queues, FTE avail, all-in, worst RAG) — not the full matrix.
+- `ui/v2/HomePage.jsx` — cards (thumbnail + name + scope/updated/runs + five
+  KPI-family chips + Open), the New-simulation fork modal (Whole ecosystem /
+  Subset / Single service / From template), and the Ecosystem overlay rendering
+  the Sankey as SVG with legend + "Edit in Setup". `ui/v2/home-main.jsx` seeds
+  the simulations list from the migrated default config with a real headline.
+- `tests/home-ui.test.js` (6) — JSDOM gate: card chips + thumbnail, the fork
+  modal opens/closes, the Ecosystem overlay renders the six-column Sankey with
+  real derived queue names and a resolved/failed outcome, and shows the
+  derived-not-entered message. Zero console noise.
+
+**Verified in real Chromium** (zero page errors): strong parity with
+home-page-v2.html; the real card reads 52 wk · 4 svc · 4 queues · 159 FTE avail.
+· £7.2m all-in · ▲ at risk; the Ecosystem Sankey shows Voice larger than Digital
+by real volume, the service→queue cross-over ribbons, and Resolved 100% (the
+default estate holds SLA).
+
+**Full suite now:** 18 gates green (adds **Home 6**). Engine untouched.
+
+**Next — Step 6:** template round-trip (lazy-loaded SheetJS; four sheets
+mirroring the Setup sections — Structure, Queues, Services, Channel volume
+profiles — with an export → edit → import → export round-trip guarantee). Then
+the final integration: one app shell (Home · Setup · Levers · Results) threading a
+single v2 model + IndexedDB autosave, replacing the per-page fixtures each v2
+page currently mounts on.
 
 ---
 
