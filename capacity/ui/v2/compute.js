@@ -10,15 +10,47 @@
  */
 import { v2ToEngineConfig } from "../../model/adapter.js";
 import { simulate, applyGroupScope } from "../../engine/engine.js";
-import { runMatrix, bestCell } from "../sim-set.js";
+import { bestCell } from "../sim-set.js";
 import { strategyList, groupScenarioIds } from "../views.js";
+
+// Richer decision matrix than sim-set.runMatrix: same allIn / redWeeks / status /
+// bestCell-compatible shape, PLUS per-cell SLA attainment (share of green
+// queue-weeks) that the Levers cells display. One matrix, consumed by both
+// Results (cost + red) and Levers (cost + SLA + red) — one source of truth.
+function richMatrix(cfg) {
+  const groups = cfg.groups || [];
+  const strategies = strategyList(cfg);
+  const cells = {};
+  for (const g of groups) {
+    const ids = groupScenarioIds(cfg, g.id);
+    const scoped = applyGroupScope(cfg, g.id);
+    cells[g.id] = {};
+    for (const s of strategies) {
+      const sim = simulate(scoped, { strategy: s.id, viewIds: ids });
+      let redWeeks = 0, greenQW = 0, totalQW = 0;
+      for (const w of sim.weeks) {
+        if (cfg.queues.some((q) => w.queues[q.id].status === "red")) redWeeks++;
+        for (const q of cfg.queues) { totalQW++; if (w.queues[q.id].status === "green") greenQW++; }
+      }
+      const flags = sim.summary.flags;
+      const status = flags.capInfeasible || flags.tippingPoint || redWeeks > 0
+        ? (redWeeks > sim.weeks.length * 0.1 || flags.tippingPoint ? "red" : "amber") : "green";
+      cells[g.id][s.id] = {
+        allIn: sim.summary.allIn, redWeeks, status,
+        tipping: !!flags.tippingPoint, capInfeasible: !!flags.capInfeasible,
+        sla: totalQW ? greenQW / totalQW : 1,
+      };
+    }
+  }
+  return { cells };
+}
 
 // Selection-independent base: the engine cfg + decision matrix + axes. Memoise
 // this on the model — running the 4×N matrix once, not per cell selection.
 export function computeBase(model) {
   const cfg = v2ToEngineConfig(model);
-  const matrix = runMatrix(cfg);
-  const strategies = strategyList(cfg);          // [{ id, name }]
+  const matrix = richMatrix(cfg);
+  const strategies = strategyList(cfg);          // [{ id, name, baseType, forwardMonths? }]
   const groups = (cfg.groups || []).map((g) => ({ id: g.id, name: g.name }));
   return { cfg, matrix, strategies, groups };
 }

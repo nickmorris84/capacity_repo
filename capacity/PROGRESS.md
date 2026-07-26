@@ -197,12 +197,46 @@ Plan ribbon + FTE chart read the same run.
 **Full suite now:** 16 gates green (adds **Results 10**). Engine untouched;
 golden/adapter/derivation all still green.
 
-**Next — Step 4:** Levers (levers-page-v2.html) — the decision matrix flanked by
-strategy + scenario-group cards, hiring caps (BU × channel). The matrix data is
-already computed (`computeBase`); Levers is the editing surface for the same
-matrix Results consumes. Then Step 5 (Home + Ecosystem) and Step 6 (template
-round-trip), and finally wiring the four v2 pages into one app shell threading a
-single model (currently each page runs on its appropriate fixture).
+### Step 4 — Levers ✅ COMPLETE (new gate green)
+
+The Levers page built to levers-page-v2.html: the decision matrix flanked by
+strategy + scenario-group cards, hiring caps at the foot. The matrix is the SAME
+`computeBase()` Results consumes — one source of truth, two surfaces (Levers
+edits, Results reviews). Every lever is a REAL engine input that re-scores the
+matrix live.
+
+- `ui/v2/compute.js` — `richMatrix(cfg)` replaces the sim-set.runMatrix call in
+  `computeBase`: same allIn/redWeeks/status/bestCell-compatible shape PLUS
+  per-cell **SLA attainment** (share of green queue-weeks) that the Levers cells
+  show. Results (cost + red) and Levers (cost + SLA + red) read one matrix.
+- `ui/v2/model.js` — lever ops on the carried engineConfig: `setHiringBuffer`
+  (→ hiring.buffer, S2), `setForwardMonths` (→ strategy.forwardMonths, S3),
+  `setTotalCap` (→ hiring.caps.total), `setSegmentCap` (→ hiring.caps.segments
+  keyed brandId|channel, the engine's real segKey). All matrix-affecting.
+- `ui/v2/LeversPage.jsx` — matrix (cost + SLA + red glyph, cost↔service slider,
+  Best-fit badge, cell tap → selected context); strategy cards with the built-in
+  pill, description, inline editable key param (Buffer %, Look-ahead months) and
+  an expandable path-grouped queue list; scenario-group cards with factor count,
+  scope chips and a mini in-force timeline; hiring caps grid (brand × channel) +
+  total ceiling. `ui/v2/levers-main.jsx` mounts it on the migrated config.
+- `tests/levers-ui.test.js` (9) — JSDOM gate proving the levers are real:
+  **tightening the total hiring cap adds red weeks to the matrix**, editing the
+  buffer % moves the Buffer column's all-in, cells carry cost+SLA+red, cell tap
+  selects, strategy cards expand. Zero console noise.
+
+**Verified in real Chromium** (zero page errors): strong parity with
+levers-page-v2.html; SLA% tracks the red-week counts (e.g. Forward backfill ×
+Plan of record = 85% SLA / ✕19 red), Best-fit lands on £6.0m/0-red, the buffer
+and look-ahead inputs and the caps grid are live.
+
+**Full suite now:** 17 gates green (adds **Levers 9**). Engine untouched.
+
+**Next — Step 5:** Home + Ecosystem (home-page-v2.html) — simulation cards with
+mini dependency-graph thumbnails, the create-fork modal, and the full-screen
+Ecosystem volume Sankey (brand → BU → channel → service mix → journey queues →
+outcome) built from the derivation module. Then Step 6 (template round-trip),
+and finally wiring the four v2 pages into one app shell threading a single model
+(each page currently runs on its own appropriate fixture).
 
 ---
 

@@ -223,4 +223,33 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .flowctl input[type=range]{flex:1; min-width:120px; accent-color:var(--blue)}
 .flowctl .wk{font-size:12.5px; font-weight:600; color:var(--blue-deep); min-width:64px}
 .hide{display:none}
+
+/* ---- Levers (levers-page-v2.html) ---- */
+.cardlist{display:grid; gap:8px}
+.scard{border:0.5px solid var(--line); border-radius:11px; background:#fff}
+.schead{display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; font:inherit; text-align:left; padding:11px 12px; cursor:pointer}
+.schead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+.schead b{font-size:13.5px; font-weight:600}
+.schead .desc{display:block; font-size:12px; color:var(--ink-2); font-weight:400}
+.pill{font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; background:var(--blue-tint); color:var(--blue-deep); white-space:nowrap}
+.pill.builtin{background:var(--canvas); color:var(--ink-3); border:0.5px solid var(--line)}
+.pill.shared{background:#E1F5EE; color:#0F6E56}
+.param{margin-left:auto; font-size:12px; color:var(--ink-2)}
+.param b{font-weight:600; color:var(--ink)}
+.param input{font:inherit; font-size:12px; padding:3px 6px; border:0.5px solid var(--line); border-radius:6px; text-align:right}
+.scard .chev{color:var(--ink-3); font-size:11px; margin-left:8px}
+.scbody{display:none; border-top:0.5px solid var(--line); padding:10px 12px; font-size:12.5px; color:var(--ink-2)}
+.scard.open .scbody{display:block}
+.scard.open .chev{transform:rotate(180deg); display:inline-block}
+.grph{font-size:11px; font-weight:600; color:var(--blue-deep); margin:8px 0 4px}
+.qtoggle{display:flex; justify-content:space-between; padding:3px 0}
+.tl{display:flex; gap:1px; margin-top:6px}
+.tl span{flex:1; height:6px; border-radius:2px; background:var(--line)}
+.tl span.on{background:#97C459}
+.mxnote{font-size:12px; color:var(--ink-3); margin-top:8px}
+.caps{width:100%; border-collapse:collapse; font-size:13px}
+.caps th{font-size:11.5px; font-weight:600; color:var(--ink-3); text-align:left; padding:6px 8px; border-bottom:0.5px solid var(--line)}
+.caps td{padding:7px 8px; border-bottom:0.5px solid var(--line)}
+.caps input{width:70px; font:inherit; font-size:13px; padding:5px 8px; border:0.5px solid var(--line); border-radius:7px; text-align:right}
+@media(min-width:760px){ .cols{display:grid; grid-template-columns:1fr 1fr; gap:14px} }
 `;

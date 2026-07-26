@@ -174,6 +174,41 @@ export function removeMixRow(model, profileId, rowIndex) {
   return m;
 }
 
+// ---- lever ops (edit the carried engineConfig; all matrix-affecting) --------
+export function setHiringBuffer(model, pct) {
+  const m = clone(model);
+  ensureEngine(m).hiring.buffer = (+pct || 0) / 100;
+  return m;
+}
+export function setForwardMonths(model, strategyId, months) {
+  const m = clone(model);
+  const s = (ensureEngine(m).strategies || []).find((x) => x.id === strategyId);
+  if (s) s.forwardMonths = Math.max(1, Math.min(6, +months || 1));
+  return m;
+}
+export function setTotalCap(model, cap) {
+  const m = clone(model);
+  const h = ensureEngine(m).hiring;
+  h.caps = h.caps || { total: null, segments: {} };
+  h.caps.total = cap === "" || cap == null ? null : +cap;
+  h.cap = h.caps.total != null ? h.caps.total : h.cap; // keep legacy fallback in step
+  return m;
+}
+export function setSegmentCap(model, brandId, channel, cap) {
+  const m = clone(model);
+  const h = ensureEngine(m).hiring;
+  h.caps = h.caps || { total: null, segments: {} };
+  h.caps.segments = h.caps.segments || {};
+  const key = (brandId || "") + "|" + channel;
+  if (cap === "" || cap == null) delete h.caps.segments[key];
+  else h.caps.segments[key] = +cap;
+  return m;
+}
+function ensureEngine(m) {
+  if (!m.engineConfig) throw new Error("lever op needs a model carrying engineConfig (migrate first)");
+  return m.engineConfig;
+}
+
 function firstChannelNode(m) {
   for (const b of m.brands) for (const bu of b.businessUnits) for (const p of bu.products) if (p.channels[0]) return p.channels[0].id;
   return null;
