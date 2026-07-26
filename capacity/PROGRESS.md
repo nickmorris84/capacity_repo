@@ -263,12 +263,51 @@ default estate holds SLA).
 
 **Full suite now:** 18 gates green (adds **Home 6**). Engine untouched.
 
-**Next — Step 6:** template round-trip (lazy-loaded SheetJS; four sheets
-mirroring the Setup sections — Structure, Queues, Services, Channel volume
-profiles — with an export → edit → import → export round-trip guarantee). Then
-the final integration: one app shell (Home · Setup · Levers · Results) threading a
-single v2 model + IndexedDB autosave, replacing the per-page fixtures each v2
-page currently mounts on.
+### Step 6 — Template round-trip ✅ COMPLETE (new gate green)
+
+Four sheets mirroring the Setup sections (Structure · Queues · Services · Channel
+volume profiles), with the export → edit → import → export round-trip guarantee.
+
+- `ui/v2/template.js` — PURE serialization: `modelToSheets(model)` /
+  `sheetsToModel(sheets)`. Ids carried so structure and refs reconstruct exactly;
+  Structure = one row per channel (plus rows for empty products/BUs), Queues =
+  one row per queue with the six-family staffing columns, Services = one row per
+  journey step (service fields repeat), Profiles = one row per mix entry.
+  `validateRoundTrip(model)` backs the import validation report.
+- `ui/v2/template-xlsx.js` — the SheetJS binding, **lazy-loading xlsx**
+  (`await import("xlsx")` — most sessions never touch Excel): `exportWorkbook`
+  (pre-filled), `importWorkbook` → { model, report }, `downloadTemplate` (DOM).
+- `tests/template.test.js` (6) — bundles the pure module and exercises the real
+  library via `require("xlsx")`: four sheets mirror the sections; the pure
+  round-trip deep-equals the model; re-export is byte-identical (idempotent);
+  a **REAL SheetJS .xlsx write → read reproduces the model exactly**; an edited
+  mix % survives; optional service AHT + governance sampling % round-trip
+  precisely.
+
+**Full suite now:** 19 gates green (adds **Template 6**). Engine untouched.
+
+---
+
+## v2.4 rebuild — build order COMPLETE (Steps 0–6). Remaining: integration
+
+All seven build-order steps are done and green (19 gates, 0 failures; engine
+byte-identical throughout — `git diff engine/` empty). Golden masters pin the
+preserved engine; the derivation module + adapter carry the new domain model
+through it; Setup, Results, Levers, Home+Ecosystem are built to the mockups and
+verified in real Chromium; the template round-trips through real .xlsx.
+
+**Final integration (next phase, not a build-order step):**
+- One app shell (Home · Setup · Levers · Results tabs) threading a SINGLE v2
+  model across all four pages, replacing the per-page fixtures each `*-main.jsx`
+  currently mounts on (Setup on `sampleModel`; Results/Levers/Home on the
+  migrated default config). The plumbing exists — each page already takes its
+  model/simulations as props.
+- Wire Setup's Download/Upload buttons to `template-xlsx.js` (deferred here so
+  xlsx stays out of the other page bundles until the shell sets up code-split
+  lazy-loading — the engineering-debt "lazy-load SheetJS" item).
+- Move the derivation + matrix compute into a Web Worker (worker-ready boundary
+  already in `compute.js`); IndexedDB autosave/restore of the model.
+- Replace the shipping v1 `/dist` app with the v2 shell once integration lands.
 
 ---
 
