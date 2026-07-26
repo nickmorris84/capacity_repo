@@ -39,11 +39,53 @@ engine's real deficit/failure-driven semantics — **no** new occupancy trigger.
 **Full suite after Step 0:** 11 gates green (P1 20 · **Step 0 golden 18** · R1 19 ·
 R2 27 · R3a 20 · R3d-A 5 · P7b 20 · R3b 9 · R3c 9 · R3d-B 6 · §13 harness 20).
 
-**Next — Step 1:** the derivation module (volume propagation · effective AHT ·
-cross-structure guard · shared-cost by minutes · referential integrity) as a pure,
-unit-tested module destined for a Web Worker, mapping journey splits onto the
-engine's existing deflection inputs via an adapter. Golden masters stay green
-throughout — the adapter feeds the preserved engine, it does not alter it.
+### Step 1 — Derivation module + migration ✅ COMPLETE (2 new gates green)
+
+The heart of the v2.4 change: a **pure** module (no DOM, no React, no engine
+import — destined for a Web Worker) turning the domain model into derived queue
+workload, so queue volume and AHT are NEVER user-entered. Implements all seven
+derivation rules from the prompt §1 with the owner decisions baked in.
+
+- `model/derive.js` — `derive(model)` (one-pass aggregate for the worker) plus
+  targeted pure functions:
+  - **Rule 1 — volume propagation** (`deriveServiceVolumes`): service volume =
+    deepest applicable profile total × mix %. Profiles on the same structural
+    path supersede shallower ones (channel > product > BU, "deepest wins");
+    disjoint paths sum. Supersession is tracked per source.
+  - **Rules 1+2 — queue workload & effective AHT** (`deriveQueueWorkload`):
+    workload = Σ services (service volume × splitPct × samplingPct); per-service
+    AHT = `service.ahtSec ?? queue.fallbackAhtSec`; queue **effective AHT** =
+    volume-weighted average, with a `weighted`/`svc`/`queue` marker and a
+    per-service breakdown for the tooltip.
+  - **Rule 4 — cross-structure guard** (`crossStructureWarnings`): a journey step
+    into a *structural* queue whose channel-path doesn't contain the feeding
+    profile's node WARNS (never blocks); shared queues are silent. (The
+    Loans-style acceptance case is covered by a test.)
+  - **Rule 5 — shared-queue cost allocation** (`sharedQueueAllocation`): by
+    **handling minutes** (volume × per-service AHT), split across feeding
+    structures in proportion to each node's share of the service volume.
+  - **Rule 6 — referential integrity** (`canDeleteQueue`/`canDeleteService`):
+    deletion blocked with dependents listed.
+  - **Validation** (`validateModel`): errors (dangling refs, mix >100%) vs
+    warnings (mix <100% unmodelled remainder, cross-structure).
+  - Owner decisions locked: **lag OUT** (parsed, not applied), **minutes**
+    allocation, **warn-not-block** on <100% mix and cross-structure.
+- `model/migrate.js` — `migrateV1ToV2(cfg)`: each v1 queue → one queue + one
+  service ("<queue> demand", 100% mix) + one channel profile, synthesising a
+  default BU + Product per brand (D19a). Deterministic ids, no random.
+- `tests/derive.test.js` (17) + `tests/migrate.test.js` (7), both wired into
+  `npm test`. The migration gate proves the **exact round-trip**: derived queue
+  volume === old dailyVolume and derived effective AHT === old AHT on the real
+  default config, model valid, zero cross-structure warnings.
+
+**Full suite after Step 1:** 13 gates green (adds **derivation 17** + **migration
+7**). Engine still untouched (`git diff engine/` empty); golden masters green.
+
+**Next — Step 2:** rebuild Setup as the four-section page (Structure · Queues ·
+Service catalog · Channel volume profiles) reading this module's derived outputs
+(volume/AHT read-only), per setup-page-v3.html. Then Step 3 wires the derivation
+into a Web Worker and maps journey splits onto the engine's deflection inputs via
+an adapter (the adapter feeds the preserved engine — it does not alter it).
 
 ---
 
