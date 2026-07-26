@@ -114,13 +114,53 @@ gate proves equivalence the sound way — in-process, clean AND warmed.
 
 **Full suite now:** 14 gates green (adds **adapter 5**). Engine untouched.
 
-**Next — Step 2:** rebuild Setup as the four-section page (Structure · Queues ·
-Service catalog · Channel volume profiles) reading the derivation module's outputs
-(volume/AHT read-only), per setup-page-v3.html. **Blocked on the four mockup HTML
-files** (home/setup/levers/results-*.html) — the prompt's stated source of truth
-for layout, copy and design tokens; needed for the "mockup visual parity"
-acceptance criterion. Provide them, or authorise building Setup from the written
-§5.2 spec alone. Step 3 then wraps the derivation module in a Web Worker.
+### Step 2 — Setup page ✅ COMPLETE (new gate green; mockups received)
+
+The four-section Setup page built to setup-page-v3.html, wired live to the
+derivation module — queue volume and Effective AHT are DERIVED and rendered
+read-only (there is no queue-volume input anywhere). Kept as a self-contained v2
+module (`ui/v2/`), cleanly separate from the shipping v1 app.
+
+- `model/taxonomy.js` — the fixed enumerations (channels/activities/product
+  requests/queue types), shared by model and UI.
+- `ui/v2/tokens.js` — the design system extracted verbatim from the mockups'
+  `:root` + components (blue-led light theme, six KPI-family colours, glyphs,
+  tabular numerals); one injected stylesheet + `FAMILY_COLORS`.
+- `ui/v2/model.js` — the v2 model state: `sampleModel()` (mirrors the mockup's
+  worked example), `blankModel()`, and pure reducer ops (structure channel
+  toggles; queue/service/profile/journey/mix add·update·delete); `deriveModel()`
+  wraps model/derive.js.
+- `ui/v2/SetupPage.jsx` — four collapsible sections with completion badges
+  (Structure · Queues · Service catalog · Channel volume profiles), the empty
+  state as the wizard; derived volume/AHT with weighted/svc markers; live mix-sum
+  indicator (green 100% / amber under); unmodelled-remainder + cross-structure
+  warnings; and the staffing drawer (six KPI-family accordions, derived volume
+  read-only). `ui/v2/setup-main.jsx` mounts it (mirrors ui/main.jsx).
+- `tests/setup-ui.test.js` (9) — JSDOM gate: renders the page, asserts derived
+  volumes are read-only and update live as the mix changes (2,398 = 1998+400
+  from two disjoint profiles → 1,750 at 50% → back), the amber+unmodelled path,
+  the Loans-style cross-structure warning, channel toggles, and the drawer's six
+  accordions. Zero console noise. (Harness bug caught + fixed: async tests are
+  now awaited so a failure actually exits non-zero — verified it bites.)
+
+**Derivation refinement (found while building):** the cross-structure guard is
+now evaluated PER FEEDING PROFILE (rule 4: "outside the path of *the profile*
+feeding it"), so a service fed both in-path and out-of-path flags only the
+out-of-path source — the mockup's exact Loans behaviour. Derivation/adapter/golden
+gates all still green.
+
+**Verified in real Chromium** (headless, deviceScaleFactor 2, zero page/console
+errors): strong parity with setup-page-v3.html across all four sections and the
+drawer; the live derivation is correct end-to-end (e.g. shared QA — Governance =
+83/day at 575 s *weighted* = Billing at its 600 s fallback + New-card at 540 s).
+
+**Full suite now:** 15 gates green (adds **Setup 9**). `/dist` unchanged — the v2
+Setup is a standalone module, not yet wired into the shipping v1 app shell.
+
+**Next — Step 3:** consolidate Results (Summary · Plan · Intraday · Data · Flow)
+under one context bar + shared week cursor per results-page-v2.html, and move the
+derivation into a Web Worker (engineering-debt item), feeding the preserved engine
+through the adapter already built.
 
 ---
 

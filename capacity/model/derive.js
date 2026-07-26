@@ -163,32 +163,35 @@ function deriveQueueWorkload(model, opts = {}) {
 }
 
 // ------------------------------------------------ rule 4: cross-structure guard
-// A journey step feeding a STRUCTURAL queue whose channel-instance path does not
-// contain the feeding profile's node raises a WARNING (never a block). Shared
-// queues accept volume from any journey silently.
+// Per PROFILE SOURCE: a journey step feeding a STRUCTURAL queue whose
+// channel-instance path does not contain THE FEEDING PROFILE's node raises a
+// WARNING (never a block). Evaluated per feeding profile, so a service fed both
+// in-path (e.g. its own channel) and out-of-path (e.g. a sibling product's
+// profile) flags only the out-of-path source — matching the mockup's Loans case.
+// Shared queues accept volume from any journey silently.
 function crossStructureWarnings(model, struct = indexStructure(model)) {
   const warnings = [];
   const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
-  // For each service, which structural nodes feed it (via its profiles' mix)?
   const svcVol = deriveServiceVolumes(model, struct);
   for (const svc of model.services || []) {
     const sv = svcVol.get(svc.id);
-    const feedNodes = sv ? sv.sources.filter((s) => !s.superseded && s.nodeId != null).map((s) => s.nodeId) : [];
-    if (!feedNodes.length) continue;
+    const sources = sv ? sv.sources.filter((s) => !s.superseded && s.nodeId != null && s.volume > 0) : [];
+    if (!sources.length) continue;
     for (const step of svc.journey || []) {
       const q = queueById.get(step.queueId);
       if (!q || !q.attachment || q.attachment.kind !== "structural") continue; // shared/dangling: silent
       const chId = q.attachment.channelInstanceId;
-      // In-path if the queue's channel path contains at least one feeding node.
-      const inPath = feedNodes.some((nid) => struct.isAncestorOrSelf(nid, chId));
-      if (!inPath) {
-        const qn = struct.nodes.get(chId);
+      const qn = struct.nodes.get(chId);
+      for (const src of sources) {
+        if (struct.isAncestorOrSelf(src.nodeId, chId)) continue; // this source is in-path
+        const fn = struct.nodes.get(src.nodeId);
         warnings.push({
-          kind: "cross_structure", serviceId: svc.id, serviceName: svc.name,
+          kind: "cross_structure", profileId: src.profileId,
+          serviceId: svc.id, serviceName: svc.name,
           queueId: q.id, queueName: q.name,
           queuePath: qn ? qn.label : chId,
-          feedNodePaths: feedNodes.map((nid) => (struct.nodes.get(nid) || {}).label || nid),
-          message: `Service "${svc.name}" routes to structural queue "${q.name}" (${qn ? qn.label : chId}) but its volume enters outside that path.`,
+          feedNodePath: fn ? fn.label : src.nodeId,
+          message: `Service "${svc.name}" routes to structural queue "${q.name}" (${qn ? qn.label : chId}) but volume from ${fn ? fn.label : src.nodeId} enters outside that path.`,
         });
       }
     }
