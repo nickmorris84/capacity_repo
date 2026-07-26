@@ -69,10 +69,15 @@ function migrateV1ToV2(cfg) {
       const svcId = `svc_${q.id}`;
       const pfId = `pf_${q.id}`;
       // Queue: structural, pinned to its channel instance; fallback AHT = old AHT.
+      // `staffing` carries the original engine parameters verbatim (the prompt's
+      // Queue.staffing = "reuse existing engine parameters"). The adapter
+      // (model/adapter.js) overrides only the demand-derived fields (dailyVolume,
+      // aht) from the derivation module, so the round-trip is exact.
       queues.push({
         id: q.id, name: q.name, type: v2QueueType(q),
         attachment: { kind: "structural", channelInstanceId: ciId },
         fallbackAhtSec: q.aht,
+        staffing: q,
       });
       // Service: carries the demand as a single-step journey through its queue.
       // Declaring ahtSec = old AHT makes the derived effective AHT exact even
@@ -91,7 +96,14 @@ function migrateV1ToV2(cfg) {
     }
   }
 
-  return { brands, queues, services, profiles };
+  // The engine's global config (everything except the queue list) is preserved
+  // verbatim — v2.4 restructures DEMAND (queues/services/profiles) and the UI,
+  // not the engine's settings/hiring/scenario machinery. The adapter reassembles
+  // a runnable cfg from this carry plus the derived per-queue demand.
+  const engineConfig = { ...cfg };
+  delete engineConfig.queues;
+
+  return { brands, queues, services, profiles, engineConfig };
 }
 
 module.exports = { migrateV1ToV2, CHANNEL_MAP, v2QueueType };

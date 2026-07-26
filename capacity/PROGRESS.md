@@ -81,11 +81,46 @@ derivation rules from the prompt §1 with the owner decisions baked in.
 **Full suite after Step 1:** 13 gates green (adds **derivation 17** + **migration
 7**). Engine still untouched (`git diff engine/` empty); golden masters green.
 
+### Step 1/3 bridge — Engine adapter ✅ COMPLETE (new gate green)
+
+The seam that keeps the engine untouched while the model/UI are rebuilt around it
+(prompt rule 7: "the adapter feeds the preserved engine, it does not alter it").
+Built ahead of the Setup UI because it is pure logic on the critical path and
+needs no mockups.
+
+- `model/adapter.js` — `v2ToEngineConfig(model)` runs the derivation, rebuilds
+  each engine queue from its carried staffing physics overriding ONLY the
+  demand-derived fields (dailyVolume ← derived volume, aht ← derived effective
+  AHT), and reassembles the engine's preserved global config. `roundTripConfig(cfg)`
+  = migrate → adapt in one call. Journey cross-queue routing → engine deflection
+  inputs is derived here (inert for single-step migrated journeys; activates when
+  the v2 UI authors multi-step journeys).
+- `model/migrate.js` extended: each v2 queue now carries `staffing` (the original
+  engine params verbatim) and the model carries `engineConfig` (the global config
+  minus queues) — both preserved, not transformed.
+- `tests/adapter.test.js` (5) wired into `npm test`. Proves the **full round-trip**:
+  `simulate(roundTripConfig(cfg)) ≡ simulate(cfg)` exactly, for every strategy,
+  **and under a hard-warmed cache** — the adapter never introduces its own
+  divergence whatever the quantised Erlang cache holds. Also proves derived
+  (never-entered) volume/AHT drive a hand-built multi-service queue.
+
+**Cache-quantisation note (documented in gen-golden.js):** the engine quantises
+offered load to 0.05 Erlangs for cache reuse, so a bucket's value depends on which
+exact load first populated it. The golden pipeline fixture reflects a
+grid-warmed cache — self-consistent and reproducible (all a drift-detector needs).
+A cross-process exact comparison of a clean-cache pipeline to that fixture is
+therefore unsound (churn can differ ~0.3% purely from cache-order); the adapter
+gate proves equivalence the sound way — in-process, clean AND warmed.
+
+**Full suite now:** 14 gates green (adds **adapter 5**). Engine untouched.
+
 **Next — Step 2:** rebuild Setup as the four-section page (Structure · Queues ·
-Service catalog · Channel volume profiles) reading this module's derived outputs
-(volume/AHT read-only), per setup-page-v3.html. Then Step 3 wires the derivation
-into a Web Worker and maps journey splits onto the engine's deflection inputs via
-an adapter (the adapter feeds the preserved engine — it does not alter it).
+Service catalog · Channel volume profiles) reading the derivation module's outputs
+(volume/AHT read-only), per setup-page-v3.html. **Blocked on the four mockup HTML
+files** (home/setup/levers/results-*.html) — the prompt's stated source of truth
+for layout, copy and design tokens; needed for the "mockup visual parity"
+acceptance criterion. Provide them, or authorise building Setup from the written
+§5.2 spec alone. Step 3 then wraps the derivation module in a Web Worker.
 
 ---
 

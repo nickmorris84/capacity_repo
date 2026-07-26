@@ -145,6 +145,13 @@ function buildFixtures(E) {
   }
 
   // ---- 6. Full pipeline: the whole demand→requirement→hiring→cost machine ---
+  // NB: these primitive grids above have already warmed the engine's quantised
+  // Erlang caches (offered load rounded to 0.05 Erlangs). The pipeline below
+  // therefore reflects a warm-cache state — self-consistent and reproducible
+  // (regenerate → identical), which is all a drift-detector needs. A fresh
+  // process (the real app on load) can land on a neighbouring quantised value;
+  // the adapter gate proves that difference is cache-order, not behaviour.
+  //
   // compactRun already emits a rounded, stable digest keyed by the default
   // config's fixed queue ids. One run per hiring strategy pins the volume
   // model, shrinkage, requirement curves, knock-ons, the global-cap allocator
