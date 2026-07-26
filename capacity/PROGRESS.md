@@ -1,5 +1,52 @@
 # Progress
 
+## v2.4 STRUCTURAL REBUILD — Step 0: Golden masters ✅ COMPLETE (new gate green)
+
+Kicks off the v2.4 rebuild (new domain model Brand → BU → Product → Channel →
+Queue, plus Services / journeys / Channel volume profiles; rebuilt Setup /
+Results / Levers / Home per the mockups). The simulation **engine is preserved**
+— the rebuild changes the model and UI *around* it. Step 0 pins the engine's
+observable behaviour so the refactor can be verified numerically against it.
+
+Owner decisions locked in (prompt's recommended defaults): journey-step **lag OUT
+of v1**; shared-queue cost allocation by **handling minutes**; mix <100% **warns,
+not blocks**; the mockups' "spill when occupancy > 85%" copy is a **rename** to the
+engine's real deficit/failure-driven semantics — **no** new occupancy trigger.
+
+- `scripts/gen-golden.js` — `buildFixtures(E)` is the single source of truth;
+  `npm run golden:gen` writes `tests/golden/golden.json` (~422 KB). Regenerate
+  deliberately only when an engine change is intended — the git diff then shows
+  exactly which numbers moved.
+- `tests/golden/golden.json` — committed fixtures pinning the six audit risk
+  sites: Erlang B/C fidelity; voiceRaw abandonment × patience (incl. deep
+  overload and the SPEC §11 E1 pat→∞ case, C=0.2853 / ASA≈17.0 / SL≈0.797);
+  requiredAgentsInterval (ASA∧abandon∧occupancy) + fractional voiceInterval
+  blending; runVoiceDay / runDigitalCustomerDay across coverage; backlog
+  conservation across multi-day workflow + digital-fluid chains; hoursPerHeadDay
+  (shrinkage supply-side only); and full-pipeline `compactRun` for S1–S4 (whole
+  demand→requirement→hiring→cost machine, fractional FTE throughout).
+- `tests/golden.test.js` — the gate (18 tests, wired into `npm test` right after
+  the engine suite). Regenerates from the live engine and deep-compares to the
+  committed masters with a combined abs/rel float tolerance (1e-6 / 1e-9), plus
+  standalone **invariant** checks (Erlang C ≡ direct summation; overload abandon
+  > 1−N/A floor; exact backlog conservation with day-to-day carryover; shrinkage
+  = base × (1−shrink); requirements monotone in load and tighter under a lower
+  occupancy ceiling; fractional FTE preserved unrounded; blended SL between
+  integer endpoints). Determinism verified (two generations byte-identical); the
+  guard verified to bite (a 0.01% erlangB nudge reddens 6 sections incl. an £82
+  pipeline cost drift). `git diff engine/` is empty — engine untouched this step.
+
+**Full suite after Step 0:** 11 gates green (P1 20 · **Step 0 golden 18** · R1 19 ·
+R2 27 · R3a 20 · R3d-A 5 · P7b 20 · R3b 9 · R3c 9 · R3d-B 6 · §13 harness 20).
+
+**Next — Step 1:** the derivation module (volume propagation · effective AHT ·
+cross-structure guard · shared-cost by minutes · referential integrity) as a pure,
+unit-tested module destined for a Web Worker, mapping journey splits onto the
+engine's existing deflection inputs via an adapter. Golden masters stay green
+throughout — the adapter feeds the preserved engine, it does not alter it.
+
+---
+
 ## P1 — Engine + proof: ✅ COMPLETE (all 20 gate tests green)
 
 Validated numbers (must match SPEC §11 E1 before P2 is authorised):
