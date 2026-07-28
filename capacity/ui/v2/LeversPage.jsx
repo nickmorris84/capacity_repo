@@ -16,10 +16,13 @@ const GLYPH = { ok: "●", warn: "▲", bad: "✕" };
 
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
-export default function LeversPage({ model, onModelChange, onNav = () => {} }) {
+export default function LeversPage({ model, onModelChange, onNav = () => {}, selected: selProp, onSelectedChange }) {
   const { value: base, pending } = useDeferred(model, computeBase);
   const [weight, setWeight] = useState(50);
-  const [sel, setSel] = useState(null);
+  // Shared with Results via the shell when controlled; internal when standalone.
+  const [localSel, setLocalSel] = useState(null);
+  const sel = selProp !== undefined ? selProp : localSel;
+  const setSel = onSelectedChange || setLocalSel;
   const best = useMemo(() => bestUnderWeight(base, weight / 100), [base, weight]);
   const cfg = base.cfg;
   const set = onModelChange;
@@ -68,7 +71,7 @@ export default function LeversPage({ model, onModelChange, onNav = () => {} }) {
             </tbody></table>
         </div>
         <p className="mxnote">Tap a cell to make that pair the live context on every tab. Badge = best fit under your weighting.
-          {sel ? <> Selected: <b>{base.strategies.find((s) => s.id === sel.sid).name} × {base.groups.find((g) => g.id === sel.gid).name}</b>.</> : null}</p>
+          {sel && base.strategies.find((s) => s.id === sel.sid) ? <> Selected: <b>{base.strategies.find((s) => s.id === sel.sid).name} × {base.groups.find((g) => g.id === sel.gid).name}</b>. <button className="link" style={{ background: "none", border: "none", color: "var(--blue)", font: "inherit", cursor: "pointer", padding: 0, fontWeight: 600 }} onClick={() => onNav("results")}>Review in Results →</button></> : null}</p>
       </div>
 
       <div className="cols">

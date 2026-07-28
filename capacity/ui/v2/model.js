@@ -244,6 +244,18 @@ export function blankModel() {
   return { brands: [{ id: "b1", name: "Brand 1", businessUnits: [] }], queues: [], services: [], profiles: [] };
 }
 
+// A brand-new, EMPTY simulation that can still run the engine: no queues /
+// services / profiles yet (the Setup wizard's true empty state), but it carries
+// the preserved global engine config so Levers/Results don't break before the
+// first queue exists. Reuses the current model's engineConfig.
+export function emptyModel(engineConfig, name = "New simulation") {
+  return {
+    brands: [{ id: uid("b"), name, businessUnits: [] }],
+    queues: [], services: [], profiles: [],
+    engineConfig,
+  };
+}
+
 // Mirrors setup-page-v3.html's worked example so the page is meaningful on first
 // open and the gate has real, cross-linked data (derived volumes, weighted AHT,
 // a cross-structure warning, governance sampling).

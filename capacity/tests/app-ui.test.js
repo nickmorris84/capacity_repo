@@ -92,7 +92,37 @@ await t("a Setup edit is reflected on Results (single shared model)", async () =
   ok(anyVol.length > 0, "data volumes rendered from the edited model");
 });
 
+await t("a Levers matrix cell drives the Results context (shared selection)", async () => {
+  navTab("Levers"); await settle(120);
+  // Tap a specific, non-default cell: Plan of record × Forward backfill (S3).
+  const cell = $$(".mx .cell").find((c) => c.getAttribute("aria-label") === "Plan of record × Forward backfill");
+  ok(cell, "target matrix cell present");
+  click(cell);
+  ok(cell.classList.contains("sel"), "cell marked selected in Levers");
+  navTab("Results"); await settle(120);
+  const strat = $$(".ctx select")[0], scen = $$(".ctx select")[1];
+  eq(strat.value, "S3", "Results strategy follows the tapped cell (Forward backfill)");
+  ok(/Plan of record/.test(scen.options[scen.selectedIndex].textContent), "Results scenario follows the tapped cell");
+});
+
+await t("New simulation opens an empty Setup wizard and still runs the engine", async () => {
+  navTab("Home");
+  click($$(".btn.primary").find((b) => /New simulation/.test(b.textContent)));
+  click($$(".fork .t").find((x) => x.textContent === "Whole ecosystem")); // a fork → new blank sim
+  await settle(120);
+  eq(activeTab(), "Setup", "lands on Setup as the empty-state wizard");
+  const structBadge = $$(".sec").find((s) => /Structure/.test(s.querySelector(".sechead b").textContent)).querySelector(".badge").textContent;
+  ok(/0 BUs/.test(structBadge), "structure starts empty: " + structBadge);
+  ok($$(".qline").length === 0, "no queues yet in the empty simulation");
+  // The empty simulation must not crash Levers/Results (0 queues).
+  const before = consoleEvents.length;
+  navTab("Results"); await settle(150);
+  navTab("Levers"); await settle(150);
+  eq(consoleEvents.length, before, "empty simulation runs clean: " + consoleEvents.slice(before).join(" | "));
+});
+
 await t("the model autosaves and restores across a fresh mount", async () => {
+  navTab("Home"); await settle(60);
   await settle(400); // let the debounced autosave fire
   ok(window.localStorage.getItem("capacity.v2.model"), "model persisted to storage");
   // Fresh mount into a new container restores from storage (not the seed).

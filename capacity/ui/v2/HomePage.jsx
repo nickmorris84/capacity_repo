@@ -11,7 +11,7 @@ const fmtM = (n) => "£" + (n / 1e6).toFixed(1) + "m";
 const fmtN = (n) => Math.round(n).toLocaleString("en-GB");
 const RAG = { green: { cls: "ok", glyph: "●", label: "on track" }, amber: { cls: "warn", glyph: "▲", label: "at risk" }, red: { cls: "bad", glyph: "✕", label: "red risks" } };
 
-export default function HomePage({ simulations, onOpen }) {
+export default function HomePage({ simulations, onOpen, onNew }) {
   const [modal, setModal] = useState(false);
   const [eco, setEco] = useState(null); // the sim whose ecosystem is open
   const [query, setQuery] = useState("");
@@ -47,7 +47,7 @@ export default function HomePage({ simulations, onOpen }) {
 
       <p className="note"><b>Design notes:</b> one primary action per view · destructive actions behind ⋯ with type-to-confirm · thumbnails show scope · status always colour + glyph (✕ ▲ ●) · chips use KPI-family colours · tabular numerals throughout.</p>
 
-      {modal ? <ForkModal onClose={() => setModal(false)} onOpen={onOpen} /> : null}
+      {modal ? <ForkModal onClose={() => setModal(false)} onNew={onNew} /> : null}
       {eco ? <Ecosystem sim={eco} onClose={() => setEco(null)} onEditInSetup={() => { setEco(null); onOpen && onOpen(); }} /> : null}
     </div>
   );
@@ -95,13 +95,13 @@ function Thumb({ model }) {
   );
 }
 
-function ForkModal({ onClose, onOpen }) {
+function ForkModal({ onClose, onNew }) {
   const forks = [
-    { t: "Whole ecosystem", d: "Every service, every journey, every queue." },
-    { t: "Subset", d: "Pick services and their journey queues on a live map. Severed journeys are flagged." },
-    { t: "Single service", d: "One service and its journey. Ready in under a minute." },
+    { t: "Whole ecosystem", d: "Start fresh and build every service, journey and queue in Setup." },
+    { t: "Subset", d: "Start fresh, then add the services and journey queues you want." },
+    { t: "Single service", d: "Start fresh with one service and its journey. Ready in under a minute." },
   ];
-  const enter = () => { onClose(); onOpen && onOpen(); };
+  const enter = () => { onClose(); onNew && onNew(); };
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);

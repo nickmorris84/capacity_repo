@@ -10,12 +10,24 @@ import LeversPage from "./LeversPage.jsx";
 import ResultsPage from "./ResultsPage.jsx";
 import HomePage from "./HomePage.jsx";
 import { quickHeadline } from "./compute.js";
+import { emptyModel } from "./model.js";
 import { saveModel, loadModel } from "./store.js";
 
 export default function App({ initialModel }) {
   const [model, setModel] = useState(() => loadModel() || initialModel);
   const [tab, setTab] = useState("home");
+  // The matrix cell selection (strategy × scenario) is shared: tap a cell in
+  // Levers and Results reviews that mix. Null = each page falls back to bestCell.
+  const [selected, setSelected] = useState(null);
   const nav = useCallback((t) => setTab(t), []);
+
+  // "New simulation" starts a fresh, empty world (the Setup wizard's empty
+  // state), keeping the preserved engine config so it still runs.
+  const newSimulation = useCallback(() => {
+    setModel(emptyModel(initialModel.engineConfig));
+    setSelected(null);
+    setTab("setup");
+  }, [initialModel]);
 
   // Autosave (debounced) whenever the model changes.
   const timer = useRef(null);
@@ -62,10 +74,10 @@ export default function App({ initialModel }) {
 
   return (
     <>
-      {tab === "home" && <HomePage simulations={simulations} onOpen={() => setTab("setup")} onNav={nav} />}
+      {tab === "home" && <HomePage simulations={simulations} onOpen={() => setTab("setup")} onNew={newSimulation} onNav={nav} />}
       {tab === "setup" && <SetupPage model={model} onModelChange={setModel} onNav={nav} onDownloadTemplate={onDownloadTemplate} onUploadTemplate={onUploadTemplate} />}
-      {tab === "levers" && <LeversPage model={model} onModelChange={setModel} onNav={nav} />}
-      {tab === "results" && <ResultsPage model={model} onNav={nav} />}
+      {tab === "levers" && <LeversPage model={model} onModelChange={setModel} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
+      {tab === "results" && <ResultsPage model={model} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
     </>
   );
 }

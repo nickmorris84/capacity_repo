@@ -18,9 +18,13 @@ const GLYPH = { green: "●", amber: "▲", red: "✕", g: "●", a: "▲", r: "
 
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
-export default function ResultsPage({ model, onNav = () => {} }) {
+export default function ResultsPage({ model, onNav = () => {}, selected: selProp, onSelectedChange }) {
   const { value: base, pending } = useDeferred(model, computeBase);
-  const [selected, setSelected] = useState(() => pickSelection(null, base));
+  // Controlled by the shell (shared with Levers) when props are given; otherwise
+  // internal, so the page still runs standalone.
+  const [localSel, setLocalSel] = useState(null);
+  const selected = selProp !== undefined ? selProp : localSel;
+  const setSelected = onSelectedChange || setLocalSel;
   const sel = useMemo(() => pickSelection(selected, base), [selected, base]);
   const { detail, summary } = useMemo(() => computeDetail(base.cfg, sel), [base, sel]);
   const weeks = detail.weeks;
