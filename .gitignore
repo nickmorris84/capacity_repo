@@ -2,7 +2,10 @@ node_modules/
 *.log
 .DS_Store
 
-# Build output is generated, but the two P5 deliverables are committed.
+# Build output is generated, but the committed deliverables are:
+#   capacity-sim.html/.jsx = the v2.4 shell (default product)
+#   capacity-sim-v1.html   = the legacy v1 app (regression gate)
 dist/*
 !dist/capacity-sim.html
 !dist/capacity-sim.jsx
+!dist/capacity-sim-v1.html

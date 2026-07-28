@@ -278,14 +278,16 @@ async function runHtmlTarget(html) {
 async function main() {
   console.log("\n[build] packaging dist/ from source…");
   const b = buildAll();
-  console.log(`  capacity-sim.html ${(b.htmlBytes / 1024).toFixed(0)} KB · capacity-sim.jsx ${(b.jsxBytes / 1024).toFixed(0)} KB`);
+  console.log(`  capacity-sim.html ${(b.htmlBytes / 1024).toFixed(0)} KB (v2 default) · capacity-sim-v1.html ${(b.v1HtmlBytes / 1024).toFixed(0)} KB (legacy)`);
   const fs = require("fs");
-  const html = fs.readFileSync(b.htmlPath, "utf8");
+  // The v1 app is now packaged at capacity-sim-v1.html; the §13 checklist is
+  // v1-specific, so it runs against that. (capacity-sim.html is the v2 shell.)
+  const html = fs.readFileSync(b.v1HtmlPath, "utf8");
   eq((html.match(/<\/script>/gi) || []).length, 1, "exactly one literal </script> (bundle's is escaped)");
 
   console.log("\n[source target] §13 checklist against ui/main.jsx");
   await runSourceTarget();
-  console.log("\n[html target] §13 checklist against dist/capacity-sim.html");
+  console.log("\n[html target] §13 checklist against dist/capacity-sim-v1.html");
   await runHtmlTarget(html);
 
   console.log("\n═══════════════════════════════════");
