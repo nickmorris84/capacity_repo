@@ -3,7 +3,7 @@
  * full-screen Ecosystem volume Sankey (the hero of Home) rendered from the
  * derivation module. Built to home-page-v2.html.
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { quickHeadline } from "./compute.js";
 import { sankeyLayout } from "./ecosystem.js";
 
@@ -14,6 +14,9 @@ const RAG = { green: { cls: "ok", glyph: "●", label: "on track" }, amber: { cl
 export default function HomePage({ simulations, onOpen }) {
   const [modal, setModal] = useState(false);
   const [eco, setEco] = useState(null); // the sim whose ecosystem is open
+  const [query, setQuery] = useState("");
+  const shown = simulations.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
+  const soon = "Not available in this build yet";
   return (
     <div className="shell">
       <header className="top">
@@ -28,14 +31,15 @@ export default function HomePage({ simulations, onOpen }) {
       </div>
 
       <div className="toolbar">
-        <div className="search">⌕ Search simulations</div>
+        <label className="search">⌕ <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search simulations" aria-label="Search simulations" style={{ border: "none", background: "none", font: "inherit", flex: 1, outline: "none", color: "var(--ink)" }} /></label>
         <button className="btn" onClick={() => setEco(simulations[0])}>Ecosystem</button>
-        <button className="btn">Compare</button>
-        <button className="btn">Presets</button>
+        <button className="btn" disabled title={soon}>Compare</button>
+        <button className="btn" disabled title={soon}>Presets</button>
       </div>
 
       <div className="grid">
-        {simulations.map((sim) => <SimCard key={sim.id} sim={sim} onEco={() => setEco(sim)} onOpen={onOpen} />)}
+        {shown.map((sim) => <SimCard key={sim.id} sim={sim} onEco={() => setEco(sim)} onOpen={onOpen} soon={soon} />)}
+        {query && !shown.length ? <p className="hint" style={{ gridColumn: "1 / -1" }}>No simulations match “{query}”.</p> : null}
         <button className="newcard" onClick={() => setModal(true)}>
           <span className="plus">+</span>New simulation<small>Ecosystem, subset, or single service</small>
         </button>
@@ -43,13 +47,13 @@ export default function HomePage({ simulations, onOpen }) {
 
       <p className="note"><b>Design notes:</b> one primary action per view · destructive actions behind ⋯ with type-to-confirm · thumbnails show scope · status always colour + glyph (✕ ▲ ●) · chips use KPI-family colours · tabular numerals throughout.</p>
 
-      {modal ? <ForkModal onClose={() => setModal(false)} /> : null}
-      {eco ? <Ecosystem sim={eco} onClose={() => setEco(null)} /> : null}
+      {modal ? <ForkModal onClose={() => setModal(false)} onOpen={onOpen} /> : null}
+      {eco ? <Ecosystem sim={eco} onClose={() => setEco(null)} onEditInSetup={() => { setEco(null); onOpen && onOpen(); }} /> : null}
     </div>
   );
 }
 
-function SimCard({ sim, onEco, onOpen }) {
+function SimCard({ sim, onEco, onOpen, soon }) {
   const h = sim.headline;
   const rag = RAG[h.worst];
   return (
@@ -62,7 +66,7 @@ function SimCard({ sim, onEco, onOpen }) {
           <h3>{sim.name}</h3>
           <p className="meta">{sim.scope} · updated {sim.updated} · {sim.runs} runs</p>
         </div>
-        <button className="dots" aria-label={"More actions for " + sim.name}>⋯</button>
+        <button className="dots" aria-label={"More actions for " + sim.name} disabled title={soon}>⋯</button>
       </div>
       <div className="chips">
         <span className="chip num">{h.horizon} wk</span>
@@ -91,26 +95,32 @@ function Thumb({ model }) {
   );
 }
 
-function ForkModal({ onClose }) {
+function ForkModal({ onClose, onOpen }) {
   const forks = [
     { t: "Whole ecosystem", d: "Every service, every journey, every queue." },
     { t: "Subset", d: "Pick services and their journey queues on a live map. Severed journeys are flagged." },
     { t: "Single service", d: "One service and its journey. Ready in under a minute." },
   ];
+  const enter = () => { onClose(); onOpen && onOpen(); };
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div className="overlay on" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="forktitle">
         <h3 id="forktitle">New simulation</h3>
-        <p>Choose the scope. You can change it later in Setup.</p>
+        <p>Choose the scope — it opens in Setup, where you can refine everything.</p>
         <div className="forks">
           {forks.map((f) => (
-            <button className="fork" key={f.t} onClick={onClose}>
+            <button className="fork" key={f.t} onClick={enter}>
               <span><span className="t">{f.t}</span><br /><span className="d">{f.d}</span></span>
             </button>
           ))}
         </div>
         <div className="foot">
-          <button className="link">Start from a template</button>
+          <button className="link" disabled title="Not available in this build yet" style={{ opacity: 0.5, cursor: "not-allowed" }}>Start from a template</button>
           <button className="btn" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -119,7 +129,7 @@ function ForkModal({ onClose }) {
 }
 
 // Full-screen Ecosystem view: the proportional volume Sankey from derive().
-function Ecosystem({ sim, onClose }) {
+function Ecosystem({ sim, onClose, onEditInSetup }) {
   const layout = useMemo(() => sankeyLayout(sim.model, { failedPct: sim.headline.allIn && sim.headline ? failedFrac(sim) : 0.02 }), [sim]);
   const fill = (cls) => cls === "gov" ? "#7F77DD" : cls === "res" ? "#1D9E75" : cls === "fail" ? "#EF9F27" : "#378ADD";
   const nodeFill = (col, n) => col.key === "outcome" ? (n.id === "failed" ? "#FAEEDA" : "#E1F5EE")
@@ -153,7 +163,7 @@ function Ecosystem({ sim, onClose }) {
         <div className="ecofoot">
           <span className="ecohint">Flows shown for the current plan; scrub weeks in Results › Flow.</span>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn">Edit in Setup</button>
+            <button className="btn" onClick={onEditInSetup}>Edit in Setup</button>
             <button className="btn primary" onClick={onClose}>Close</button>
           </div>
         </div>

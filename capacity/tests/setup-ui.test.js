@@ -148,6 +148,42 @@ await t("adding a service and a queue works and updates the badges", () => {
   ok(before !== svcBadge(), "service count changed: " + before + " → " + svcBadge());
 });
 
+await t("journey steps are editable: change a step's split % and see the derived queue volume follow", () => {
+  openSection("Service catalog");
+  const card = $$(".card").find((c) => c.querySelector(".cardhead b") && c.querySelector(".cardhead b").textContent === "New card application");
+  ok(card, "new-card service card present");
+  if (!card.classList.contains("open")) click(card.querySelector(".cardhead"));
+  // New card application → Outbound — Verification is a 60% split step.
+  const splitInput = [...card.querySelectorAll('input[aria-label$="split percent"]')].find((i) => +i.value === 60);
+  ok(splitInput, "found the 60% verification split input");
+  setV(splitInput, 100);
+  openSection("Queues");
+  // Outbound — Verification derived volume = New card app (702) × 100% = 702.
+  ok(/702/.test(qStats("Outbound — Verification")), "verification volume follows the edited split: " + qStats("Outbound — Verification"));
+});
+
+await t("referential integrity is surfaced: a referenced service shows a blocked delete", () => {
+  openSection("Service catalog");
+  const card = $$(".card").find((c) => c.querySelector(".cardhead b") && c.querySelector(".cardhead b").textContent === "Billing enquiry");
+  if (!card.classList.contains("open")) click(card.querySelector(".cardhead"));
+  // Billing enquiry is used in two profile mixes → delete blocked with a reason.
+  ok(/Delete service blocked/.test(card.textContent), "blocked-delete explanation shown: " + card.querySelector(".cardbody").textContent.slice(-90));
+  ok(!card.querySelector('button') || ![...card.querySelectorAll("button")].some((b) => b.textContent === "Delete service"), "no live delete button while referenced");
+});
+
+await t("the add-queue chooser offers shared or a structure path", () => {
+  openSection("Queues");
+  const addBtn = $$(".sec").find((s) => /Queues/.test(s.querySelector(".sechead b").textContent)).querySelector(".secbody .btn");
+  // The '+ Add queue' button opens the chooser form.
+  const before = $$(".qline").length;
+  click([...$$(".secbody .btn")].find((b) => b.textContent === "+ Add queue"));
+  const attachSel = $$(".secbody select").find((s) => [...s.options].some((o) => /Shared/.test(o.textContent)));
+  ok(attachSel, "attach chooser present with a Shared option");
+  ok([...attachSel.options].length >= 2, "structure-path options offered alongside Shared");
+  click([...$$(".secbody .btn")].find((b) => b.textContent === "Add queue"));
+  ok($$(".qline").length === before + 1, "a queue was added");
+});
+
 await t("zero unexpected console output across the whole run", () => {
   eq(consoleEvents.length, 0, "console noise: " + consoleEvents.join(" | "));
 });

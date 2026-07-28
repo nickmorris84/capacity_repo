@@ -38,6 +38,7 @@ const built = esbuild.buildSync({
 const mod = { exports: {} };
 
 function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); }); }
+function setV(el, v) { ok(el, "setV target missing"); const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); }); }
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
@@ -90,6 +91,31 @@ await t("the Sankey shows real derived queue names and a resolved/failed outcome
   ok(/Resolved/.test(eco.textContent) && /Failed/.test(eco.textContent), "outcome split shown");
   click($$(".eco .btn").find((b) => /Close/.test(b.textContent)));
   ok(!$(".eco-scrim.on"), "overlay closes");
+});
+
+await t("the search box is a real input that filters the card list", () => {
+  const input = $(".search input"); ok(input, "search is a real <input>, not static text");
+  const before = $$(".grid .card").length; ok(before >= 1, "a card is shown");
+  setV(input, "no-such-simulation-xyz");
+  eq($$(".grid .card").length, 0, "non-matching query hides the card");
+  ok(/No simulations match/.test($(".grid").textContent), "empty-result message shown");
+  setV(input, "");
+  ok($$(".grid .card").length === before, "clearing restores the cards");
+});
+
+await t("unimplemented chrome is visibly disabled, not silently inert", () => {
+  const compare = $$(".toolbar .btn").find((b) => b.textContent === "Compare");
+  const presets = $$(".toolbar .btn").find((b) => b.textContent === "Presets");
+  ok(compare && compare.disabled, "Compare is disabled");
+  ok(presets && presets.disabled, "Presets is disabled");
+  ok($(".dots") && $(".dots").disabled, "⋯ overflow is disabled");
+});
+
+await t("Ecosystem → Edit in Setup closes the overlay (routes to Setup in the shell)", () => {
+  click($$(".toolbar .btn").find((b) => b.textContent === "Ecosystem"));
+  ok($(".eco-scrim.on"), "ecosystem open");
+  click($$(".eco .btn").find((b) => /Edit in Setup/.test(b.textContent)));
+  ok(!$(".eco-scrim.on"), "Edit in Setup dismisses the view (would land on Setup in the app)");
 });
 
 await t("zero unexpected console output across the whole run", () => {

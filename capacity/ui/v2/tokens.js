@@ -51,6 +51,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   padding:6px 11px; font:inherit; font-size:12.5px; font-weight:500; cursor:pointer}
 .btn:hover{background:var(--blue-tint)}
 .btn:focus-visible{outline:2px solid var(--blue); outline-offset:2px}
+.btn:disabled{opacity:0.45; cursor:not-allowed}
+.btn:disabled:hover{background:#fff}
+.dots:disabled{opacity:0.4; cursor:not-allowed}
 .btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
 .btn.sm{padding:4px 9px; font-size:11.5px}
 .hint{font-size:12px; color:var(--ink-3)}

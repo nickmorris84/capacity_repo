@@ -127,10 +127,7 @@ export default function SetupPage({ model, onModelChange, onDownloadTemplate, on
             </div>
           </div>
         ))}
-        <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn sm" onClick={() => set(Ops.addQueue(model, { attachment: { kind: "shared" } }))}>+ Add queue</button>
-          <span className="hint">On create: attach to a structure path, or mark <b>shared</b>. Volume &amp; Eff. AHT are derived; tap a row for staffing physics.</span>
-        </div>
+        <AddQueue model={model} onAdd={(spec) => { set(Ops.addQueue(model, spec)); }} />
       </Section>
 
       {/* 3 SERVICE CATALOG */}
@@ -162,22 +159,35 @@ export default function SetupPage({ model, onModelChange, onDownloadTemplate, on
                     <input className="num" placeholder="— uses queue AHT" value={s.ahtSec != null ? s.ahtSec : ""}
                       onChange={(e) => set(Ops.updateService(model, s.id, { ahtSec: e.target.value === "" ? undefined : +e.target.value }))} /></div>
                 </div>
-                <div className="jour" style={{ marginTop: 8 }}>
-                  <span className="hint">Journey:</span>
+                <div style={{ marginTop: 10 }}>
+                  <span className="hint">Journey — each step routes a % of this service's volume to a queue:</span>
+                  {s.journey.length === 0 ? <p className="hint" style={{ marginTop: 4 }}>No steps yet. Add the first queue this service is handled at.</p> : null}
                   {s.journey.map((step, i) => {
                     const q = model.queues.find((x) => x.id === step.queueId);
                     const gov = q && q.type === "governance";
                     return (
-                      <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        {i > 0 ? <span className="jarr">→</span> : null}
-                        <span className={"jstep" + (gov ? " gov" : "")}>
-                          {q ? q.name : "?"}
-                          {step.samplingPct != null ? <b className="num"> {step.samplingPct}%</b> : step.splitPct !== 100 ? <b className="num"> {step.splitPct}%</b> : null}
-                        </span>
-                      </span>
+                      <div className="mixrow" key={i}>
+                        <span className="jarr" style={{ minWidth: 14 }}>{i + 1}.</span>
+                        <select value={step.queueId} onChange={(e) => set(Ops.updateJourneyStep(model, s.id, i, { queueId: e.target.value }))} aria-label={`step ${i + 1} queue`}>
+                          {model.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                        </select>
+                        <span className="hint">split</span>
+                        <input className="num" value={step.splitPct} onChange={(e) => set(Ops.updateJourneyStep(model, s.id, i, { splitPct: +e.target.value || 0 }))} aria-label={`step ${i + 1} split percent`} />
+                        <span className="hint">%</span>
+                        {gov ? <>
+                          <span className="hint">sample</span>
+                          <input className="num" value={step.samplingPct != null ? step.samplingPct : ""} placeholder="—" onChange={(e) => set(Ops.updateJourneyStep(model, s.id, i, { samplingPct: e.target.value === "" ? undefined : +e.target.value }))} aria-label={`step ${i + 1} sampling percent`} />
+                          <span className="hint">%</span>
+                        </> : null}
+                        <button className="btn sm" onClick={() => set(Ops.removeJourneyStep(model, s.id, i))} aria-label={`remove step ${i + 1}`}>✕</button>
+                      </div>
                     );
                   })}
-                  <button className="btn sm" onClick={() => set(Ops.addJourneyStep(model, s.id))}>+ Step</button>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <button className="btn sm" onClick={() => set(Ops.addJourneyStep(model, s.id))}>+ Step</button>
+                    <DeleteControl kind="service" guard={Ops.canDeleteService(model, s.id)} label="Delete service"
+                      blockedNoun="profile mix" onDelete={() => set(Ops.deleteService(model, s.id))} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -342,14 +352,68 @@ function StaffingDrawer({ model, derived, queueId, onClose, set }) {
                 <div className="accbody">{f.fields}</div>
               </div>
             ))}
-            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={onClose}>Done</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, alignItems: "center", flexWrap: "wrap", borderTop: "0.5px solid var(--line)", paddingTop: 12 }}>
+              <DeleteControl kind="queue" guard={Ops.canDeleteQueue(model, q.id)} label="Delete queue" blockedNoun="service journey"
+                onDelete={() => { set(Ops.deleteQueue(model, q.id)); onClose(); }} />
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <button className="btn sm" onClick={() => set(Ops.resetQueueStaffing(model, q.id))}>Reset to defaults</button>
+                <button className="btn sm primary" onClick={onClose}>Done</button>
+              </div>
             </div>
           </div>
         </> : null}
       </aside>
     </>
   );
+}
+
+// Add-queue chooser: name, type, and where it attaches — a structure path or
+// shared — per the mockup's "attach to a structure path, or mark shared".
+function AddQueue({ model, onAdd }) {
+  const channels = Ops.structureNodes(model).filter((n) => n.level === "channel");
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [type, setType] = useState("inbound_call");
+  const [attach, setAttach] = useState("shared");
+  const submit = () => {
+    const attachment = attach === "shared" ? { kind: "shared" } : { kind: "structural", channelInstanceId: attach };
+    onAdd({ attachment, type, name: name.trim() || undefined });
+    setName(""); setType("inbound_call"); setAttach("shared"); setOpen(false);
+  };
+  if (!open) return (
+    <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <button className="btn sm" onClick={() => setOpen(true)}>+ Add queue</button>
+      <span className="hint">Attach to a structure path, or mark <b>shared</b>. Volume &amp; Eff. AHT are derived; tap a row for staffing physics.</span>
+    </div>
+  );
+  return (
+    <div style={{ marginTop: 10, border: "0.5px solid var(--blue-line)", borderRadius: 10, padding: 12, background: "var(--blue-tint)" }}>
+      <div className="fields">
+        <div className="field"><label>Name</label><input value={name} placeholder="New queue" onChange={(e) => setName(e.target.value)} /></div>
+        <div className="field"><label>Type</label>
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            {Ops.QUEUE_TYPES.map((t) => <option key={t} value={t}>{Ops.QTYPE_LABELS[t]}</option>)}
+          </select></div>
+        <div className="field"><label>Attaches to</label>
+          <select value={attach} onChange={(e) => setAttach(e.target.value)}>
+            <option value="shared">Shared — serves any structure</option>
+            {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select></div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+        <button className="btn sm" onClick={() => setOpen(false)}>Cancel</button>
+        <button className="btn sm primary" onClick={submit}>Add queue</button>
+      </div>
+    </div>
+  );
+}
+
+// Delete action with the referential-integrity guard surfaced: a live button
+// when safe, an amber explanation naming the blockers when not.
+function DeleteControl({ guard, label, blockedNoun, onDelete }) {
+  if (guard.ok) return <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={onDelete}>{label}</button>;
+  const n = guard.blockedBy.length;
+  return <span className="hint" style={{ color: "var(--amber-ink)" }}>▲ {label} blocked — referenced by {n} {blockedNoun}{n === 1 ? "" : "s"}. Remove {n === 1 ? "it" : "them"} first.</span>;
 }
 
 function drawerPath(model, q) {

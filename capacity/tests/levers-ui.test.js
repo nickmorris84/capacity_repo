@@ -43,6 +43,7 @@ function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const totalRed = () => $$(".mx .cell").reduce((a, c) => { const m = /(\d+) red/.exec(c.textContent); return a + (m ? +m[1] : 0); }, 0);
+async function settle(ms = 60) { await act(async () => { await new Promise((r) => setTimeout(r, ms)); }); }
 
 console.log("Levers page gate — v2.4 Step 4");
 
@@ -77,24 +78,26 @@ await t("hiring caps grid (brand × channel) + total ceiling render", () => {
   ok($$(".hint input").length > 0 || /Total ceiling/.test($(".panel:last-of-type").textContent), "total ceiling input present");
 });
 
-await t("tightening the TOTAL hiring cap re-scores the matrix (adds red weeks) — a real engine lever", () => {
+await t("tightening the TOTAL hiring cap re-scores the matrix (adds red weeks) — a real engine lever", async () => {
   const before = totalRed();
   // Find the total-ceiling input and slash it far below the operation's need.
   const totalInput = $$("input").find((i) => i.getAttribute("aria-label") === "total ceiling");
   ok(totalInput, "total ceiling input found");
   setV(totalInput, 1);
+  await settle(); // the matrix recompute is deferred (recalculating… state)
   const after = totalRed();
   ok(after > before, `red weeks should rise when the cap binds: ${before} → ${after}`);
 });
 
-await t("editing the buffer % re-scores the matrix (Buffer column changes)", () => {
+await t("editing the buffer % re-scores the matrix (Buffer column changes)", async () => {
   // Reset cap first so we isolate the buffer effect. Buffer strategy = column S2.
   const totalInput = $$("input").find((i) => i.getAttribute("aria-label") === "total ceiling");
-  setV(totalInput, 999);
+  setV(totalInput, 999); await settle();
   const bufferInput = $$("input").find((i) => i.getAttribute("aria-label") === "buffer percent");
   ok(bufferInput, "buffer input found");
   const costBefore = bufferColumnCost();
   setV(bufferInput, 40); // a big buffer lifts cost
+  await settle();
   const costAfter = bufferColumnCost();
   ok(costAfter !== costBefore, `buffer column all-in should move: ${costBefore} → ${costAfter}`);
 });

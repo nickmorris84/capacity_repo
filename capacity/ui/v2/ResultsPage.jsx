@@ -7,6 +7,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from "react";
 import { FAMILY_COLORS } from "./tokens.js";
 import { computeBase, computeDetail, pickSelection } from "./compute.js";
+import { useDeferred } from "./hooks.js";
 
 const fmtGBP = (n) => "£" + Math.round(n).toLocaleString("en-GB");
 const fmtM = (n) => "£" + (n / 1e6).toFixed(1) + "m";
@@ -18,7 +19,7 @@ const GLYPH = { green: "●", amber: "▲", red: "✕", g: "●", a: "▲", r: "
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
 export default function ResultsPage({ model, onNav = () => {} }) {
-  const base = useMemo(() => computeBase(model), [model]);
+  const { value: base, pending } = useDeferred(model, computeBase);
   const [selected, setSelected] = useState(() => pickSelection(null, base));
   const sel = useMemo(() => pickSelection(selected, base), [selected, base]);
   const { detail, summary } = useMemo(() => computeDetail(base.cfg, sel), [base, sel]);
@@ -60,8 +61,8 @@ export default function ResultsPage({ model, onNav = () => {} }) {
         <select value={sel.gid} onChange={(e) => setSelected({ gid: e.target.value, sid: sel.sid })}>
           {base.groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
-        <button className="btn">Save run</button>
-        <span className="fresh">● Up to date</span>
+        <button className="btn" disabled title="Saved runs are not available in this build yet">Save run</button>
+        <span className={"fresh" + (pending ? " stale" : "")}>{pending ? "recalculating…" : "● Up to date"}</span>
       </div>
 
       <div className="sub" role="tablist" aria-label="Lenses">

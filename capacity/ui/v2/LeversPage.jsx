@@ -7,6 +7,7 @@
  */
 import { useState, useMemo, Fragment } from "react";
 import { computeBase } from "./compute.js";
+import { useDeferred } from "./hooks.js";
 import * as Ops from "./model.js";
 
 const fmtM = (n) => "£" + (n / 1e6).toFixed(1) + "m";
@@ -16,7 +17,7 @@ const GLYPH = { ok: "●", warn: "▲", bad: "✕" };
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
 export default function LeversPage({ model, onModelChange, onNav = () => {} }) {
-  const base = useMemo(() => computeBase(model), [model]);
+  const { value: base, pending } = useDeferred(model, computeBase);
   const [weight, setWeight] = useState(50);
   const [sel, setSel] = useState(null);
   const best = useMemo(() => bestUnderWeight(base, weight / 100), [base, weight]);
@@ -38,7 +39,7 @@ export default function LeversPage({ model, onModelChange, onNav = () => {} }) {
       <h2 style={{ marginBottom: 14 }}>Levers</h2>
 
       <div className="panel">
-        <h3>Decision matrix <small>every scenario group × every strategy</small></h3>
+        <h3>Decision matrix <small>{pending ? "recalculating…" : "every scenario group × every strategy"}</small></h3>
         <div className="weight">
           <label>Lowest cost</label>
           <input type="range" min="0" max="100" value={weight} onChange={(e) => setWeight(+e.target.value)} aria-label="cost versus service weighting" />

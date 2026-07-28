@@ -3,7 +3,8 @@
  * volume/AHT and validation. Ops are pure (return a new model) so React state
  * updates are clean and the reducers are unit-testable without a DOM.
  */
-import { derive } from "../../model/derive.js";
+import { derive, canDeleteQueue, canDeleteService } from "../../model/derive.js";
+export { canDeleteQueue, canDeleteService };
 import { CHANNELS } from "../../model/taxonomy.js";
 
 // Browser-only id generator (never used by the pure model/derive/migrate code).
@@ -93,6 +94,15 @@ export function deleteQueue(model, queueId) {
   const m = clone(model);
   m.queues = m.queues.filter((x) => x.id !== queueId);
   return m;
+}
+export function resetQueueStaffing(model, queueId) {
+  const m = clone(model);
+  const q = m.queues.find((x) => x.id === queueId);
+  if (q) { q.staffing = defaultStaffing(); delete q._modified; }
+  return m;
+}
+function defaultStaffing() {
+  return { asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, agentCost: 32000, resourcing: "dedicated", occupancyCeiling: 0.85, churnCost: 500, failedToChurnPct: 6, attritionPct: 26 };
 }
 
 // ---- service ops -------------------------------------------------------------
