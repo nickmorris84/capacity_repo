@@ -28,7 +28,13 @@ export default function ResultsPage({ model, onNav = () => {} }) {
   const [lens, setLens] = useState(0);
   const [week, setWeek] = useState(0); // 0-indexed shared cursor
   const [weight, setWeight] = useState(50);
-  const clampWeek = useCallback((w) => Math.max(0, Math.min(weeks.length - 1, w)), [weeks.length]);
+  // Shared cursor setter: clamps to the horizon AND supports the functional
+  // updater form (Flow's play uses setWeek(w => …)), so no lens can drive the
+  // cursor out of range (was: NaN → weeks[NaN].totals crash on Play).
+  const scrub = useCallback((w) => setWeek((prev) => {
+    const next = typeof w === "function" ? w(prev) : w;
+    return Math.max(0, Math.min(weeks.length - 1, Number.isFinite(next) ? next : prev));
+  }), [weeks.length]);
 
   const stratName = base.strategies.find((s) => s.id === sel.sid)?.name || sel.sid;
   const grpName = base.groups.find((g) => g.id === sel.gid)?.name || sel.gid;
@@ -65,10 +71,10 @@ export default function ResultsPage({ model, onNav = () => {} }) {
       </div>
 
       {lens === 0 && <Summary base={base} sel={sel} setSelected={setSelected} summary={summary} weeks={weeks} cfg={cfg} stratName={stratName} grpName={grpName} weight={weight} setWeight={setWeight} model={model} />}
-      {lens === 1 && <Plan weeks={weeks} cfg={cfg} week={week} setWeek={(w) => setWeek(clampWeek(w))} />}
-      {lens === 2 && <Intraday weeks={weeks} cfg={cfg} week={week} setWeek={(w) => setWeek(clampWeek(w))} />}
+      {lens === 1 && <Plan weeks={weeks} cfg={cfg} week={week} setWeek={scrub} />}
+      {lens === 2 && <Intraday weeks={weeks} cfg={cfg} week={week} setWeek={scrub} />}
       {lens === 3 && <DataLens weeks={weeks} cfg={cfg} />}
-      {lens === 4 && <Flow weeks={weeks} cfg={cfg} week={week} setWeek={(w) => setWeek(clampWeek(w))} />}
+      {lens === 4 && <Flow weeks={weeks} cfg={cfg} week={week} setWeek={scrub} />}
 
       <p className="note"><b>Design notes:</b> one context bar, five lenses, one week cursor · Summary = year (matrix + six family cards + risk register) · Plan sets the cursor · Intraday &amp; Flow inherit it · Data grouped by path, export = template · Flow animates cached weekly results — no re-simulation.</p>
     </div>
@@ -153,14 +159,22 @@ function RiskRegister({ summary, cfg, model }) {
   const [bu, setBu] = useState("all");
   const [ch, setCh] = useState("all");
   const bus = useMemo(() => (model.brands || []).flatMap((b) => b.businessUnits.map((x) => x.name)), [model]);
-  const channels = ["voice", "digital", "third_party", "customer_management"];
-  // Tag each finding with the queues it names, and their brand/channel, so the
-  // BU/channel filters work on the engine's queue-named findings.
+  const channels = useMemo(() => [...new Set((cfg.queues || []).map((q) => q.channel))], [cfg]);
+  // Map each queue to the Business unit it sits under (via the v2 structure), so
+  // the BU filter works against the engine's queue-named findings.
+  const queueBu = useMemo(() => {
+    const chBu = {};
+    for (const b of model.brands || []) for (const bu of b.businessUnits || []) for (const p of bu.products || []) for (const c of p.channels || []) chBu[c.id] = bu.name;
+    const map = {};
+    for (const q of model.queues || []) map[q.name] = q.attachment && q.attachment.kind === "structural" ? (chBu[q.attachment.channelInstanceId] || null) : "Shared";
+    return map;
+  }, [model]);
+  // Tag each finding with the queue it names, and that queue's BU + channel.
   const rows = useMemo(() => summary.findings.filter((f) => f.tone !== "green").map((f) => {
     const q = cfg.queues.find((qq) => f.text.includes(qq.name));
-    return { tone: f.tone, text: f.text, channel: q ? q.channel : null, brand: q ? q.brandId : null };
-  }), [summary, cfg]);
-  const shown = rows.filter((r) => (bu === "all") && (ch === "all" || r.channel === ch));
+    return { tone: f.tone, text: f.text, channel: q ? q.channel : null, bu: q ? queueBu[q.name] : null };
+  }), [summary, cfg, queueBu]);
+  const shown = rows.filter((r) => (bu === "all" || r.bu === bu) && (ch === "all" || r.channel === ch));
   return (
     <div className="panel">
       <h3>Risk register <small>{shown.length} risk(s) shown · thresholds in Setup</small></h3>

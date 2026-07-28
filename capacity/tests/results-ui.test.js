@@ -41,6 +41,7 @@ function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEven
 function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype; const s = Object.getOwnPropertyDescriptor(p, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
+async function settle(ms = 60) { await act(async () => { await new Promise((r) => setTimeout(r, ms)); }); }
 const lensBtn = (label) => $$(".sub button").find((b) => b.textContent === label);
 const gotoLens = (label) => click(lensBtn(label));
 
@@ -113,6 +114,16 @@ await t("Data exports a template-compatible CSV with a header row", () => {
   click($$(".panel .btn").find((b) => /Export CSV/.test(b.textContent)));
   const csv = $('[data-testid="csv"]');
   ok(csv && /Group,Queue,Week,Volume,AHT,SLA/.test(csv.value), "CSV header present: " + (csv ? csv.value.slice(0, 40) : "none"));
+});
+
+await t("Flow Play advances the cursor via a functional update without crashing", async () => {
+  gotoLens("Flow");
+  const before = consoleEvents.length;
+  const play = $$(".flowctl .btn").find((b) => /Play/.test(b.textContent));
+  click(play);            // starts setInterval(setWeek(w => …)) — the crashy path
+  await settle(400);      // let several ticks fire (clamped functional updater)
+  click($$(".flowctl .btn").find((b) => /Pause/.test(b.textContent)) || play);
+  eq(consoleEvents.length, before, "no console errors while playing: " + consoleEvents.slice(before).join(" | "));
 });
 
 await t("Flow scrubber sets the shared week cursor", () => {

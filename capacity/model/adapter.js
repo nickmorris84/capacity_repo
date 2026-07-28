@@ -24,6 +24,7 @@
  * UI authors multi-step journeys, without disturbing the round-trip.
  */
 const D = require("./derive.js");
+const { DEFAULT_PROFILE } = require("../engine/engine.js");
 
 // v2 queue type → v1 engine type/subtype. Inverse of migrate.v2QueueType, but
 // driven by the carried staffing where present so nothing is lost.
@@ -41,18 +42,36 @@ function v2ToEngineConfig(model, opts = {}) {
   const base = model.engineConfig || opts.engineConfig;
   if (!base) throw new Error("v2ToEngineConfig: no engineConfig carried on the model (migrate first, or pass opts.engineConfig)");
 
+  const brandDefault = (model.brands && model.brands[0] && model.brands[0].id) || "b1";
+  const resolveChannelBrand = (q) => {
+    if (q.attachment && q.attachment.kind === "structural") {
+      const n = struct.nodes.get(q.attachment.channelInstanceId);
+      if (n && n.path && n.path.length) return { channel: n.name, brandId: n.path[0] };
+    }
+    return { channel: q.type === "inbound_call" || q.type === "outbound_call" ? "voice" : "digital", brandId: brandDefault };
+  };
+
   const queues = (model.queues || []).map((q) => {
     const d = derived.get(q.id) || { volume: 0, effectiveAht: q.fallbackAhtSec };
     const st = q.staffing || {};
     const et = engineTypeOf(q);
-    // Start from the preserved staffing physics; override ONLY demand-derived
-    // fields. id/name/brand/channel come from staffing when migrated, else fall
-    // back to the v2 queue's own fields.
+    const cb = resolveChannelBrand(q);
+    // Migrated queues carry the full engine staffing (burn/wf/channel/…) and it
+    // overrides these defaults exactly — so the round-trip is unchanged. Queues
+    // AUTHORED IN SETUP carry only the compact drawer fields; the defaults fill
+    // every engine-required field (notably burn/wf, whose absence crashes the
+    // day loop) so any Setup queue is simulatable.
+    const defaults = engineQueueDefaults(cb);
+    const merged = { ...defaults, ...st };
+    // Map the compact drawer attrition (%/yr) onto the engine's monthly wf when
+    // the queue has no wf of its own (i.e. it was authored in Setup).
+    if (!st.wf && st.attritionPct != null) merged.wf = { ...defaults.wf, attrition: (st.attritionPct / 100) / 12 };
     const eq = {
-      ...st,
+      ...merged,
       id: q.id,
       name: q.name != null ? q.name : st.name,
       type: et.type,
+      brandId: merged.brandId, channel: merged.channel,
       dailyVolume: d.volume,
       aht: d.effectiveAht,
     };
@@ -61,6 +80,21 @@ function v2ToEngineConfig(model, opts = {}) {
   });
 
   return { ...base, queues };
+}
+
+// Every engine-required field with a sane default, so a Setup-authored queue
+// (compact staffing) simulates without dereferencing undefined (burn/wf/…).
+function engineQueueDefaults(cb) {
+  return {
+    brandId: cb.brandId, channel: cb.channel, priority: 5,
+    concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null,
+    crossSkill: [], supports: [], weeklyVolumes: null, seasonal: null,
+    profile: [...DEFAULT_PROFILE], // intraday arrival pattern (normProfile WeakMap key)
+    asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, agentCost: 32000,
+    resourcing: "resourced",
+    wf: { attrition: 0.04, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [0.6, 0.75, 0.9, 1.0], hires: [] },
+    burn: { occThreshold: 0.85, sensitivity: 1.5, recovery: 8, maxAttritionMult: 2, absenceUplift: 0.05 },
+  };
 }
 
 // Convenience: v1 cfg → v2 model → engine cfg, in one call. Requires migrate.js

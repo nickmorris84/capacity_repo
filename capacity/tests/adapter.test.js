@@ -125,6 +125,25 @@ t("adapter drives derived (never entered) volume: a multi-service queue reflects
   ok(close(q.aht, 260), `weighted AHT 260, got ${q.aht}`); // (1000×240+500×300)/1500
 });
 
+t("a Setup-authored queue (compact staffing, no burn/wf) is simulatable — regression", () => {
+  // Reproduces the add-queue crash: a queue authored in Setup carries only the
+  // compact drawer fields; the adapter must fill burn/wf so the engine day loop
+  // does not dereference undefined (was: "cannot read maxAttritionMult").
+  const m = M.migrateV1ToV2(E.makeDefaultConfig());
+  m.queues.push({
+    id: "q_new", name: "New — Setup queue", type: "inbound_call",
+    attachment: { kind: "shared" }, fallbackAhtSec: 300,
+    staffing: { asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, agentCost: 32000, resourcing: "dedicated", occupancyCeiling: 0.85, churnCost: 500, failedToChurnPct: 6, attritionPct: 26 },
+  });
+  const eng = A.v2ToEngineConfig(m);
+  const nq = eng.queues.find((x) => x.id === "q_new");
+  ok(nq.burn && nq.burn.maxAttritionMult != null, "burn defaults filled");
+  ok(nq.wf && Array.isArray(nq.wf.learningCurve), "wf defaults filled");
+  let threw = null;
+  try { E.simulate(eng, { strategy: "S1" }); } catch (e) { threw = e.message; }
+  ok(!threw, "simulate must not throw: " + threw);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.log("\nFAILURES:\n" + failures.map((f) => "  - " + f).join("\n")); process.exit(1); }
 console.log("STEP 1/3 ADAPTER GATE: GREEN");

@@ -25,11 +25,22 @@ export default function App({ initialModel }) {
     return () => clearTimeout(timer.current);
   }, [model]);
 
-  const simulations = useMemo(() => ([{
-    id: "sim_full", name: (model.brands[0] && model.brands[0].name) + " — full estate",
-    scope: "Whole ecosystem", updated: "just now", runs: 3,
-    model, services: model.services.length, headline: quickHeadline(model),
-  }]), [model]);
+  // The Home card headline is a full engine run — only compute it when Home is
+  // showing (not on every Setup keystroke), reuse the last good one otherwise,
+  // and never let an engine error white-screen the app.
+  const lastHeadline = useRef(null);
+  const simulations = useMemo(() => {
+    let headline = lastHeadline.current;
+    if (tab === "home" || !headline) {
+      try { headline = quickHeadline(model); lastHeadline.current = headline; }
+      catch { headline = headline || { horizon: 0, queues: (model.queues || []).length, allIn: 0, availFte: 0, worst: "amber", lost: 0 }; }
+    }
+    return [{
+      id: "sim_full", name: (model.brands[0] && model.brands[0].name) + " — full estate",
+      scope: "Whole ecosystem", updated: "just now", runs: 3,
+      model, services: model.services.length, headline,
+    }];
+  }, [model, tab]);
 
   const onDownloadTemplate = useCallback(async (m) => {
     const { downloadTemplate } = await import("./template-xlsx.js");
