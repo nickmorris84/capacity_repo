@@ -11,9 +11,10 @@ import { sampleModel, blankModel } from "./model.js";
 export const OWNER = "nick_morris";
 
 // Standalone stateful host — the shell (App.jsx) owns the model in the app.
-function StatefulSetup({ model: seed }) {
+function StatefulSetup({ model: seed, importReport: seedReport }) {
   const [model, setModel] = useState(seed || sampleModel());
-  return <SetupPage model={model} onModelChange={setModel} />;
+  const [report, setReport] = useState(seedReport || null);
+  return <SetupPage model={model} onModelChange={setModel} importReport={report} onDismissImport={() => setReport(null)} />;
 }
 
 function injectStyle() {
@@ -27,7 +28,7 @@ function injectStyle() {
 export function mount(container, opts = {}) {
   injectStyle();
   const root = createRoot(container);
-  root.render(<StatefulSetup model={opts.model} />);
+  root.render(<StatefulSetup model={opts.model} importReport={opts.importReport} />);
   return root;
 }
 

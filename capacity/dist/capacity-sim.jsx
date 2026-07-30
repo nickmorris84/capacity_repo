@@ -3031,6 +3031,20 @@ var QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call
 function deriveModel(model) {
   return (0, import_derive.derive)(model);
 }
+function buildImportReport(model) {
+  const v = (0, import_derive.derive)(model).validation;
+  return {
+    ok: v.ok,
+    counts: {
+      businessUnits: (model.brands || []).reduce((a, b) => a + (b.businessUnits || []).length, 0),
+      queues: (model.queues || []).length,
+      services: (model.services || []).length,
+      profiles: (model.profiles || []).length
+    },
+    errors: v.errors || [],
+    warnings: v.warnings || []
+  };
+}
 var clone = (m) => JSON.parse(JSON.stringify(m));
 function addBusinessUnit(model, brandId) {
   const m = clone(model);
@@ -3249,7 +3263,7 @@ function useOpenSet(initial = []) {
 }
 var NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {
-} }) {
+}, importReport, onDismissImport }) {
   const derived = useMemo(() => deriveModel(model), [model]);
   const [openSec, toggleSec] = useOpenSet(["s1"]);
   const [openBu, toggleBu] = useOpenSet(["bu_retail", "qg_ci_cards_voice", "qg_ci_cards_digital", "qg_shared"]);
@@ -3288,6 +3302,7 @@ function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate,
     ] }),
     /* @__PURE__ */ jsx("h2", { children: "Setup" }),
     /* @__PURE__ */ jsx("p", { className: "lede", children: "Four sections, in order \u2014 each unlocks the next. A new simulation is this page, empty, with Structure open." }),
+    importReport ? /* @__PURE__ */ jsx(ImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
     /* @__PURE__ */ jsxs(
       Section,
       {
@@ -3725,6 +3740,54 @@ function StaffingDrawer({ model, derived, queueId, onClose, set }) {
         ] })
       ] })
     ] }) : null })
+  ] });
+}
+function ImportReport({ report, onDismiss }) {
+  const err = report.error;
+  const errors = report.errors || [], warnings = report.warnings || [];
+  const tone = err || errors.length ? "err" : warnings.length ? "warn" : "ok";
+  const bg = tone === "err" ? "var(--red-bg)" : tone === "warn" ? "var(--amber-bg)" : "var(--green-bg)";
+  const ink = tone === "err" ? "var(--red-ink)" : tone === "warn" ? "var(--amber-ink)" : "var(--green-ink)";
+  const glyph = tone === "err" ? "\u2715" : tone === "warn" ? "\u25B2" : "\u25CF";
+  return /* @__PURE__ */ jsxs("div", { "data-testid": "import-report", role: "status", style: { border: "0.5px solid " + ink, background: bg, color: ink, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs("b", { style: { fontSize: 13 }, children: [
+        glyph,
+        " ",
+        err ? "Import failed" : "Template imported" + (report.filename ? ` \u2014 ${report.filename}` : "")
+      ] }),
+      /* @__PURE__ */ jsx("button", { className: "close", onClick: onDismiss, "aria-label": "Dismiss import report", style: { marginLeft: "auto", color: ink }, children: "\u2715" })
+    ] }),
+    err ? /* @__PURE__ */ jsx("p", { style: { fontSize: 12.5, marginTop: 4 }, children: err }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsxs("p", { style: { fontSize: 12.5, marginTop: 4 }, children: [
+        "Loaded ",
+        report.counts.businessUnits,
+        " BU",
+        report.counts.businessUnits === 1 ? "" : "s",
+        " \xB7 ",
+        report.counts.queues,
+        " queue",
+        report.counts.queues === 1 ? "" : "s",
+        " \xB7 ",
+        report.counts.services,
+        " service",
+        report.counts.services === 1 ? "" : "s",
+        " \xB7 ",
+        report.counts.profiles,
+        " profile",
+        report.counts.profiles === 1 ? "" : "s",
+        ".",
+        errors.length ? ` ${errors.length} error${errors.length === 1 ? "" : "s"} must be fixed.` : warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"} to review.` : " No issues."
+      ] }),
+      errors.slice(0, 5).map((e, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
+        "\u2715 ",
+        e.message
+      ] }, "e" + i)),
+      warnings.slice(0, 5).map((w, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
+        "\u25B2 ",
+        w.message
+      ] }, "w" + i))
+    ] })
   ] });
 }
 function AddQueue({ model, onAdd }) {
@@ -5041,6 +5104,7 @@ import { Fragment as Fragment6, jsx as jsx5, jsxs as jsxs5 } from "react/jsx-run
 function App({ initialModel }) {
   const [model, setModel] = useState7(() => loadModel() || initialModel);
   const [tab, setTab] = useState7("home");
+  const [importReport, setImportReport] = useState7(null);
   const [selected, setSelected] = useState7(null);
   const nav = useCallback3((t) => setTab(t), []);
   const newSimulation = useCallback3(() => {
@@ -5087,16 +5151,25 @@ function App({ initialModel }) {
     input.onchange = async () => {
       const file = input.files && input.files[0];
       if (!file) return;
-      const { importWorkbook: importWorkbook2 } = await Promise.resolve().then(() => (init_template_xlsx(), template_xlsx_exports));
-      const buf = await file.arrayBuffer();
-      const { model: imported } = await importWorkbook2(new Uint8Array(buf));
-      setModel((m) => ({ ...imported, engineConfig: m.engineConfig }));
+      try {
+        const { importWorkbook: importWorkbook2 } = await Promise.resolve().then(() => (init_template_xlsx(), template_xlsx_exports));
+        const buf = await file.arrayBuffer();
+        const { model: imported } = await importWorkbook2(new Uint8Array(buf));
+        const merged = { ...imported, engineConfig: model.engineConfig };
+        setModel(merged);
+        setSelected(null);
+        setImportReport({ ...buildImportReport(merged), filename: file.name });
+        setTab("setup");
+      } catch (e) {
+        setImportReport({ error: `Couldn\u2019t read \u201C${file.name}\u201D. ${e.message}` });
+        setTab("setup");
+      }
     };
     input.click();
-  }, []);
+  }, [model]);
   return /* @__PURE__ */ jsxs5(Fragment6, { children: [
     tab === "home" && /* @__PURE__ */ jsx5(HomePage, { simulations, onOpen: () => setTab("setup"), onNew: newSimulation, onNav: nav }),
-    tab === "setup" && /* @__PURE__ */ jsx5(SetupPage, { model, onModelChange: setModel, onNav: nav, onDownloadTemplate, onUploadTemplate }),
+    tab === "setup" && /* @__PURE__ */ jsx5(SetupPage, { model, onModelChange: setModel, onNav: nav, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport: () => setImportReport(null) }),
     tab === "levers" && /* @__PURE__ */ jsx5(LeversPage, { model, onModelChange: setModel, onNav: nav, selected, onSelectedChange: setSelected }),
     tab === "results" && /* @__PURE__ */ jsx5(ResultsPage, { model, onNav: nav, selected, onSelectedChange: setSelected })
   ] });

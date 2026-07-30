@@ -21,7 +21,7 @@ function useOpenSet(initial = []) {
 
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
-export default function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {} }) {
+export default function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {}, importReport, onDismissImport }) {
   const derived = useMemo(() => Ops.deriveModel(model), [model]);
   const [openSec, toggleSec] = useOpenSet(["s1"]);
   const [openBu, toggleBu] = useOpenSet(["bu_retail", "qg_ci_cards_voice", "qg_ci_cards_digital", "qg_shared"]);
@@ -62,6 +62,8 @@ export default function SetupPage({ model, onModelChange, onDownloadTemplate, on
 
       <h2>Setup</h2>
       <p className="lede">Four sections, in order — each unlocks the next. A new simulation is this page, empty, with Structure open.</p>
+
+      {importReport ? <ImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
       {/* 1 STRUCTURE */}
       <Section id="s1" n="1" title="Structure" sub="Brand › business unit › product › channel"
@@ -364,6 +366,33 @@ function StaffingDrawer({ model, derived, queueId, onClose, set }) {
         </> : null}
       </aside>
     </>
+  );
+}
+
+// Import validation report shown after an Upload: what was imported, blocking
+// errors (red), and warnings (amber). Dismissible. Nothing is silently applied.
+function ImportReport({ report, onDismiss }) {
+  const err = report.error;
+  const errors = report.errors || [], warnings = report.warnings || [];
+  const tone = err || errors.length ? "err" : warnings.length ? "warn" : "ok";
+  const bg = tone === "err" ? "var(--red-bg)" : tone === "warn" ? "var(--amber-bg)" : "var(--green-bg)";
+  const ink = tone === "err" ? "var(--red-ink)" : tone === "warn" ? "var(--amber-ink)" : "var(--green-ink)";
+  const glyph = tone === "err" ? "✕" : tone === "warn" ? "▲" : "●";
+  return (
+    <div data-testid="import-report" role="status" style={{ border: "0.5px solid " + ink, background: bg, color: ink, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>{glyph} {err ? "Import failed" : "Template imported" + (report.filename ? ` — ${report.filename}` : "")}</b>
+        <button className="close" onClick={onDismiss} aria-label="Dismiss import report" style={{ marginLeft: "auto", color: ink }}>✕</button>
+      </div>
+      {err ? <p style={{ fontSize: 12.5, marginTop: 4 }}>{err}</p> : <>
+        <p style={{ fontSize: 12.5, marginTop: 4 }}>
+          Loaded {report.counts.businessUnits} BU{report.counts.businessUnits === 1 ? "" : "s"} · {report.counts.queues} queue{report.counts.queues === 1 ? "" : "s"} · {report.counts.services} service{report.counts.services === 1 ? "" : "s"} · {report.counts.profiles} profile{report.counts.profiles === 1 ? "" : "s"}.
+          {errors.length ? ` ${errors.length} error${errors.length === 1 ? "" : "s"} must be fixed.` : warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"} to review.` : " No issues."}
+        </p>
+        {errors.slice(0, 5).map((e, i) => <p key={"e" + i} style={{ fontSize: 12, marginTop: 2 }}>✕ {e.message}</p>)}
+        {warnings.slice(0, 5).map((w, i) => <p key={"w" + i} style={{ fontSize: 12, marginTop: 2 }}>▲ {w.message}</p>)}
+      </>}
+    </div>
   );
 }
 

@@ -106,6 +106,24 @@ t("service with an optional AHT and a governance sampling step round-trip precis
   ok(gov && gov.samplingPct === 2, "governance sampling % preserved");
 });
 
+t("buildImportReport summarises counts and surfaces warnings/errors", () => {
+  // A clean import → ok, counts, no issues.
+  const clean = Model.buildImportReport(model);
+  ok(clean.ok, "sample model imports clean");
+  ok(clean.counts.queues === model.queues.length && clean.counts.services === model.services.length, "counts reported");
+  ok(clean.warnings.length === 0 || clean.warnings.every((w) => w.kind !== "unmodelled_remainder"), "no unmodelled warnings on a 100% sample");
+  // Break a profile mix to <100% → an unmodelled-remainder WARNING (not blocking).
+  const warned = JSON.parse(JSON.stringify(model));
+  warned.profiles[0].mix[0].pct = 30; // 30 + 26 = 56%
+  const wr = Model.buildImportReport(warned);
+  ok(wr.warnings.some((w) => w.kind === "unmodelled_remainder"), "unmodelled remainder warned");
+  // A dangling journey reference → a blocking ERROR.
+  const broken = JSON.parse(JSON.stringify(model));
+  broken.services[0].journey.push({ queueId: "ghost_queue", splitPct: 100 });
+  const br = Model.buildImportReport(broken);
+  ok(!br.ok && br.errors.some((e) => e.kind === "dangling_journey_queue"), "dangling reference is an error");
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.log("\nFAILURES:\n" + failures.map((f) => "  - " + f).join("\n")); process.exit(1); }
 console.log("STEP 6 / TEMPLATE GATE: GREEN");

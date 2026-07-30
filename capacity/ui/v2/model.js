@@ -25,6 +25,24 @@ export const QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outb
 // ---- derived-state helper ----------------------------------------------------
 export function deriveModel(model) { return derive(model); }
 
+// A validation report for a just-imported model: what came in, plus the
+// derivation module's errors (blocking) and warnings (unmodelled mix,
+// cross-structure, dangling refs). Surfaced in Setup after an Upload.
+export function buildImportReport(model) {
+  const v = derive(model).validation;
+  return {
+    ok: v.ok,
+    counts: {
+      businessUnits: (model.brands || []).reduce((a, b) => a + (b.businessUnits || []).length, 0),
+      queues: (model.queues || []).length,
+      services: (model.services || []).length,
+      profiles: (model.profiles || []).length,
+    },
+    errors: v.errors || [],
+    warnings: v.warnings || [],
+  };
+}
+
 // ---- structure ops -----------------------------------------------------------
 const clone = (m) => JSON.parse(JSON.stringify(m));
 

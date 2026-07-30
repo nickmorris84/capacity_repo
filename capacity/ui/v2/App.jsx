@@ -10,12 +10,13 @@ import LeversPage from "./LeversPage.jsx";
 import ResultsPage from "./ResultsPage.jsx";
 import HomePage from "./HomePage.jsx";
 import { quickHeadline } from "./compute.js";
-import { emptyModel } from "./model.js";
+import { emptyModel, buildImportReport } from "./model.js";
 import { saveModel, loadModel } from "./store.js";
 
 export default function App({ initialModel }) {
   const [model, setModel] = useState(() => loadModel() || initialModel);
   const [tab, setTab] = useState("home");
+  const [importReport, setImportReport] = useState(null);
   // The matrix cell selection (strategy × scenario) is shared: tap a cell in
   // Levers and Results reviews that mix. Null = each page falls back to bestCell.
   const [selected, setSelected] = useState(null);
@@ -63,19 +64,28 @@ export default function App({ initialModel }) {
     input.type = "file"; input.accept = ".xlsx,.xls";
     input.onchange = async () => {
       const file = input.files && input.files[0]; if (!file) return;
-      const { importWorkbook } = await import("./template-xlsx.js");
-      const buf = await file.arrayBuffer();
-      const { model: imported } = await importWorkbook(new Uint8Array(buf));
-      // Preserve the engine config carry; the template covers the Setup sections.
-      setModel((m) => ({ ...imported, engineConfig: m.engineConfig }));
+      try {
+        const { importWorkbook } = await import("./template-xlsx.js");
+        const buf = await file.arrayBuffer();
+        const { model: imported } = await importWorkbook(new Uint8Array(buf));
+        // Preserve the engine config carry; the template covers the Setup sections.
+        const merged = { ...imported, engineConfig: model.engineConfig };
+        setModel(merged);
+        setSelected(null);
+        setImportReport({ ...buildImportReport(merged), filename: file.name });
+        setTab("setup");
+      } catch (e) {
+        setImportReport({ error: `Couldn’t read “${file.name}”. ${e.message}` });
+        setTab("setup");
+      }
     };
     input.click();
-  }, []);
+  }, [model]);
 
   return (
     <>
       {tab === "home" && <HomePage simulations={simulations} onOpen={() => setTab("setup")} onNew={newSimulation} onNav={nav} />}
-      {tab === "setup" && <SetupPage model={model} onModelChange={setModel} onNav={nav} onDownloadTemplate={onDownloadTemplate} onUploadTemplate={onUploadTemplate} />}
+      {tab === "setup" && <SetupPage model={model} onModelChange={setModel} onNav={nav} onDownloadTemplate={onDownloadTemplate} onUploadTemplate={onUploadTemplate} importReport={importReport} onDismissImport={() => setImportReport(null)} />}
       {tab === "levers" && <LeversPage model={model} onModelChange={setModel} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
       {tab === "results" && <ResultsPage model={model} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
     </>

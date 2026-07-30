@@ -184,6 +184,25 @@ await t("the add-queue chooser offers shared or a structure path", () => {
   ok($$(".qline").length === before + 1, "a queue was added");
 });
 
+await t("import validation report renders counts + warnings/errors and dismisses (P4)", () => {
+  const c = document.createElement("div"); document.body.appendChild(c);
+  const report = {
+    ok: false, filename: "forecast.xlsx",
+    counts: { businessUnits: 2, queues: 4, services: 2, profiles: 2 },
+    errors: [{ kind: "dangling_journey_queue", message: "Service references missing queue q9." }],
+    warnings: [{ kind: "unmodelled_remainder", message: "Profile mix sums to 56%." }],
+  };
+  act(() => { mod.exports.mount(c, { importReport: report }); });
+  const banner = c.querySelector('[data-testid="import-report"]');
+  ok(banner, "import report banner shown");
+  ok(/forecast\.xlsx/.test(banner.textContent), "filename shown");
+  ok(/4 queues · 2 services · 2 profiles/.test(banner.textContent), "counts summarised: " + banner.textContent.replace(/\s+/g, " ").slice(0, 120));
+  ok(/missing queue q9/.test(banner.textContent), "blocking error message shown");
+  ok(/sums to 56%/.test(banner.textContent), "warning message shown");
+  click(banner.querySelector('[aria-label="Dismiss import report"]'));
+  ok(!c.querySelector('[data-testid="import-report"]'), "banner dismissed");
+});
+
 await t("zero unexpected console output across the whole run", () => {
   eq(consoleEvents.length, 0, "console noise: " + consoleEvents.join(" | "));
 });
