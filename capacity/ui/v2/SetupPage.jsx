@@ -21,7 +21,7 @@ function useOpenSet(initial = []) {
 
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
-export default function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {}, importReport, onDismissImport }) {
+export default function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {}, importReport, onDismissImport, onOpenV3 }) {
   const derived = useMemo(() => Ops.deriveModel(model), [model]);
   const [openSec, toggleSec] = useOpenSet(["s1"]);
   const [openBu, toggleBu] = useOpenSet(["bu_retail", "qg_ci_cards_voice", "qg_ci_cards_digital", "qg_shared"]);
@@ -61,7 +61,8 @@ export default function SetupPage({ model, onModelChange, onDownloadTemplate, on
       </header>
 
       <h2>Setup</h2>
-      <p className="lede">Four sections, in order — each unlocks the next. A new simulation is this page, empty, with Structure open.</p>
+      <p className="lede">Four sections, in order — each unlocks the next. A new simulation is this page, empty, with Structure open.
+        {onOpenV3 ? <> <button className="linkbtn" onClick={onOpenV3}>Preview the new six-tab Setup →</button></> : null}</p>
 
       {importReport ? <ImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 

@@ -309,4 +309,57 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .lg.ovf{background:var(--amber-bg); color:var(--amber-ink)}
 .ecofoot{display:flex; justify-content:space-between; align-items:center; margin-top:12px; flex-wrap:wrap; gap:8px}
 .ecohint{font-size:12px; color:var(--ink-2)}
+
+/* ---- domain redesign: six-tab Setup shell (U1) ---- */
+.linkbtn{background:none; border:none; color:var(--blue); font:inherit; font-size:12px; font-weight:500; cursor:pointer; padding:0}
+.linkbtn:hover{text-decoration:underline}
+.pstrip{display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--amber-ink); background:var(--amber-bg);
+  border:0.5px solid #EAD1A4; border-radius:10px; padding:8px 12px; margin-bottom:12px}
+.pstrip.done{color:var(--green-ink); background:var(--green-bg); border-color:#CBDDB4}
+.pstrip .btn{margin-left:auto}
+.glyph{font-size:10px}
+.glyph.ok{color:var(--green-ink)}
+.glyph.todo{color:var(--amber-ink)}
+.subtabs{display:flex; gap:2px; border-bottom:0.5px solid var(--line); margin-bottom:16px; overflow-x:auto}
+.subtabs button{display:flex; align-items:center; gap:6px; padding:8px 11px; border:none; border-bottom:2px solid transparent;
+  background:none; font:inherit; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
+.subtabs button.on{color:var(--blue-deep); font-weight:600; border-bottom-color:var(--blue)}
+.subtabs button:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+.subtabs .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
+.subtabs button.on .count{background:var(--blue-tint); border-color:var(--blue-line); color:var(--blue-deep)}
+.panel h3{font-size:15px; font-weight:600; margin-bottom:2px}
+.panel>.hint{margin-bottom:12px}
+.phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}
+.reglist{border:0.5px solid var(--line); border-radius:10px; background:#fff; padding:10px 12px; margin-bottom:8px}
+.reghead{display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:6px}
+.reghead .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
+.regchips{display:flex; gap:6px; flex-wrap:wrap}
+.regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
+.md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
+@media(max-width:640px){.md{grid-template-columns:1fr}}
+.mdlist{display:flex; flex-direction:column; gap:4px}
+.mdlist button{display:grid; grid-template-columns:1fr auto; gap:1px 8px; text-align:left; border:0.5px solid var(--line);
+  background:#fff; border-radius:10px; padding:8px 11px; font:inherit; cursor:pointer}
+.mdlist button b{font-size:12.5px; font-weight:600}
+.mdlist button small{grid-column:1; font-size:10.5px; color:var(--ink-3)}
+.mdlist button .qstats{grid-row:1/3; align-self:center; font-size:11px; color:var(--ink-2)}
+.mdlist button.on{border-color:var(--blue); background:var(--blue-tint)}
+.mddetail{border:0.5px solid var(--line); border-radius:12px; background:#fff; padding:14px 16px}
+.mddetail h4{font-size:14px; font-weight:600}
+.mddetail>.hint{margin-bottom:10px}
+.kv{display:flex; justify-content:space-between; gap:10px; font-size:12.5px; padding:5px 0; border-bottom:0.5px dashed var(--line)}
+.kv span{color:var(--ink-2)}
+.usage{font-size:12px; color:var(--ink-2); margin-top:8px}
+.rtcard{border:0.5px solid var(--line); border-radius:12px; background:#fff; padding:12px 14px; margin-bottom:8px}
+.rthead{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px}
+.rthead b{font-size:13px}
+.procline{display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; padding:5px 0; border-top:0.5px dashed var(--line)}
+.procline .chain{color:var(--ink-2)}
+.vtable{width:100%; border-collapse:collapse; font-size:12.5px; background:#fff; border:0.5px solid var(--line); border-radius:10px}
+.vtable th{text-align:left; font-size:11px; color:var(--ink-3); font-weight:600; padding:7px 10px; border-bottom:0.5px solid var(--line)}
+.vtable th.num,.vtable td.num{text-align:right}
+.vtable td{padding:7px 10px; border-bottom:0.5px dashed var(--line)}
+.valpanel{border:0.5px solid var(--line); border-radius:10px; background:#fff; padding:10px 12px; margin-top:10px}
+.okmsg{font-size:12.5px; color:var(--green-ink)}
+.errmsg{font-size:12.5px; color:var(--red-ink)}
 `;

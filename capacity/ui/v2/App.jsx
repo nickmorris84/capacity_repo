@@ -6,16 +6,28 @@
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import SetupPage from "./SetupPage.jsx";
+import SetupV3Page from "./SetupV3Page.jsx";
 import LeversPage from "./LeversPage.jsx";
 import ResultsPage from "./ResultsPage.jsx";
 import HomePage from "./HomePage.jsx";
 import { quickHeadline } from "./compute.js";
 import { emptyModel, buildImportReport } from "./model.js";
 import { saveModel, loadModel } from "./store.js";
+import { saveDomainModel, loadDomainModel } from "../../model/store-domain.js";
+import { migrateV2ToDomain } from "../../model/migrate-domain.js";
 
 export default function App({ initialModel }) {
   const [model, setModel] = useState(() => loadModel() || initialModel);
   const [tab, setTab] = useState("home");
+  // The DOMAIN model (v1.2 redesign) rides alongside the v2 model while the
+  // new Setup is built tab by tab: restored from the v3 key, else migrated
+  // from the current v2 model. It becomes authoritative at the final swap.
+  const [domainModel, setDomainModel] = useState(() => {
+    try {
+      const r = loadDomainModel();
+      return r ? r.model : migrateV2ToDomain(loadModel() || initialModel);
+    } catch { return migrateV2ToDomain(initialModel); }
+  });
   const [importReport, setImportReport] = useState(null);
   // The matrix cell selection (strategy × scenario) is shared: tap a cell in
   // Levers and Results reviews that mix. Null = each page falls back to bestCell.
@@ -37,6 +49,12 @@ export default function App({ initialModel }) {
     timer.current = setTimeout(() => saveModel(model), 300);
     return () => clearTimeout(timer.current);
   }, [model]);
+  const dTimer = useRef(null);
+  useEffect(() => {
+    clearTimeout(dTimer.current);
+    dTimer.current = setTimeout(() => saveDomainModel(domainModel), 300);
+    return () => clearTimeout(dTimer.current);
+  }, [domainModel]);
 
   // The Home card headline is a full engine run — only compute it when Home is
   // showing (not on every Setup keystroke), reuse the last good one otherwise,
@@ -85,7 +103,8 @@ export default function App({ initialModel }) {
   return (
     <>
       {tab === "home" && <HomePage simulations={simulations} onOpen={() => setTab("setup")} onNew={newSimulation} onNav={nav} />}
-      {tab === "setup" && <SetupPage model={model} onModelChange={setModel} onNav={nav} onDownloadTemplate={onDownloadTemplate} onUploadTemplate={onUploadTemplate} importReport={importReport} onDismissImport={() => setImportReport(null)} />}
+      {tab === "setup" && <SetupPage model={model} onModelChange={setModel} onNav={nav} onDownloadTemplate={onDownloadTemplate} onUploadTemplate={onUploadTemplate} importReport={importReport} onDismissImport={() => setImportReport(null)} onOpenV3={() => { setDomainModel(migrateV2ToDomain(model)); setTab("setup3"); }} />}
+      {tab === "setup3" && <SetupV3Page model={domainModel} onModelChange={setDomainModel} onNav={nav} onOpenClassic={() => setTab("setup")} />}
       {tab === "levers" && <LeversPage model={model} onModelChange={setModel} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
       {tab === "results" && <ResultsPage model={model} onNav={nav} selected={selected} onSelectedChange={setSelected} />}
     </>

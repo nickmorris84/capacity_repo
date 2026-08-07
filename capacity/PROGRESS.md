@@ -6,6 +6,39 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — U1: the six-tab Setup shell ✅ (new gate green) — CHECKPOINT
+
+The navigation shell per REVIEW-SETUP §2, over the domain model:
+**Structure │ Queues │ Request types │ Volume │ Map │ Defaults** — the order
+is the dependency order.
+
+- `ui/v2/SetupV3Page.jsx` — the shell. Completion state on every tab
+  (● / ▲ + a live badge: entity counts, error counts, uncovered-volume
+  count, validation state, engine-defaults presence); a slim progress strip
+  that names the next thing to do and jumps there (green "Model complete"
+  when every tab checks out). Queues carries the master–detail scaffold
+  (list with DERIVED vol/day + eff. AHT and markers; detail pane with
+  blast radius "used in N processes across M brands"). Every panel renders
+  a live read-only view of the model — five flat registry lists, request-type
+  wiring with step chains/sampling/outcomes, volume entries with scope
+  addresses, the Map validation panel, engine defaults — so the shell is
+  reviewable before the editors land (U2–U6).
+- **App threading** — `App.jsx` now carries the domain model alongside the
+  v2 model: restored from the v3 key (store-domain), else migrated live from
+  the v2 model; debounce-autosaved. Classic Setup gains a "Preview the new
+  six-tab Setup →" link (re-migrates from the live v2 model on entry, so the
+  preview always reflects current data); the new shell links back.
+- `tests/setup-v3-ui.test.js` (10) — six tabs in order, sample-complete
+  glyphs, tab navigation, the master–detail scaffold with derived numbers,
+  request-type wiring rendered, volume scope labels, Defaults reading the
+  engine config, the blank-model progress strip (names Structure first, Go
+  jumps there), a broken process flagging Request types + listed in Map,
+  zero console noise.
+
+**Full suite: 27 gates green; dist rebuilt** (the packaged app carries the
+preview). **USER CHECKPOINT: does the shell feel right?** Next: U2
+(Structure editors).
+
 ## DOMAIN REDESIGN — M1–M4: the full model layer ✅ (four new gates green)
 
 BUILD-PLAN.md approved ("Okay let's go"); the model phases land together, all
