@@ -524,7 +524,15 @@ A change is done when: the relevant gate covers it, `npm test` is green,
 
 ## 24. Known gaps / candidate next steps
 
-Ordered by value, all optional — none blocks the core product.
+> **See also [GAP-ANALYSIS.md](./GAP-ANALYSIS.md)** — a measured v1 → v2.4
+> feature diff. v2 re-implemented a *subset* of v1's editable surface: ~32 of
+> v1's 106 fields, 9 of 53 data columns, 1 of 6 charts. Almost all of it is
+> missing **UI**, not missing engine capability — the v1 config still flows
+> through `engineConfig` and is still simulated. That document carries the
+> restoration order and the list of reusable v1 modules.
+
+The items below are the v2-native follow-ons; the parity work is in the gap
+analysis. All optional — none blocks the core product.
 
 1. **IndexedDB persistence** — swap `store.js`'s localStorage for IndexedDB
    behind the same three functions. Small and testable.
