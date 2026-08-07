@@ -335,6 +335,17 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .reghead .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
 .regchips{display:flex; gap:6px; flex-wrap:wrap}
 .regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
+.regrow{border-top:0.5px dashed var(--line); padding:4px 0}
+.regrow:first-of-type{border-top:none}
+.regmain{display:flex; align-items:center; gap:8px}
+.regmain input{flex:0 1 260px; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
+.regmain input:hover{border-color:var(--line); background:#fff}
+.regmain input:focus{border-color:var(--blue); background:#fff; outline:none}
+.regdel{margin-left:auto; border:none; background:none; color:var(--ink-3); font:inherit; font-size:12px; cursor:pointer; padding:2px 6px; border-radius:6px}
+.regdel:hover{color:var(--red-ink); background:var(--red-bg)}
+.blocked{margin-left:auto; color:var(--amber-ink); white-space:nowrap}
+.regoff{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
+.chdefaults{margin:4px 0 8px; padding:10px 12px; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas)}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}

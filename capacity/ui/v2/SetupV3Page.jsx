@@ -12,8 +12,10 @@
  */
 import { useState, useMemo } from "react";
 import { propagateDomain } from "../../model/propagate.js";
-import { queueUsage } from "../../model/domain.js";
-import { QTYPE_LABELS } from "./model.js";
+import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct } from "../../model/domain.js";
+import { CHANNELS } from "../../model/taxonomy.js";
+import * as Ops from "../../model/ops.js";
+import { QTYPE_LABELS, CHANNEL_LABELS } from "./model.js";
 
 const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString("en-GB"));
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
@@ -99,7 +101,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
       </div>
 
       <div role="tabpanel" data-tab={tab} className="panel">
-        {tab === "structure" && <StructurePanel model={model} />}
+        {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
         {tab === "queues" && <QueuesPanel model={model} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} />}
         {tab === "volume" && <VolumePanel model={model} p={p} />}
@@ -112,26 +114,120 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
 
 const nameOf = (list, id) => { const e = (list || []).find((x) => x.id === id); return e ? e.name : id; };
 
-// ---- 1 · Structure — the five flat lists (registry; editors land in U2) ------
-function StructurePanel({ model }) {
-  const lists = [
-    ["Brands", model.brands], ["Business units", model.businessUnits], ["Channels", model.channels],
-    ["Process groups", model.processGroups], ["Products", model.products],
+// ---- 1 · Structure — the registry: five flat lists, editable (U2) ------------
+// Rename propagates by id (nothing stores names twice); delete is guarded with
+// the dependents summarised (V6). Channels enable from the taxonomy and carry
+// the channel defaults new processes inherit (globals category B).
+const KIND_LABELS = { requestType: ["request type", "request types"], queue: ["queue", "queues"], volumeEntry: ["volume entry", "volume entries"], process: ["process", "processes"] };
+function guardSummary(guard) {
+  const byKind = {};
+  for (const b of guard.blockedBy) byKind[b.kind] = (byKind[b.kind] || 0) + 1;
+  return Object.entries(byKind).map(([k, n]) => {
+    const [one, many] = KIND_LABELS[k] || [k, k + "s"];
+    return `${n} ${n === 1 ? one : many}`;
+  }).join(" · ");
+}
+
+function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
+  return (
+    <div className="regrow">
+      <div className="regmain">
+        <input value={entity.name} onChange={(e) => onRename(e.target.value)} aria-label={"Rename " + entity.name} />
+        {extra}
+        {guard.ok
+          ? <button className="regdel" onClick={onDelete} aria-label={"Delete " + entity.name}>✕</button>
+          : <span className="hint blocked" title={"Referenced by " + guardSummary(guard)}>▲ in use — {guardSummary(guard)}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function RegistryList({ title, list, hint, onAdd, addLabel, row }) {
+  return (
+    <div className="reglist">
+      <div className="reghead"><b>{title}</b><span className="count">{(list || []).length}</span>
+        {onAdd ? <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onAdd}>{addLabel || "+ Add"}</button> : null}
+      </div>
+      {hint ? <p className="hint" style={{ marginBottom: 6 }}>{hint}</p> : null}
+      {(list || []).length === 0 ? <span className="hint">none yet</span> : list.map(row)}
+    </div>
+  );
+}
+
+const CH_DEFAULT_FIELDS = [
+  ["asaTarget", "ASA target (s)", 1],
+  ["maxAbandon", "Max abandon (%)", 100],
+  ["patience", "Patience (s)", 1],
+  ["concurrency", "Concurrency", 1],
+  ["digitalSlaMinutes", "SLA within (min)", 1],
+  ["digitalSlaPct", "SLA target (%)", 100],
+];
+
+function ChannelRow({ model, c, set }) {
+  const [open, setOpen] = useState(false);
+  const d = c.defaults || {};
+  return (
+    <RegRow entity={c} onRename={(name) => set(Ops.renameChannel(model, c.id, name))}
+      guard={canDeleteChannel(model, c.id)} onDelete={() => set(Ops.deleteChannel(model, c.id))}
+      extra={<>
+        <span className="tax">{CHANNEL_LABELS[c.key] || c.key}</span>
+        <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}</button>
+      </>}>
+      {open ? (
+        <div className="fields chdefaults" data-testid={"channel-defaults-" + c.key}>
+          {CH_DEFAULT_FIELDS.map(([k, label, scale]) => (
+            <div className="field" key={k}><label>{label}</label>
+              <input className="num" placeholder="—" value={d[k] != null ? Math.round(d[k] * scale * 100) / 100 : ""}
+                onChange={(e) => set(Ops.setChannelDefaults(model, c.id, { [k]: e.target.value === "" ? undefined : (+e.target.value || 0) / scale }))} />
+            </div>
+          ))}
+          <p className="hint" style={{ gridColumn: "1/-1" }}>New processes on this channel inherit these; a queue can still override them.</p>
+        </div>
+      ) : null}
+    </RegRow>
+  );
+}
+
+function StructurePanel({ model, set }) {
+  const plain = [
+    ["Brands", "brands", Ops.addBrand, Ops.renameBrand, Ops.deleteBrand, canDeleteBrand, "New brand", "+ Brand"],
+    ["Business units", "businessUnits", Ops.addBusinessUnit, Ops.renameBusinessUnit, Ops.deleteBusinessUnit, canDeleteBU, "New business unit", "+ Business unit"],
+    ["Process groups", "processGroups", Ops.addProcessGroup, Ops.renameProcessGroup, Ops.deleteProcessGroup, canDeleteGroup, "New group", "+ Group"],
+    ["Products", "products", Ops.addProduct, Ops.renameProduct, Ops.deleteProduct, canDeleteProduct, "New product", "+ Product"],
   ];
+  const enabledKeys = new Set((model.channels || []).map((c) => c.key));
+  const offKeys = CHANNELS.filter((k) => !enabledKeys.has(k));
+  const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => (
+    <RegistryList key={key} title={title} list={model[key]} onAdd={() => set(add(model, { name: seed }))} addLabel={addLabel}
+      row={(e) => (
+        <RegRow key={e.id} entity={e} onRename={(name) => set(rename(model, e.id, name))}
+          guard={guard(model, e.id)} onDelete={() => set(del(model, e.id))} />
+      )} />
+  ));
   return (
     <>
       <h3>Structure</h3>
-      <p className="hint">The vocabulary of the estate — five independent lists, nothing interlinked. Request types is where they meet.</p>
-      {lists.map(([title, list]) => (
-        <div className="reglist" key={title}>
-          <div className="reghead"><b>{title}</b><span className="count">{(list || []).length}</span></div>
-          <div className="regchips">
-            {(list || []).length === 0 ? <span className="hint">none yet</span>
-              : list.map((e) => <span className="chip" key={e.id}>{e.name}{e.defaults ? <small> · defaults set</small> : null}</span>)}
+      <p className="hint">The vocabulary of the estate — five independent lists, nothing interlinked. Request types is where they meet. Renames propagate everywhere; deletes are guarded while anything references the entry.</p>
+      {brandsL}
+      {busL}
+      <div className="reglist">
+        <div className="reghead"><b>Channels</b><span className="count">{(model.channels || []).length}</span></div>
+        <p className="hint" style={{ marginBottom: 6 }}>Enable the subset of the taxonomy the estate uses; each enabled channel carries the defaults new processes inherit.</p>
+        {(model.channels || []).length === 0 ? <span className="hint">none yet</span> : null}
+        {(model.channels || []).map((c) => <ChannelRow key={c.id} model={model} c={c} set={set} />)}
+        {offKeys.length ? (
+          <div className="regoff">
+            {offKeys.map((k) => (
+              <button key={k} className="chip off" onClick={() => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] }))} aria-label={"Enable " + CHANNEL_LABELS[k]}>
+                + {CHANNEL_LABELS[k]}
+              </button>
+            ))}
           </div>
-        </div>
-      ))}
-      <p className="phase-note">Add · rename · delete-with-guard lands in the next build phase.</p>
+        ) : null}
+      </div>
+      {groupsL}
+      {prodsL}
     </>
   );
 }

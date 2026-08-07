@@ -6,6 +6,31 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — U2: the Structure tab ✅ (new gate green)
+
+The registry per REVIEW-SETUP §3.1, live in the shell's first tab:
+
+- **Five flat lists, editable** — Brands · Business units · Channels ·
+  Process groups · Products. Add seeds a named row; **rename is an inline
+  input that propagates by id** (the gate renames Acme and finds the new
+  name in Request types' assignment line); **delete is guarded** (V6): a
+  clean entry gets a live ✕, a referenced one shows an amber "▲ in use —
+  2 request types · 3 queues · 2 volume entries" summary instead — the
+  pure-reducer guard (M1) means a blocked delete cannot change the model.
+- **Channels enable from the taxonomy** — enabled channels are rows; the
+  taxonomy remainder renders as "+ Third party"-style chips. Each enabled
+  channel carries **channel defaults** (globals category B: ASA, abandon,
+  patience, concurrency, SLA within/target) behind a "defaults" disclosure;
+  values live on the model (percent fields stored as fractions), and a ●
+  marker shows on rows with defaults set.
+- `tests/structure-ui.test.js` (9) — five lists, add + badge movement,
+  rename propagation into another tab, guard messages incl. dependents
+  summary, taxonomy enable/disable with the used-channel block, defaults
+  persistence through close/reopen, zero console noise.
+
+**Full suite: 28 gates green; dist rebuilt.** Next: U3 (Request types —
+the heart), user checkpoint after.
+
 ## DOMAIN REDESIGN — U1: the six-tab Setup shell ✅ (new gate green) — CHECKPOINT
 
 The navigation shell per REVIEW-SETUP §2, over the domain model:
