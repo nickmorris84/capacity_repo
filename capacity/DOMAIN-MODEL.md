@@ -1,11 +1,15 @@
-# Domain model — v1.1 (FINAL)
+# Domain model — v1.2 (FINAL)
 
-**Status:** complete. v1.1 revises one thing, by owner direction: **the
-registry is flat** — reference-data entities are set up independently and are
-not interlinked; **linkage happens only at the request type**. This supersedes
-v1.0's P1/P2 nesting (groups under BUs, products under brands). Everything
-else stands. This is the baseline for the Setup review and the `derive.js`
-rework; changes from here require a deliberate revision of this document.
+**Status:** complete. v1.1 flattened the registry (independent lists; the
+request type is the only linking surface). v1.2 adds two owner rulings:
+**queue-to-queue interactions live in processes** — contact flow, including
+knock-ons (rework, converts-to-calls, redial, spill), is routing expressed as
+process steps; there is no separate interaction entity. Capacity-sharing
+(supports/pools) remains queue staffing physics. Consequently **the Map is a
+pure derived artefact** — "a function of the system once all interactions are
+built; it spits out visually" — rendered from processes + staffing links, with
+nothing authored on it. This is the baseline for the build; changes from here
+require a deliberate revision of this document.
 
 ---
 
@@ -186,6 +190,8 @@ not vocabulary.
 | — | Volume | cascade of §6 |
 | **v1.1** | **Registry shape** | **flat — five independent lists, no interlinks; the request type is the only linking surface.** Supersedes P1/P2 (v1.0 had groups under BUs, products under brands); a group may now span BUs — the double-cover check is unaffected. |
 | v1.1 | Queue setup surface | own tab (weight + cadence), conceptually part of the registry |
+| **v1.2** | **Interactions** | **live in processes** — contact flow incl. knock-ons (rework, converts-to, redial, spill) is routing, expressed as process steps; no separate interaction entity. Capacity-sharing (supports/pools) stays queue staffing physics |
+| v1.2 | Map | a **pure derived artefact** — generated from processes + staffing links; nothing authored on it |
 
 ## 10. Deltas from the current build
 

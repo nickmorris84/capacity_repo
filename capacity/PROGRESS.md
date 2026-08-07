@@ -1,8 +1,41 @@
 # Progress
 
-> **Baseline: [SPEC-V2.md](./SPEC-V2.md)** — what the shipping v2.4 product *is*
-> (user guide · technical spec · how to extend it), kept current with the code.
+> **Baselines:** [SPEC-V2.md](./SPEC-V2.md) — the shipping v2.4 product ·
+> [DOMAIN-MODEL.md](./DOMAIN-MODEL.md) — the v1.2 domain redesign (FINAL) ·
+> [REVIEW-SETUP.md](./REVIEW-SETUP.md) — the signed-off Setup spec ·
+> [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
+
+## DOMAIN REDESIGN — Step 0: the domain layer ✅ (new gate green)
+
+DOMAIN-MODEL v1.2 signed off (request types → channels → processes; flat
+registry; interactions live in processes; Map is a generated artefact; volume
+cascade). Step 0 builds the model layer as NEW pure modules alongside the old
+ones — old `derive.js` untouched, so every existing gate keeps guarding the
+shipping app while the UI migrates tab by tab.
+
+- `model/domain.js` — shapes, All-semantics leaf expansion, validation
+  (V2 double-cover · V3 end-point completeness · dangling refs), registry
+  delete guards (V6) and queue blast radius (V4).
+- `model/cascade.js` — the volume resolver: totals cascade down, entered
+  finer figures act as weights, equal split by default, over-runs scaled and
+  flagged, shapes inherit down, provenance on every node (entered · scaled ·
+  equal · sum · none; single-child levels pass provenance through).
+- `model/propagate.js` — cascade leaves → queue workload: split × sampling
+  per step, request-type AHT override ?? queue fallback, volume-weighted
+  effective AHT with svc/weighted/queue markers, weekly series from shapes,
+  V1 uncovered-volume warnings folded into validation.
+- `model/migrate-domain.js` — v2.4 model → domain model, deterministic;
+  deepest-wins applied once at migration via the old model's own source
+  resolution, then the cascade owns the data.
+- `tests/domain.test.js` (19) — the cascade rules incl. the owner's worked
+  example, propagation, validations, guards, and the **round-trip**:
+  the migrated sample model AND the migrated shipping default config
+  reproduce old `deriveQueueWorkload()` volumes, effective AHT and markers
+  exactly.
+
+**Full suite: 22 gates green.** Engine and adapter untouched. Next per
+REVIEW-SETUP §7: the six-tab navigation shell.
 
 ## v2.4 STRUCTURAL REBUILD — Step 0: Golden masters ✅ COMPLETE (new gate green)
 

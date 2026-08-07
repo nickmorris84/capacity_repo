@@ -1,9 +1,10 @@
-# Page review 1 — Setup (draft 5, against DOMAIN-MODEL v1.1)
+# Page review 1 — Setup (SIGNED OFF, against DOMAIN-MODEL v1.2)
 
-**Status:** structure proposal for sign-off. Draft 5 folds in the flat
-registry (v1.1): Structure is five independent lists, no interlinks; the
-request type is the only linking surface; queues stay in their own tab but
-are recognised as registry entities. Calls remaining in §6.
+**Status:** **signed off.** All calls resolved (§6): the Map is a generated
+output ("a function of the system — it should spit out visually"), queue
+interactions live **in processes** (they are routing, expressed as process
+steps — there is no separate interactions editor), and queues keep their own
+set-up tab. This document is now the build spec for the Setup page.
 
 ---
 
@@ -86,11 +87,13 @@ retired along with the interlinks.
   (week × heads — S4's input), cross-linked from the Levers Manual-plan card.
 - **Blast radius on every row:** *"used in 4 processes across 3 brands"* (V4),
   visible before any delete attempt.
-- **Queue interactions restored here** ⬜C-b: support / spill / pool links
-  between queues as an editable list (typed edges: supports, shares-pool,
-  converts-to), per-queue in the Workforce/Customer families plus a
-  consolidated "Interactions" list in this tab. The Map renders them; editing
-  stays here (view-first Map, per the original D14).
+- **No interactions editor here** (C-b): queue-to-queue *flow* — including
+  knock-ons like converts-to-calls, redial and spill — **lives in processes**:
+  it is routing, expressed as process steps/branches in the Request types tab.
+  What remains on the queue is pure **staffing physics**: the resourcing model
+  and support/pool capacity-sharing parameters in the Workforce family (these
+  are workforce arrangements, not contact flow; the Map renders them as
+  dashed capacity links, distinct from flow ribbons).
 - **Service teams** live here as a "Shared capacity" group — siblings of
   queues, with their eight parameters.
 
@@ -134,20 +137,24 @@ per row (`entered` · `weighted` · `equal` · `inherited`), one shape column.
 - This is the contributor's tab: cleanly separable scope, nothing else to
   break.
 
-### 3.5 Map — the verification step
+### 3.5 Map — a generated output (C-a)
 
-The owner's requirement verbatim: *"once all are defined, you should be able
-to see a global view of queues and interactions."*
+The owner's rulings verbatim: *"once all are defined, you should be able to
+see a global view of queues and interactions"* and *"the Map is a function of
+the system once all interactions are built — it should spit out visually."*
 
-- **Two lenses on one surface:** *flow* (volume through processes → queues →
-  outcomes — the existing Sankey, re-plumbed to the new model) and
-  *interactions* (the capacity links between queues: supports, shares-pool,
-  converts-to — dashed, distinct from volume ribbons).
+- **Nothing is authored here — ever.** The Map renders automatically from the
+  model: queues as nodes; **flow edges derived entirely from process steps**
+  (including rework/converts/redial branches — C-b); capacity-sharing links
+  from queue staffing drawn dashed, visually distinct from flow.
+- **Always current:** any edit in tabs 1–4 is reflected on next view; there is
+  no "rebuild" action.
 - **The validation panel lives here:** V1 coverage, V2 double-cover, V3
   end-point completeness, V5 reconciliations — each with a jump-link to the
-  offending object. The Map is where "does it hang together?" gets a yes/no.
+  object that fixes it. The Map is where "does it hang together?" gets its
+  yes/no.
 - View-first: tap a node/edge → details + "Edit in <tab>". Also reachable
-  from Home (same surface, second entry point). ⬜C-a
+  from Home (same surface, second entry point).
 
 ### 3.6 Defaults — what everything inherits
 
@@ -193,13 +200,13 @@ products/channel-instances → registry products / enabled channels; queue
 attachment → home. Provenance marks everything `entered` where a number
 existed.
 
-## 6. Remaining calls
+## 6. Calls — all resolved
 
-| # | Call | Recommendation |
+| # | Call | Ruling |
 |---|---|---|
-| ⬜ C-a | Map placement: Setup tab 5 with Home as a second entry point — confirm? | as written (§3.5) |
-| ⬜ C-b | Interactions editing surface: per-queue + consolidated list in Queues, Map view-first — confirm? | as written (§3.2) |
-| ⬜ C-c | Queues keep their own set-up tab (registry split by weight), rather than folding into Structure — confirm? | as written (§2) |
+| ✅ C-a | Map | **a generated output** — a function of the system once interactions are built; it spits out visually, nothing authored (§3.5) |
+| ✅ C-b | Interactions | **live in processes** — queue-to-queue flow (incl. knock-ons) is routing, expressed as process steps; no separate interactions editor. Capacity-sharing stays queue staffing physics (§3.2) |
+| ✅ C-c | Queue set-up surface | **own tab** — the registry spans Structure + Queues, split by weight (§2) |
 
 ## 7. Build order for Setup (after sign-off)
 
