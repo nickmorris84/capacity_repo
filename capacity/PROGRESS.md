@@ -6,6 +6,34 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — U3: the Request types tab ✅ (new gate green) — CHECKPOINT
+
+The heart of Setup — the ONLY linking surface — as a master–detail editor
+per REVIEW-SETUP §3.3:
+
+- **Master list**: name · validity glyph (● / ▲ / ✕ from live validation) ·
+  group + product chips · assignment summary · channels with processes.
+- **Identity** — name, activity, product-request, process group and product
+  selects (registry-driven), AHT override (blank ⇒ queue AHT).
+- **Assignment** — brand and BU toggle chips; **empty ⇒ All, spelled out**
+  ("Applies to: all brands · Customer Service"); V2 double-cover warnings
+  render inline right where the overlap is created.
+- **Processes, one per enabled channel** — channel picker chips add a
+  process; each is a journey editor: entry step labelled, ordered steps with
+  queue select · split % · sampling % (governance queues only) · an "ends"
+  terminal toggle + outcome select from the process's enumerated outcomes;
+  outcome chips add/remove with in-use outcomes protected; the **p/(1−p)
+  multi-round rework figure computed per sub-100% branch** (60% branch ⇒
+  eff. 150%); V3 end-point completeness inline AND on the row/tab glyphs.
+- Guarded delete (volume entries block, summarised).
+- `tests/rt-ui.test.js` (11) — incl. **THE CASCADE PROOF**: editing the 60%
+  verification split to 100% moves the derived queue volume on the Queues
+  tab to 702/day, live; double-cover inline; V3 flag → clear round trip;
+  outcome chip lifecycle; channel add/remove; guards; zero console noise.
+
+**Full suite: 29 gates green; dist rebuilt.** CHECKPOINT: the core editing
+loop is reviewable in the packaged app. Next: U4 (Queues editor depth).
+
 ## DOMAIN REDESIGN — U2: the Structure tab ✅ (new gate green)
 
 The registry per REVIEW-SETUP §3.1, live in the shell's first tab:

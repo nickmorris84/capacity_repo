@@ -441,7 +441,7 @@ var require_domain = __commonJS({
           if ((p.steps || []).some((s) => s.queueId === id)) b.push({ kind: "requestType", id: rt.id, channelId: p.channelId });
       return guard(b);
     }
-    function canDeleteRequestType(model, id) {
+    function canDeleteRequestType2(model, id) {
       return guard((model.volumeEntries || []).filter((e) => (e.scope || {}).requestTypeId === id).map((e) => ({ kind: "volumeEntry", id: e.id })));
     }
     function queueUsage2(model, queueId) {
@@ -468,7 +468,7 @@ var require_domain = __commonJS({
       canDeleteGroup: canDeleteGroup2,
       canDeleteProduct: canDeleteProduct2,
       canDeleteQueue: canDeleteQueue2,
-      canDeleteRequestType,
+      canDeleteRequestType: canDeleteRequestType2,
       queueUsage: queueUsage2
     };
   }
@@ -653,7 +653,7 @@ var require_ops = __commonJS({
       canDeleteGroup: canDeleteGroup2,
       canDeleteProduct: canDeleteProduct2,
       canDeleteQueue: canDeleteQueue2,
-      canDeleteRequestType,
+      canDeleteRequestType: canDeleteRequestType2,
       keyOf
     } = require_domain();
     var { CHANNELS: CHANNELS4 } = require_taxonomy();
@@ -805,7 +805,7 @@ var require_ops = __commonJS({
         m.engineConfig.serviceTeams = m.engineConfig.serviceTeams.filter((x) => x.id !== teamId);
       return m;
     }
-    function addRequestType(model, { id, name, groupId, activity, productRequest, productId } = {}) {
+    function addRequestType2(model, { id, name, groupId, activity, productRequest, productId } = {}) {
       const m = clone2(model);
       m.requestTypes = m.requestTypes || [];
       const rt = {
@@ -822,13 +822,13 @@ var require_ops = __commonJS({
       m.requestTypes.push(rt);
       return m;
     }
-    function updateRequestType(model, rtId, patch) {
+    function updateRequestType2(model, rtId, patch) {
       const m = clone2(model);
       const rt = (m.requestTypes || []).find((x) => x.id === rtId);
       if (rt) applyPatch(rt, patch);
       return m;
     }
-    function setAssignment(model, rtId, { brandIds, buIds } = {}) {
+    function setAssignment2(model, rtId, { brandIds, buIds } = {}) {
       const m = clone2(model);
       const rt = (m.requestTypes || []).find((x) => x.id === rtId);
       if (rt) {
@@ -837,12 +837,12 @@ var require_ops = __commonJS({
       }
       return m;
     }
-    var deleteRequestType = deleteFromList("requestTypes", canDeleteRequestType);
+    var deleteRequestType2 = deleteFromList("requestTypes", canDeleteRequestType2);
     var procOf = (m, rtId, channelId) => {
       const rt = (m.requestTypes || []).find((x) => x.id === rtId);
       return rt ? { rt, p: (rt.processes || []).find((x) => x.channelId === channelId) } : { rt: null, p: null };
     };
-    function addProcess(model, rtId, channelId) {
+    function addProcess2(model, rtId, channelId) {
       const { rt, p } = procOf(model, rtId, channelId);
       if (!rt || p) return model;
       const m = clone2(model);
@@ -850,7 +850,7 @@ var require_ops = __commonJS({
       rt2.processes.push({ channelId, outcomes: ["completed"], steps: [] });
       return m;
     }
-    function deleteProcess(model, rtId, channelId) {
+    function deleteProcess2(model, rtId, channelId) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
       const m = clone2(model);
@@ -858,7 +858,7 @@ var require_ops = __commonJS({
       rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
       return m;
     }
-    function addStep(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
+    function addStep2(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
       const m = clone2(model);
@@ -868,7 +868,7 @@ var require_ops = __commonJS({
       p2.steps.push(step);
       return m;
     }
-    function updateStep(model, rtId, channelId, index, patch) {
+    function updateStep2(model, rtId, channelId, index, patch) {
       const { p } = procOf(model, rtId, channelId);
       if (!p || !p.steps[index]) return model;
       const m = clone2(model);
@@ -880,14 +880,14 @@ var require_ops = __commonJS({
       }
       return m;
     }
-    function removeStep(model, rtId, channelId, index) {
+    function removeStep2(model, rtId, channelId, index) {
       const { p } = procOf(model, rtId, channelId);
       if (!p || !p.steps[index]) return model;
       const m = clone2(model);
       procOf(m, rtId, channelId).p.steps.splice(index, 1);
       return m;
     }
-    function setOutcomes(model, rtId, channelId, outcomes) {
+    function setOutcomes2(model, rtId, channelId, outcomes) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
       const m = clone2(model);
@@ -1008,16 +1008,16 @@ var require_ops = __commonJS({
       addServiceTeam,
       updateServiceTeam,
       deleteServiceTeam,
-      addRequestType,
-      updateRequestType,
-      setAssignment,
-      deleteRequestType,
-      addProcess,
-      deleteProcess,
-      addStep,
-      updateStep,
-      removeStep,
-      setOutcomes,
+      addRequestType: addRequestType2,
+      updateRequestType: updateRequestType2,
+      setAssignment: setAssignment2,
+      deleteRequestType: deleteRequestType2,
+      addProcess: addProcess2,
+      deleteProcess: deleteProcess2,
+      addStep: addStep2,
+      updateStep: updateStep2,
+      removeStep: removeStep2,
+      setOutcomes: setOutcomes2,
       setVolumeEntry,
       clearVolumeEntry,
       blankDomainModel,
@@ -3853,6 +3853,17 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .blocked{margin-left:auto; color:var(--amber-ink); white-space:nowrap}
 .regoff{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
 .chdefaults{margin:4px 0 8px; padding:10px 12px; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas)}
+.glyph.err{color:var(--red-ink)}
+.rtrow small{display:block}
+.proc{border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin-bottom:8px}
+.prochead{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+.prochead .regdel{margin-left:auto}
+.termlab{display:flex; align-items:center; gap:4px; white-space:nowrap}
+.rework{white-space:nowrap; color:var(--purple)}
+.chipx{border:none; background:none; color:inherit; font:inherit; font-size:10px; cursor:pointer; padding:0 0 0 4px; opacity:0.7}
+.chipx:hover{opacity:1; color:var(--red-ink)}
+.outin{border:0.5px solid var(--line); border-radius:7px; padding:4px 8px; font:inherit; font-size:11.5px; width:120px}
+.applies{margin-top:8px}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -4846,7 +4857,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
     /* @__PURE__ */ jsxs2("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
       tab === "structure" && /* @__PURE__ */ jsx2(StructurePanel, { model, set: onModelChange }),
       tab === "queues" && /* @__PURE__ */ jsx2(QueuesPanel, { model, p }),
-      tab === "requestTypes" && /* @__PURE__ */ jsx2(RequestTypesPanel, { model }),
+      tab === "requestTypes" && /* @__PURE__ */ jsx2(RequestTypesPanel, { model, set: onModelChange, p }),
       tab === "volume" && /* @__PURE__ */ jsx2(VolumePanel, { model, p }),
       tab === "map" && /* @__PURE__ */ jsx2(MapPanel, { p }),
       tab === "defaults" && /* @__PURE__ */ jsx2(DefaultsPanel, { model })
@@ -5044,37 +5055,238 @@ function QueuesPanel({ model, p }) {
     ] })
   ] });
 }
-function RequestTypesPanel({ model }) {
-  const chName = (id) => nameOf(model.channels, id);
-  const qName = (id) => nameOf(model.queues, id);
+var fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
+function ToggleChips({ options, selected, onToggle, allLabel }) {
+  return /* @__PURE__ */ jsxs2("div", { className: "regoff", style: { marginTop: 4 }, children: [
+    options.map((o) => {
+      const on = selected.includes(o.id);
+      return /* @__PURE__ */ jsx2(
+        "button",
+        {
+          className: "chip" + (on ? " on-toggle" : " off"),
+          "aria-pressed": on,
+          onClick: () => onToggle(o.id),
+          children: on ? o.name : "+ " + o.name
+        },
+        o.id
+      );
+    }),
+    options.length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: allLabel }) : null
+  ] });
+}
+function ProcessEditor({ model, set, rt, proc }) {
+  const [newOutcome, setNewOutcome] = useState2("");
+  const chName = nameOf(model.channels, proc.channelId);
+  const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
+  const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
+  return /* @__PURE__ */ jsxs2("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
+    /* @__PURE__ */ jsxs2("div", { className: "prochead", children: [
+      /* @__PURE__ */ jsx2("span", { className: "chip on-toggle", children: chName }),
+      /* @__PURE__ */ jsx2("span", { className: "hint", children: "entry \u2192 steps in order; each step routes a % of what reaches it" }),
+      /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.deleteProcess(model, rt.id, proc.channelId)), "aria-label": "Remove " + chName + " process", children: "\u2715" })
+    ] }),
+    (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : null,
+    (proc.steps || []).map((s, i) => {
+      const q = (model.queues || []).find((x) => x.id === s.queueId);
+      const gov = q && q.type === "governance";
+      const p01 = (+s.splitPct || 0) / 100;
+      return /* @__PURE__ */ jsxs2("div", { className: "mixrow", children: [
+        /* @__PURE__ */ jsx2("span", { className: "jarr", style: { minWidth: 34 }, children: i === 0 ? "entry" : i + 1 + "." }),
+        /* @__PURE__ */ jsx2("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id)) }),
+        /* @__PURE__ */ jsx2("span", { className: "hint", children: "split" }),
+        /* @__PURE__ */ jsx2("input", { className: "num", value: s.splitPct, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
+        /* @__PURE__ */ jsx2("span", { className: "hint", children: "%" }),
+        gov ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
+          /* @__PURE__ */ jsx2("span", { className: "hint", children: "sample" }),
+          /* @__PURE__ */ jsx2(
+            "input",
+            {
+              className: "num",
+              value: s.samplingPct != null ? s.samplingPct : "",
+              placeholder: "\u2014",
+              onChange: (e) => upd(i, { samplingPct: e.target.value === "" ? void 0 : +e.target.value }),
+              "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} sampling percent`
+            }
+          ),
+          /* @__PURE__ */ jsx2("span", { className: "hint", children: "%" })
+        ] }) : null,
+        /* @__PURE__ */ jsxs2("label", { className: "hint termlab", children: [
+          /* @__PURE__ */ jsx2("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} terminal` }),
+          " ends"
+        ] }),
+        s.terminal ? /* @__PURE__ */ jsxs2("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
+          /* @__PURE__ */ jsx2("option", { value: "", children: "outcome\u2026" }),
+          (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx2("option", { value: o, children: o }, o))
+        ] }) : null,
+        p01 > 0 && p01 < 1 ? /* @__PURE__ */ jsxs2("span", { className: "hint rework", title: "If this branch is rework, repeated rounds collapse to an effective split of p/(1\u2212p).", children: [
+          "as rework \u21D2 eff. ",
+          fmtPct(p01 / (1 - p01) * 100),
+          "%"
+        ] }) : null,
+        /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
+      ] }, i);
+    }),
+    noTerminal ? /* @__PURE__ */ jsx2("p", { className: "errmsg", children: '\u2715 No terminal step \u2014 the process leads nowhere. Mark the final step "ends" and pick its outcome.' }) : null,
+    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }, children: [
+      /* @__PURE__ */ jsx2(
+        "button",
+        {
+          className: "btn sm",
+          disabled: !(model.queues || []).length,
+          onClick: () => set(Ops.addStep(model, rt.id, proc.channelId, { queueId: model.queues[0].id })),
+          children: "+ Step"
+        }
+      ),
+      /* @__PURE__ */ jsx2("span", { className: "hint", style: { marginLeft: 8 }, children: "outcomes:" }),
+      (proc.outcomes || []).map((o) => {
+        const used = (proc.steps || []).some((s) => s.outcome === o);
+        return /* @__PURE__ */ jsxs2("span", { className: "chip", children: [
+          o,
+          used ? /* @__PURE__ */ jsx2("small", { title: "Referenced by a terminal step", children: " \xB7in use" }) : /* @__PURE__ */ jsx2("button", { className: "chipx", onClick: () => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o))), "aria-label": "Remove outcome " + o, children: "\u2715" })
+        ] }, o);
+      }),
+      /* @__PURE__ */ jsx2("input", { className: "outin", placeholder: "add outcome\u2026", value: newOutcome, onChange: (e) => setNewOutcome(e.target.value), "aria-label": `${rt.id} ${proc.channelId} new outcome` }),
+      /* @__PURE__ */ jsx2("button", { className: "btn sm", disabled: !newOutcome.trim(), onClick: () => {
+        const o = newOutcome.trim();
+        if (o && !(proc.outcomes || []).includes(o)) set(Ops.setOutcomes(model, rt.id, proc.channelId, [...proc.outcomes || [], o]));
+        setNewOutcome("");
+      }, children: "Add" })
+    ] })
+  ] });
+}
+function RequestTypesPanel({ model, set, p }) {
+  const rts = model.requestTypes || [];
+  const [sel, setSel] = useState2(rts[0] ? rts[0].id : null);
+  const rt = rts.find((x) => x.id === sel) || rts[0] || null;
+  const rtErr = (x) => p.validation.errors.filter((e) => e.requestTypeId === x.id);
+  const rtWarn = (x) => p.validation.warnings.filter((w) => (w.requestTypeIds || []).includes(x.id));
+  const assignLine = (x) => {
+    const b = (x.brandIds || []).length ? x.brandIds.map((i) => nameOf(model.brands, i)).join(", ") : "all brands";
+    const u = (x.buIds || []).length ? x.buIds.map((i) => nameOf(model.businessUnits, i)).join(", ") : "all BUs";
+    return b + " \xB7 " + u;
+  };
+  const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
+  const guard = rt ? (0, import_domain.canDeleteRequestType)(model, rt.id) : { ok: true, blockedBy: [] };
   return /* @__PURE__ */ jsxs2(Fragment2, { children: [
     /* @__PURE__ */ jsx2("h3", { children: "Request types" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "What customers ask for, and how each is processed \u2014 per channel, one specific journey." }),
-    (model.requestTypes || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No request types yet." }) : null,
-    (model.requestTypes || []).map((rt) => /* @__PURE__ */ jsxs2("div", { className: "rtcard", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "rthead", children: [
-        /* @__PURE__ */ jsx2("b", { children: rt.name }),
-        /* @__PURE__ */ jsxs2("span", { className: "tax", children: [
-          (rt.brandIds || []).length ? rt.brandIds.map((b) => nameOf(model.brands, b)).join(", ") : "All brands",
-          " \xB7 ",
-          (rt.buIds || []).length ? rt.buIds.map((b) => nameOf(model.businessUnits, b)).join(", ") : "All BUs"
-        ] }),
-        rt.ahtSec != null ? /* @__PURE__ */ jsxs2("span", { className: "tax num", children: [
-          "AHT ",
-          rt.ahtSec,
-          " s"
-        ] }) : null
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together." }),
+    rts.length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No request types yet." }) : null,
+    /* @__PURE__ */ jsxs2("div", { className: "md", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "mdlist", role: "listbox", "aria-label": "Request types", children: [
+        rts.map((x) => {
+          const errs = rtErr(x), warns = rtWarn(x);
+          return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": rt && rt.id === x.id, className: "rtrow" + (rt && rt.id === x.id ? " on" : ""), onClick: () => setSel(x.id), children: [
+            /* @__PURE__ */ jsxs2("b", { children: [
+              x.name,
+              " ",
+              /* @__PURE__ */ jsx2("span", { className: "glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok"), children: errs.length ? "\u2715" : warns.length ? "\u25B2" : "\u25CF" })
+            ] }),
+            /* @__PURE__ */ jsxs2("small", { children: [
+              nameOf(model.processGroups, x.groupId) || "no group",
+              x.productId ? " \xB7 " + nameOf(model.products, x.productId) : "",
+              " \xB7 ",
+              assignLine(x)
+            ] }),
+            /* @__PURE__ */ jsx2("small", { children: (x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
+          ] }, x.id);
+        }),
+        /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginTop: 4 }, onClick: () => {
+          const m2 = Ops.addRequestType(model, { name: "New request type", groupId: (model.processGroups[0] || {}).id });
+          set(m2);
+          setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
+        }, children: "+ Request type" })
       ] }),
-      (rt.processes || []).map((proc) => /* @__PURE__ */ jsxs2("div", { className: "procline", children: [
-        /* @__PURE__ */ jsx2("span", { className: "chip on-toggle", children: chName(proc.channelId) }),
-        /* @__PURE__ */ jsx2("span", { className: "chain num", children: (proc.steps || []).length === 0 ? "no steps yet" : proc.steps.map((s, i) => `${qName(s.queueId)} ${s.splitPct}%${s.samplingPct != null ? ` (sample ${s.samplingPct}%)` : ""}${s.terminal ? ` \u2713 ${s.outcome || "ends"}` : ""}`).join(" \u2192 ") }),
-        /* @__PURE__ */ jsxs2("span", { className: "hint", children: [
-          "outcomes: ",
-          (proc.outcomes || []).join(" \xB7 ") || "\u2014"
-        ] })
-      ] }, proc.channelId))
-    ] }, rt.id)),
-    /* @__PURE__ */ jsx2("p", { className: "phase-note", children: "Identity \xB7 assignment \xB7 the per-channel process editor land in a later phase." })
+      /* @__PURE__ */ jsx2("div", { className: "mddetail", "data-testid": "rt-detail", children: rt ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
+        /* @__PURE__ */ jsx2("h4", { children: "Identity" }),
+        /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Name" }),
+            /* @__PURE__ */ jsx2("input", { value: rt.name, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value })), "aria-label": "Request type name" })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Activity" }),
+            /* @__PURE__ */ jsx2("select", { value: rt.activity, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx2("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Product request" }),
+            /* @__PURE__ */ jsxs2("select", { value: rt.productRequest, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
+              /* @__PURE__ */ jsx2("option", { value: "existing", children: "Existing product" }),
+              /* @__PURE__ */ jsx2("option", { value: "new", children: "New product" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Process group" }),
+            /* @__PURE__ */ jsxs2("select", { value: rt.groupId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || void 0 })), "aria-label": "Process group", children: [
+              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
+              (model.processGroups || []).map((g) => /* @__PURE__ */ jsx2("option", { value: g.id, children: g.name }, g.id))
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Product (optional)" }),
+            /* @__PURE__ */ jsxs2("select", { value: rt.productId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || void 0 })), "aria-label": "Product", children: [
+              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
+              (model.products || []).map((g) => /* @__PURE__ */ jsx2("option", { value: g.id, children: g.name }, g.id))
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "AHT override (s) \u2014 optional" }),
+            /* @__PURE__ */ jsx2(
+              "input",
+              {
+                className: "num",
+                placeholder: "\u2014 uses queue AHT",
+                value: rt.ahtSec != null ? rt.ahtSec : "",
+                onChange: (e) => set(Ops.updateRequestType(model, rt.id, { ahtSec: e.target.value === "" ? void 0 : +e.target.value })),
+                "aria-label": "AHT override"
+              }
+            )
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx2("h4", { style: { marginTop: 14 }, children: "Assignment" }),
+        /* @__PURE__ */ jsx2("p", { className: "hint", children: "Pick the brands and business units this applies to \u2014 none selected means all." }),
+        /* @__PURE__ */ jsx2(
+          ToggleChips,
+          {
+            options: model.brands || [],
+            selected: rt.brandIds || [],
+            allLabel: "no brands defined yet",
+            onToggle: (id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...rt.brandIds || [], id] }))
+          }
+        ),
+        /* @__PURE__ */ jsx2(
+          ToggleChips,
+          {
+            options: model.businessUnits || [],
+            selected: rt.buIds || [],
+            allLabel: "no business units defined yet",
+            onToggle: (id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...rt.buIds || [], id] }))
+          }
+        ),
+        /* @__PURE__ */ jsxs2("p", { className: "hint applies", "data-testid": "applies-line", children: [
+          /* @__PURE__ */ jsx2("b", { children: "Applies to:" }),
+          " ",
+          assignLine(rt)
+        ] }),
+        rtWarn(rt).map((w, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+          "\u25B2 ",
+          w.message
+        ] }, i)),
+        /* @__PURE__ */ jsx2("h4", { style: { marginTop: 14 }, children: "Processes \u2014 one per channel" }),
+        (rt.processes || []).map((pr) => /* @__PURE__ */ jsx2(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
+        offChannels.length ? /* @__PURE__ */ jsx2("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs2("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
+          "+ ",
+          c.name
+        ] }, c.id)) }) : null,
+        /* @__PURE__ */ jsx2("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => {
+          set(Ops.deleteRequestType(model, rt.id));
+          setSel(null);
+        }, children: "Delete request type" }) : /* @__PURE__ */ jsxs2("span", { className: "hint blocked", style: { marginLeft: 0 }, children: [
+          "\u25B2 Delete blocked \u2014 referenced by ",
+          guardSummary(guard),
+          ". Remove them first."
+        ] }) })
+      ] }) : null })
+    ] })
   ] });
 }
 function VolumePanel({ model, p }) {

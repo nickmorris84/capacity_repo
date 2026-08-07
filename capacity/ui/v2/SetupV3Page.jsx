@@ -12,10 +12,10 @@
  */
 import { useState, useMemo } from "react";
 import { propagateDomain } from "../../model/propagate.js";
-import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct } from "../../model/domain.js";
+import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType } from "../../model/domain.js";
 import { CHANNELS } from "../../model/taxonomy.js";
 import * as Ops from "../../model/ops.js";
-import { QTYPE_LABELS, CHANNEL_LABELS } from "./model.js";
+import { QTYPE_LABELS, CHANNEL_LABELS, ACTIVITIES, ACTIVITY_LABELS } from "./model.js";
 
 const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString("en-GB"));
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
@@ -103,7 +103,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
       <div role="tabpanel" data-tab={tab} className="panel">
         {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
         {tab === "queues" && <QueuesPanel model={model} p={p} />}
-        {tab === "requestTypes" && <RequestTypesPanel model={model} />}
+        {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
         {tab === "volume" && <VolumePanel model={model} p={p} />}
         {tab === "map" && <MapPanel p={p} />}
         {tab === "defaults" && <DefaultsPanel model={model} />}
@@ -275,35 +275,187 @@ function QueuesPanel({ model, p }) {
   );
 }
 
-// ---- 3 · Request types — the only linking surface (editor lands in U3) -------
-function RequestTypesPanel({ model }) {
-  const chName = (id) => nameOf(model.channels, id);
-  const qName = (id) => nameOf(model.queues, id);
+// ---- 3 · Request types — the heart: the only linking surface (U3) ------------
+// Master–detail. Identity · assignment (empty ⇒ All, spelled out; V2 inline) ·
+// AHT override · one process per enabled channel (entry step, splits, sampling
+// on governance queues, terminal + outcome, editable outcome chips, the
+// p/(1−p) multi-round rework figure computed per branch) with V3 live.
+const fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
+
+function ToggleChips({ options, selected, onToggle, allLabel }) {
+  return (
+    <div className="regoff" style={{ marginTop: 4 }}>
+      {options.map((o) => {
+        const on = selected.includes(o.id);
+        return (
+          <button key={o.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on}
+            onClick={() => onToggle(o.id)}>{on ? o.name : "+ " + o.name}</button>
+        );
+      })}
+      {options.length === 0 ? <span className="hint">{allLabel}</span> : null}
+    </div>
+  );
+}
+
+function ProcessEditor({ model, set, rt, proc }) {
+  const [newOutcome, setNewOutcome] = useState("");
+  const chName = nameOf(model.channels, proc.channelId);
+  const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
+  const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
+  return (
+    <div className="proc" data-testid={"process-" + rt.id + "-" + proc.channelId}>
+      <div className="prochead">
+        <span className="chip on-toggle">{chName}</span>
+        <span className="hint">entry → steps in order; each step routes a % of what reaches it</span>
+        <button className="regdel" onClick={() => set(Ops.deleteProcess(model, rt.id, proc.channelId))} aria-label={"Remove " + chName + " process"}>✕</button>
+      </div>
+      {(proc.steps || []).length === 0 ? <p className="hint" style={{ margin: "4px 0" }}>No steps yet — this process is inert until it routes somewhere.</p> : null}
+      {(proc.steps || []).map((s, i) => {
+        const q = (model.queues || []).find((x) => x.id === s.queueId);
+        const gov = q && q.type === "governance";
+        const p01 = (+s.splitPct || 0) / 100;
+        return (
+          <div className="mixrow" key={i}>
+            <span className="jarr" style={{ minWidth: 34 }}>{i === 0 ? "entry" : i + 1 + "."}</span>
+            <select value={s.queueId} onChange={(e) => upd(i, { queueId: e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} queue`}>
+              {(model.queues || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+            <span className="hint">split</span>
+            <input className="num" value={s.splitPct} onChange={(e) => upd(i, { splitPct: +e.target.value || 0 })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} split percent`} />
+            <span className="hint">%</span>
+            {gov ? <>
+              <span className="hint">sample</span>
+              <input className="num" value={s.samplingPct != null ? s.samplingPct : ""} placeholder="—"
+                onChange={(e) => upd(i, { samplingPct: e.target.value === "" ? undefined : +e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} sampling percent`} />
+              <span className="hint">%</span>
+            </> : null}
+            <label className="hint termlab"><input type="checkbox" checked={!!s.terminal} onChange={(e) => upd(i, { terminal: e.target.checked ? true : false })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} terminal`} /> ends</label>
+            {s.terminal ? (
+              <select value={s.outcome || ""} onChange={(e) => upd(i, { outcome: e.target.value || undefined })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} outcome`}>
+                <option value="">outcome…</option>
+                {(proc.outcomes || []).map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            ) : null}
+            {p01 > 0 && p01 < 1 ? <span className="hint rework" title="If this branch is rework, repeated rounds collapse to an effective split of p/(1−p).">as rework ⇒ eff. {fmtPct((p01 / (1 - p01)) * 100)}%</span> : null}
+            <button className="regdel" onClick={() => set(Ops.removeStep(model, rt.id, proc.channelId, i))} aria-label={`${rt.id} ${proc.channelId} remove step ${i + 1}`}>✕</button>
+          </div>
+        );
+      })}
+      {noTerminal ? <p className="errmsg">✕ No terminal step — the process leads nowhere. Mark the final step "ends" and pick its outcome.</p> : null}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+        <button className="btn sm" disabled={!(model.queues || []).length}
+          onClick={() => set(Ops.addStep(model, rt.id, proc.channelId, { queueId: model.queues[0].id }))}>+ Step</button>
+        <span className="hint" style={{ marginLeft: 8 }}>outcomes:</span>
+        {(proc.outcomes || []).map((o) => {
+          const used = (proc.steps || []).some((s) => s.outcome === o);
+          return (
+            <span className="chip" key={o}>{o}{used
+              ? <small title="Referenced by a terminal step"> ·in use</small>
+              : <button className="chipx" onClick={() => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o)))} aria-label={"Remove outcome " + o}>✕</button>}
+            </span>
+          );
+        })}
+        <input className="outin" placeholder="add outcome…" value={newOutcome} onChange={(e) => setNewOutcome(e.target.value)} aria-label={`${rt.id} ${proc.channelId} new outcome`} />
+        <button className="btn sm" disabled={!newOutcome.trim()} onClick={() => {
+          const o = newOutcome.trim();
+          if (o && !(proc.outcomes || []).includes(o)) set(Ops.setOutcomes(model, rt.id, proc.channelId, [...(proc.outcomes || []), o]));
+          setNewOutcome("");
+        }}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+function RequestTypesPanel({ model, set, p }) {
+  const rts = model.requestTypes || [];
+  const [sel, setSel] = useState(rts[0] ? rts[0].id : null);
+  const rt = rts.find((x) => x.id === sel) || rts[0] || null;
+  const rtErr = (x) => p.validation.errors.filter((e) => e.requestTypeId === x.id);
+  const rtWarn = (x) => p.validation.warnings.filter((w) => (w.requestTypeIds || []).includes(x.id));
+  const assignLine = (x) => {
+    const b = (x.brandIds || []).length ? x.brandIds.map((i) => nameOf(model.brands, i)).join(", ") : "all brands";
+    const u = (x.buIds || []).length ? x.buIds.map((i) => nameOf(model.businessUnits, i)).join(", ") : "all BUs";
+    return b + " · " + u;
+  };
+  const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
+  const guard = rt ? canDeleteRequestType(model, rt.id) : { ok: true, blockedBy: [] };
   return (
     <>
       <h3>Request types</h3>
-      <p className="hint">What customers ask for, and how each is processed — per channel, one specific journey.</p>
-      {(model.requestTypes || []).length === 0 ? <p className="hint">No request types yet.</p> : null}
-      {(model.requestTypes || []).map((rt) => (
-        <div className="rtcard" key={rt.id}>
-          <div className="rthead">
-            <b>{rt.name}</b>
-            <span className="tax">{(rt.brandIds || []).length ? rt.brandIds.map((b) => nameOf(model.brands, b)).join(", ") : "All brands"} · {(rt.buIds || []).length ? rt.buIds.map((b) => nameOf(model.businessUnits, b)).join(", ") : "All BUs"}</span>
-            {rt.ahtSec != null ? <span className="tax num">AHT {rt.ahtSec} s</span> : null}
-          </div>
-          {(rt.processes || []).map((proc) => (
-            <div className="procline" key={proc.channelId}>
-              <span className="chip on-toggle">{chName(proc.channelId)}</span>
-              <span className="chain num">
-                {(proc.steps || []).length === 0 ? "no steps yet"
-                  : proc.steps.map((s, i) => `${qName(s.queueId)} ${s.splitPct}%${s.samplingPct != null ? ` (sample ${s.samplingPct}%)` : ""}${s.terminal ? ` ✓ ${s.outcome || "ends"}` : ""}`).join(" → ")}
-              </span>
-              <span className="hint">outcomes: {(proc.outcomes || []).join(" · ") || "—"}</span>
-            </div>
-          ))}
+      <p className="hint">What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together.</p>
+      {rts.length === 0 ? <p className="hint">No request types yet.</p> : null}
+      <div className="md">
+        <div className="mdlist" role="listbox" aria-label="Request types">
+          {rts.map((x) => {
+            const errs = rtErr(x), warns = rtWarn(x);
+            return (
+              <button key={x.id} role="option" aria-selected={rt && rt.id === x.id} className={"rtrow" + (rt && rt.id === x.id ? " on" : "")} onClick={() => setSel(x.id)}>
+                <b>{x.name} <span className={"glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok")}>{errs.length ? "✕" : warns.length ? "▲" : "●"}</span></b>
+                <small>{nameOf(model.processGroups, x.groupId) || "no group"}{x.productId ? " · " + nameOf(model.products, x.productId) : ""} · {assignLine(x)}</small>
+                <small>{(x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</small>
+              </button>
+            );
+          })}
+          <button className="btn sm" style={{ marginTop: 4 }} onClick={() => {
+            const m2 = Ops.addRequestType(model, { name: "New request type", groupId: (model.processGroups[0] || {}).id });
+            set(m2); setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
+          }}>+ Request type</button>
         </div>
-      ))}
-      <p className="phase-note">Identity · assignment · the per-channel process editor land in a later phase.</p>
+        <div className="mddetail" data-testid="rt-detail">
+          {rt ? <>
+            <h4>Identity</h4>
+            <div className="fields">
+              <div className="field"><label>Name</label><input value={rt.name} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value }))} aria-label="Request type name" /></div>
+              <div className="field"><label>Activity</label>
+                <select value={rt.activity} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value }))}>
+                  {ACTIVITIES.map((a) => <option key={a} value={a}>{ACTIVITY_LABELS[a]}</option>)}
+                </select></div>
+              <div className="field"><label>Product request</label>
+                <select value={rt.productRequest} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value }))}>
+                  <option value="existing">Existing product</option><option value="new">New product</option>
+                </select></div>
+              <div className="field"><label>Process group</label>
+                <select value={rt.groupId || ""} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || undefined }))} aria-label="Process group">
+                  <option value="">— none</option>
+                  {(model.processGroups || []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select></div>
+              <div className="field"><label>Product (optional)</label>
+                <select value={rt.productId || ""} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || undefined }))} aria-label="Product">
+                  <option value="">— none</option>
+                  {(model.products || []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select></div>
+              <div className="field"><label>AHT override (s) — optional</label>
+                <input className="num" placeholder="— uses queue AHT" value={rt.ahtSec != null ? rt.ahtSec : ""}
+                  onChange={(e) => set(Ops.updateRequestType(model, rt.id, { ahtSec: e.target.value === "" ? undefined : +e.target.value }))} aria-label="AHT override" /></div>
+            </div>
+
+            <h4 style={{ marginTop: 14 }}>Assignment</h4>
+            <p className="hint">Pick the brands and business units this applies to — none selected means all.</p>
+            <ToggleChips options={model.brands || []} selected={rt.brandIds || []} allLabel="no brands defined yet"
+              onToggle={(id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...(rt.brandIds || []), id] }))} />
+            <ToggleChips options={model.businessUnits || []} selected={rt.buIds || []} allLabel="no business units defined yet"
+              onToggle={(id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...(rt.buIds || []), id] }))} />
+            <p className="hint applies" data-testid="applies-line"><b>Applies to:</b> {assignLine(rt)}</p>
+            {rtWarn(rt).map((w, i) => <p className="warnmsg" key={i}>▲ {w.message}</p>)}
+
+            <h4 style={{ marginTop: 14 }}>Processes — one per channel</h4>
+            {(rt.processes || []).map((pr) => <ProcessEditor key={pr.channelId} model={model} set={set} rt={rt} proc={pr} />)}
+            {offChannels.length ? (
+              <div className="regoff">
+                {offChannels.map((c) => (
+                  <button key={c.id} className="chip off" onClick={() => set(Ops.addProcess(model, rt.id, c.id))} aria-label={"Add " + c.name + " process"}>+ {c.name}</button>
+                ))}
+              </div>
+            ) : null}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }}>
+              {guard.ok
+                ? <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => { set(Ops.deleteRequestType(model, rt.id)); setSel(null); }}>Delete request type</button>
+                : <span className="hint blocked" style={{ marginLeft: 0 }}>▲ Delete blocked — referenced by {guardSummary(guard)}. Remove them first.</span>}
+            </div>
+          </> : null}
+        </div>
+      </div>
     </>
   );
 }

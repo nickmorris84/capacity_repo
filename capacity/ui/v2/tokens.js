@@ -346,6 +346,17 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .blocked{margin-left:auto; color:var(--amber-ink); white-space:nowrap}
 .regoff{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
 .chdefaults{margin:4px 0 8px; padding:10px 12px; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas)}
+.glyph.err{color:var(--red-ink)}
+.rtrow small{display:block}
+.proc{border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin-bottom:8px}
+.prochead{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+.prochead .regdel{margin-left:auto}
+.termlab{display:flex; align-items:center; gap:4px; white-space:nowrap}
+.rework{white-space:nowrap; color:var(--purple)}
+.chipx{border:none; background:none; color:inherit; font:inherit; font-size:10px; cursor:pointer; padding:0 0 0 4px; opacity:0.7}
+.chipx:hover{opacity:1; color:var(--red-ink)}
+.outin{border:0.5px solid var(--line); border-radius:7px; padding:4px 8px; font:inherit; font-size:11.5px; width:120px}
+.applies{margin-top:8px}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}

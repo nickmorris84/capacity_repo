@@ -92,16 +92,17 @@ await t("Queues is a master–detail scaffold with DERIVED volume/AHT and blast 
   eq($$(".mddetail input").length, 0, "read-only scaffold — no inputs");
 });
 
-await t("Request types renders the wiring: assignment, step chains, sampling, outcomes", () => {
+await t("Request types is a master–detail editor: rows, assignment, step wiring", () => {
   click(subtab("Request types"));
-  const cards = $$(".rtcard");
-  eq(cards.length, 2, "two sample request types");
-  const bill = cards.find((c) => /Billing enquiry/.test(c.textContent));
-  ok(/Acme/.test(bill.textContent), "brand assignment shown");
-  ok(/sample 2%/.test(bill.textContent), "QA sampling shown");
-  const card = cards.find((c) => /New card/.test(c.textContent));
-  ok(/60%/.test(card.textContent), "the 60% verify split shown");
-  ok(/outcomes:/.test(card.textContent), "outcomes listed");
+  const rows = $$(".rtrow");
+  eq(rows.length, 2, "two sample request types");
+  const bill = rows.find((c) => /Billing enquiry/.test(c.textContent));
+  ok(/Acme/.test(bill.textContent), "brand assignment on the row");
+  click(bill);
+  const det = $('[data-testid="rt-detail"]');
+  ok(/Applies to:/.test(det.textContent), "resolved assignment spelled out");
+  ok($$("input", det).some((i) => i.getAttribute("aria-label") && /sampling percent/.test(i.getAttribute("aria-label")) && i.value === "2"), "QA sampling editable at 2%");
+  ok(/outcomes:/.test(det.textContent), "outcomes listed");
 });
 
 await t("Volume lists entries with scope labels and daily figures", () => {
