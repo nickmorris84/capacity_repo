@@ -1,9 +1,11 @@
-# Domain model — v1.0 (FINAL)
+# Domain model — v1.1 (FINAL)
 
-**Status:** **complete — all decisions settled**, including P1 (process groups
-are per-BU; no cross-BU span) and P2 (product's parent is the brand). This is
-the baseline the Setup review and the `derive.js` rework build against.
-Changes from here require a deliberate revision of this document.
+**Status:** complete. v1.1 revises one thing, by owner direction: **the
+registry is flat** — reference-data entities are set up independently and are
+not interlinked; **linkage happens only at the request type**. This supersedes
+v1.0's P1/P2 nesting (groups under BUs, products under brands). Everything
+else stands. This is the baseline for the Setup review and the `derive.js`
+rework; changes from here require a deliberate revision of this document.
 
 ---
 
@@ -25,14 +27,18 @@ objects** (the things that do work).
 3. **Rename propagates** everywhere automatically (references are by id).
 4. **Delete is guarded** by references, with the dependents listed — the same
    guard pattern queues already have.
+5. **The registry is flat.** Reference-data entities are independent lists —
+   no ownership links between them. The request type is the only place they
+   are wired together. (Brand ⊥ BU as independent assignment axes also matches
+   multi-brand estates where one operations BU serves several brands.)
 
 ## 2. Vocabulary
 
 | Term | Meaning | Replaces (v2.4) |
 |---|---|---|
-| **Brand / Business unit** | the org skeleton; BUs belong to a brand | kept |
+| **Brand / Business unit** | two independent axes of the estate — a request type is assigned to brand(s) × BU(s); no parent/child link between them | the brand→BU tree — flattened |
 | **Channel** | an entry channel the estate uses — enabled from the fixed taxonomy (voice · third party · digital · customer management); carries the **channel defaults** new request-type processes inherit | ChannelInstance (tree node) — retired |
-| **Process group** | a **defined entity at BU level** grouping related processes for collective reporting; also scopes the double-cover check | — (new) |
+| **Process group** | a **defined entity** grouping related processes for collective reporting; scopes the double-cover check | — (new) |
 | **Product** | a **defined entity** grouping request types by commercial product, for reporting rollups | Product (tree level) — re-homed |
 | **Queue** | a global processing station with staffing physics; reusable by any process; optional **home** (brand/BU) for grouping and permissions | kept, attachment simplified |
 | **Request type** | what a customer asks for — classified, attached to brand(s) × BU(s), referencing a process group and optionally a product | the catalog-global "service" |
@@ -44,13 +50,11 @@ Retired words: *service*, *service flow*, *journey*, *profile*, *tag*.
 ## 3. Entities and relationships
 
 ```
-REFERENCE DATA
-Brand ──1:N── Business unit
-Channel        (enabled subset of the taxonomy; carries channel defaults)
-Process group  (belongs to a BU)                     ⬜ span rule — §9
-Product        (belongs to a brand)                  ⬜ parent — §9
+REFERENCE DATA — five independent flat lists (no interlinks)
+Brand[]          Business unit[]          Channel[] (from taxonomy,
+Process group[]  Product[]                 carrying channel defaults)
 
-OPERATIONAL
+OPERATIONAL — where the linking happens
 Request type
   • name (unique) · classification: activity · product-request
   • assignment: brands[] × BUs[]  — empty ⇒ All
@@ -72,6 +76,11 @@ Cascade spine (unambiguous):
 ```
 Brand → Business unit → Request type → Channel → (process steps → queues)
 ```
+
+With a flat registry, the *scope* at each cascade level is **derived from
+assignments, not from a tree**: within Brand A, the BU layer is the BUs that
+have request types covering Brand A. A mis-assignment is never blocked — it
+simply shows up as inert in the coverage check (V1).
 
 ## 4. What the structure expresses
 
@@ -130,20 +139,23 @@ retire as concepts.
 
 ## 7. Where reference data is defined (Setup implication)
 
-The **Structure** tab becomes the registry — *"define the vocabulary of the
-estate"*:
+The **Structure** tab is the registry — *"set up the vocabulary of the
+estate"* — five independent flat lists:
 
 | Entity | Defined in | Referenced by |
 |---|---|---|
-| Brand | Structure | BUs · request-type assignment · queue home · volume entries |
-| Business unit | Structure (under its brand) | request-type assignment · process groups · queue home · volume entries |
+| Brand | Structure (flat list) | request-type assignment · queue home · volume entries |
+| Business unit | Structure (flat list) | request-type assignment · queue home · volume entries |
 | Channel | Structure (enable from the taxonomy; set channel defaults here) | request types' processes · volume entries |
-| Process group | Structure (under its BU) | request types · Results rollups · double-cover check |
-| Product | Structure (under its brand ⬜) | request types · Results rollups |
+| Process group | Structure (flat list) | request types · Results rollups · double-cover check |
+| Product | Structure (flat list) | request types · Results rollups |
 
-Queues, request types (with their processes) and volume entries keep their own
-tabs — they are operational, not vocabulary. Full Setup IA resumes in
-REVIEW-SETUP once §9 closes.
+**Queues are registry-like too** (set up once, referenced, guarded) but get
+their own setup tab because of their weight — ~30 physics parameters, tuned
+constantly. Conceptually the registry spans *Structure + Queues*; **the
+request type is the only linking surface.** Request types (with their
+processes) and volume entries keep their own tabs — they are operational,
+not vocabulary.
 
 ## 8. Validation rules
 
@@ -168,13 +180,12 @@ REVIEW-SETUP once §9 closes.
 | D4 | Product | **defined reference entity** for grouping request types — not a tree level, not a tag |
 | D5 | ChannelInstance | retired; channel = reference entity + attribute of request types. Queues global with optional home |
 | D6 | AHT override | request-type level, queue fallback |
-| — | Process group | **defined reference entity at BU level** — not a tag |
+| — | Process group | **defined reference entity** — not a tag |
 | — | Registry | all classifiers defined/stored in Structure; selected never typed; rename propagates; delete guarded |
 | — | Variants | distinct names; group carries the collective reporting name; soft double-cover warning |
 | — | Volume | cascade of §6 |
-
-| P1 | Process group span | **per-BU; no cross-BU span** (cross-BU reporting may roll up same-named groups) |
-| P2 | Product's parent | **brand** |
+| **v1.1** | **Registry shape** | **flat — five independent lists, no interlinks; the request type is the only linking surface.** Supersedes P1/P2 (v1.0 had groups under BUs, products under brands); a group may now span BUs — the double-cover check is unaffected. |
+| v1.1 | Queue setup surface | own tab (weight + cadence), conceptually part of the registry |
 
 ## 10. Deltas from the current build
 
@@ -184,6 +195,6 @@ REVIEW-SETUP once §9 closes.
 | `model/derive.js` | propagation over request types × channels; **cascade resolver** (new pure module, provenance); cross-structure guard retired for V1/V2 | the main work |
 | `model/adapter.js` | unchanged mechanics | none–small |
 | **Engine** | **untouched** | none |
-| Structure | tree reduces to Brand → BU; classifiers become registry lists; queues gain optional home | small–medium |
+| Structure | org tree retired entirely — registry = five flat lists; queues gain optional home | small–medium |
 | Template | sheets: Registry (brands/BUs/channels/groups/products) · Queues · Request types · Processes/steps · Volume entries | medium |
-| Setup IA | REVIEW-SETUP resumes against this model after P1/P2 | — |
+| Setup IA | REVIEW-SETUP draft 5 reflects the flat registry | — |

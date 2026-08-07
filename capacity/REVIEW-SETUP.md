@@ -1,9 +1,9 @@
-# Page review 1 — Setup (draft 4, against DOMAIN-MODEL v1.0)
+# Page review 1 — Setup (draft 5, against DOMAIN-MODEL v1.1)
 
-**Status:** structure proposal for sign-off. Drafts 1–3 established the
-navigation grammar and tab purposes; the domain model then changed under them.
-This draft is the reconciliation: Setup as it should be **under the final
-model**. Two calls remain (§6).
+**Status:** structure proposal for sign-off. Draft 5 folds in the flat
+registry (v1.1): Structure is five independent lists, no interlinks; the
+request type is the only linking surface; queues stay in their own tab but
+are recognised as registry entities. Calls remaining in §6.
 
 ---
 
@@ -35,12 +35,17 @@ model is incomplete, a slim progress strip names the next thing to do.
 
 | # | Tab | Purpose (one line) | Cadence | Owner |
 |---|---|---|---|---|
-| 1 | **Structure** | *Define the vocabulary of the estate* | set once | admin |
-| 2 | **Queues** | *Define the stations and their physics* | tuned constantly | planner |
-| 3 | **Request types** | *Define what customers ask for, and how each is processed* | on process change | planner / ops design |
+| 1 | **Structure** | *Set up the vocabulary of the estate* | set once | admin |
+| 2 | **Queues** | *Set up the stations and their physics* | tuned constantly | planner |
+| 3 | **Request types** | *Wire it together: what customers ask for, and how each is processed* | on process change | planner / ops design |
 | 4 | **Volume** | *State how much arrives, at whatever granularity you know* | every forecast cycle | contributor |
 | 5 | **Map** | *Prove the world hangs together* | after each edit | planner |
 | 6 | **Defaults** | *The physics everything inherits* | set once, tuned rarely | admin |
+
+Tabs 1–2 are both **set-up** tabs — together they are the registry, split by
+weight (Structure holds the light entities; queues get their own room because
+they carry ~30 physics parameters and are tuned constantly). Tab 3 is the
+**only linking surface** — nothing is wired anywhere else.
 
 Navigation grammar (settled in draft 2, unchanged): horizontal tabs for peers ·
 master–detail for instances · one scrolling form with sticky section-nav for an
@@ -51,21 +56,24 @@ overlay drawer is retired.**
 
 ## 3. Tab by tab
 
-### 3.1 Structure — the registry
+### 3.1 Structure — the registry (five flat lists)
 
-Defines all five reference-data entities:
+**No interlinks** (v1.1): each entity is set up independently and becomes
+*useable in request types* — nothing here is nested under anything else.
 
-- **Brands**, and **Business units** under them (rename/delete guarded — V6).
+- **Brands** — flat list.
+- **Business units** — flat list (an independent axis; one BU may serve many
+  brands).
 - **Channels** — enable the subset of the taxonomy the estate uses; each
   enabled channel carries its **channel defaults** (ASA, abandon, patience,
   concurrency, SLA within/target — globals category B), which new processes
   inherit.
-- **Process groups** — created under their owning BU.
-- **Products** — created under their owning brand.
+- **Process groups** — flat list.
+- **Products** — flat list.
 
-Nesting is justified everywhere here: it is all genuine hierarchy. This is the
-only tab whose v2.4 layout (collapsible tree + chips) survives mostly intact —
-extended with rename, delete-with-guard, and the two new entity lists.
+All five: add · rename (propagates by id) · delete (guarded with dependents
+listed — V6). The layout is five simple list panels — the v2.4 tree is
+retired along with the interlinks.
 
 ### 3.2 Queues — stations and physics
 
@@ -191,13 +199,14 @@ existed.
 |---|---|---|
 | ⬜ C-a | Map placement: Setup tab 5 with Home as a second entry point — confirm? | as written (§3.5) |
 | ⬜ C-b | Interactions editing surface: per-queue + consolidated list in Queues, Map view-first — confirm? | as written (§3.2) |
+| ⬜ C-c | Queues keep their own set-up tab (registry split by weight), rather than folding into Structure — confirm? | as written (§2) |
 
 ## 7. Build order for Setup (after sign-off)
 
 0. **`derive.js` rework first** — cascade resolver + request-type propagation
    (the model under all six tabs; engine/adapter untouched).
 1. Navigation shell — six tabs, drawer retired, master–detail in Queues.
-2. Structure registry (channels + groups + products, rename/delete guards).
+2. Structure registry (five flat lists incl. channels-with-defaults, rename/delete guards).
 3. Request types tab (identity, assignment, per-channel process editor).
 4. Queues editor depth (~30 params + interactions + shared capacity).
 5. Volume cascade grid + shapes.
