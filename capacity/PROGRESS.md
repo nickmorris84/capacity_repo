@@ -6,6 +6,41 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — M1–M4: the full model layer ✅ (four new gates green)
+
+BUILD-PLAN.md approved ("Okay let's go"); the model phases land together, all
+as NEW pure modules — the shipping v2.4 app and its 22 gates stay untouched.
+
+- **M1 · `model/ops.js`** — every Setup edit as a pure reducer over the domain
+  model: registry CRUD with guarded deletes (a blocked delete returns the
+  ORIGINAL model object, asserted by identity), channel enable/defaults, queue
+  add/staffing/reset, request-type assignment with All semantics, process/step
+  editing (terminal:false drops the outcome), volume entry upsert by address,
+  `blankDomainModel()` / `sampleDomainModel()` (deterministic ids for tests
+  and the first-run experience). `tests/ops.test.js` (12).
+- **M2 · `model/bridge.js`** — domain model → the PRESERVED engine's config,
+  twin of the old adapter but fed by `propagateDomain()`. The theorem the gate
+  proves: for migrated flat-shape models the domain path simulates
+  **identically** to the old path — cfg field equality plus exact `compactRun`
+  equality for S1–S4. New capability: cascade shapes reach the engine as
+  `weeklyVolumes` (flat shapes emit null, keeping byte-parity).
+  `tests/bridge.test.js` (5).
+- **M3 · `model/store-domain.js`** — schema-versioned persistence
+  (`capacity.v3.model`), storage-injectable; a saved v2.4 model migrates on
+  load, persists to v3, and the v2 key is LEFT INTACT for rollback; corrupt
+  payloads read as absent, never throw. `tests/store-domain.test.js` (5).
+- **M4 · `model/template-domain.js`** — template v3 per DOMAIN-MODEL §10:
+  five sheets (Registry with Kind/DefaultsJson · Queues with StaffingJson so
+  migrated v1 physics round-trip exactly · Request types · Steps with
+  order/terminal/outcome · Volume entries with W1..W52 columns). Pure rows;
+  the gate drives REAL SheetJS bytes: export → import structural identity for
+  sample and migrated models, export → edit-a-cell → import equals the same
+  edit made via Ops, and export → import → export byte-identical.
+  `tests/template-domain.test.js` (6).
+
+**Full suite: 26 gates green.** Next: U1 (Setup shell, six tabs) — user
+checkpoint after.
+
 ## DOMAIN REDESIGN — Step 0: the domain layer ✅ (new gate green)
 
 DOMAIN-MODEL v1.2 signed off (request types → channels → processes; flat
