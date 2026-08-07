@@ -1,231 +1,263 @@
-# Page review 1 — Setup (draft 2)
+# Page review 1 — Setup (draft 3)
 
-**Status:** working draft for review. Replaces SPEC-V2 §4 once settled.
-**Changed in draft 2:** navigation grammar (§2) after the "why drawers?"
-challenge; globals fully categorised from the engine, not v1's labels (§4);
-per-family purpose stated (§3).
-
----
-
-## 1. Goal
-
-> **Build and maintain a world the engine can simulate — and be able to defend
-> every number in it.**
-
-| Audience | Needs |
-|---|---|
-| **Planner** (primary) | A credible model in minutes; then tune one parameter without hunting for it |
-| **Contributor** | Refresh volumes for their own queues; touch nothing else |
-
-**The principle to settle first:** *hiding is a default, never a deletion.*
-Every parameter the engine reads must be reachable in ≤ 2 clicks; the default
-view shows only what is commonly changed. v1 chose walls of fields; v2
-over-corrected by removing them. Neither is right.
+**Status:** purpose review. No structural decisions taken yet — §6 lists the
+calls to make once we agree the purposes below are right.
+**Draft 3 change:** rebuilt around *what each tab is trying to achieve*, per the
+owner's framing: **"the goal is to set up the different service flows."**
 
 ---
 
-## 2. Navigation grammar (the consistency problem)
+## 1. The domain, as stated by the owner
 
-Today the app speaks three dialects: Results uses **horizontal sub-tabs**,
-Setup uses **vertical accordions + an overlay drawer**, Levers uses **cards
-with inline expansion**. That is the inconsistency, and the drawer is the worst
-of it — a 420 px overlay designed when a queue had six fields, now the densest
-editing surface in the product.
+> A **service flow** is a set of queues that process a specific request. The
+> same queues can be used on multiple flows. Service flows require a
+> **service**. A service should be attached to a **brand and a business unit**.
+> These should be defined separately. Once all are defined, you should be able
+> to see a **global view of queues and interactions**.
 
-### 2.1 Proposed: one grammar, four rules
-
-| Pattern | Used for | Example |
-|---|---|---|
-| **Horizontal tabs** | *Which thing am I looking at* — mutually exclusive peers | Results lenses; **Setup sections** |
-| **Master–detail** (list + panel) | *Which instance am I editing* | queues, services, profiles |
-| **Headed sections in one scroll + sticky jump-nav** | *The parameters of one instance* | queue families; global groups |
-| **Nested disclosure** | *Only where it mirrors real hierarchy* | BU › product › channel; service › journey steps |
-
-That last rule is the important distinction, and it validates the instinct
-behind the challenge: **Structure's nesting is good because it is a tree.**
-The queue drawer's accordions are bad because they are just a form in a box.
-Nesting that represents structure earns its place; nesting that only hides a
-form does not.
-
-### 2.2 What Setup becomes
+Read as a dependency chain:
 
 ```
-Setup
-┌─────────────────────────────────────────────────────────────┐
-│ Structure ● │ Queues 4 │ Services 2 │ Volume ▲ │ Defaults   │  ← sub-tabs
-└─────────────────────────────────────────────────────────────┘
+brand + business unit ─→ service ─→ service flow ─→ (uses) queues
+                                          ↑
+                                     volume feeds it
+                          global view verifies the whole
 ```
 
-- **Structure** — the BU › product › channel tree. Keeps its nesting.
-- **Queues** — master–detail: the grouped queue list stays on the left; picking
-  one opens a **full-width editor**, six family sections in one scroll with a
-  sticky family nav. **No overlay drawer.**
-- **Services** — master–detail: service list → journey editor.
-- **Volume** — master–detail: profile list → mix + 52-week series + curves.
-- **Defaults & engine** — the eight global groups (§4) in one scroll with the
-  same sticky nav as the queue editor.
+---
 
-One editing pattern, reused four times.
+## 2. Setup's purpose, in one line
 
-### 2.3 What we lose, and the mitigation
+> **Define the service flows — and everything they depend on — then prove the
+> world hangs together.**
 
-Honest trade-off: the four-accordion page was the mockup's central idea — *"the
-empty state IS the wizard"* — where you scroll down through the dependency
-order and see all four completion badges at once. Tabs break that.
-
-Mitigations:
-- **Completion state moves onto the tabs** — a count, ● complete, ▲ needs
-  attention. Same information, one line higher.
-- **When the model is incomplete**, a slim progress strip under the tabs names
-  the next thing to do and links to it, so a new user is still led through
-  Structure → Queues → Services → Volume.
-- Tabs also *solve* the problem that made the drawer necessary: a full-width
-  panel has room for 30 parameters. The accordion page never did.
+Everything in Setup is either (a) a thing a flow needs, or (b) the check that
+the flows are sound. That is the test for whether something belongs here.
 
 ---
 
-## 3. The six families — purpose, contents, gaps
+## 3. Tab-by-tab: the job each does
 
-Each family answers one question. That is what makes them a good grouping for
-editing, not just reporting.
+For each: the question it answers, what it defines, what breaks downstream if
+it is wrong, **how often it is touched and by whom** — and an honest read of
+whether the current build serves that job.
 
-### Inputs — *"What arrives here, and how long it takes."*
-| Present | Missing |
+### 3.1 Structure — *"What parts of the organisation are we planning for?"*
+
+| | |
 |---|---|
-| derived volume (read-only), fallback AHT | **concurrency**, **digital subtype (chat vs workflow)**, **arrival pattern**, **seasonality pattern** *(→ moving to profiles, §5.3)* |
+| **Defines** | brands, business units *(today also: products, channels)* |
+| **Feeds** | service ownership · queue attachment · volume entry points · Results rollups · future permissions |
+| **Cadence** | **Set once.** Changes on reorg or a new product line |
+| **Owner** | Planner / admin |
 
-### Performance — *"What good looks like here."*
-| Present | Missing |
-|---|---|
-| ASA target, max abandon | **SLA within (digital mins)**, **SLA target %**, **backlog limit**, **patience** *(exposed for voice only)*, **SLA attainment target** |
+**Current build:** collapsible BU rows, products as indented sub-rows, channels
+as tap-on chips. This is the one place in Setup where nesting is genuinely
+right — it *is* a tree, so the disclosure mirrors reality.
 
-### Efficiency — *"How hard we are prepared to run."*
-| Present | Missing |
-|---|---|
-| occupancy ceiling | **overtime: max/agent/day, weekly ceiling, premium, burnout load** |
-
-### Workforce — *"Who is here, who is coming, who is leaving."*
-| Present | Missing |
-|---|---|
-| shrinkage, attrition, resourcing model | **starting FTE**, **attrition growth**, **req-to-start**, **training weeks**, **learning curve**, **manual hires (week × heads)**, **priority**, **support routes (share of spare, max share, supporter list)**, **burnout (5: occ threshold, sensitivity, recovery, max attrition mult, absence uplift)** |
-
-*The largest gap by far — and the one that makes strategy S4 inert.*
-
-### Customer — *"What it costs the customer when we miss."*
-| Present | Missing |
-|---|---|
-| churn cost, failed→churn % | **repeat contacts**, **converts-to-calls + target queue**, **redial %** |
-
-### Outputs — *"What it costs us."*
-| Present | Missing |
-|---|---|
-| agent cost | **OT premium**, manager cost/ratio *(global — see §4)* |
-
-### 3.1 Known awkwardness
-
-Two parameters sit oddly in a KPI-family grouping, because the families were
-designed for *reporting*, not *editing*:
-
-- **Support / spill routes** — modelled as Workforce (they are capacity) but
-  they are really *routing*, and they pair conceptually with journeys.
-- **Converts-to-calls** — sits in Customer, but it is a routing rule.
-
-Options: leave them (accept the seam), or add a seventh editing group
-**"Connections"** for everything that links one queue to another (support
-routes, spill, converts-to). The second is cleaner conceptually but breaks the
-"six families everywhere" rule from the brief (D4). **Recommendation:** leave
-them for now, revisit if the Connections idea earns its keep on Levers too.
+**Gaps:** you cannot **rename** a BU or product, cannot **delete** one, cannot
+reorder. Brand-level attributes v1 had (training profile, brand volume, brand
+share) have no home. And the depth is unresolved — the owner described *brand
+and BU*; the build has four levels.
 
 ---
 
-## 4. The globals — categorised
+### 3.2 Queues — *"What stations exist, and what are their physics?"*
 
-**67 fields**, read from the engine (`engine`, `costs`, `cx`, `loops`,
-`R2_DEFAULTS`), not from v1's editor labels — v1 exposed only 46 of them.
-Grouped by *what kind of thing they are*, which is what makes them navigable:
+| | |
+|---|---|
+| **Defines** | queue identity, type, attachment (structural or shared), ~30 physics parameters |
+| **Feeds** | every flow step · all capacity, cost and SLA maths · Results grouping |
+| **Cadence** | **Tuned constantly.** The page you keep coming back to |
+| **Owner** | Planner |
 
-| # | Category | Fields | n | Proposed home |
-|---|---|---|---|---|
-| **A** | **Simulation frame** — how the clock works | horizonWeeks (+min/max), dayStart, dayEnd, intervalMin, daysPerWeek, hoursPerFteDay, daysWorkedPerFte, currency, calendar.weekOneDate | 11 | Setup › Defaults |
-| **B** | **Channel defaults** — the inheritance layer | per channel: ASA target, max abandon, patience, concurrency, SLA within, SLA target + knockOn.{repeatPct, spillPct, spillTargetQueue} | ~9 × channels | Setup › Defaults |
-| **C** | **Workforce policy** | training.{weeks, learningCurve, shrinkagePct}, trainingDebt.{accumRate, recoveryRate, maxAhtPenalty, maxAttritionMult}, globalStartingHC, crossSkillProficiency, occupancyCeiling | 10 | Setup › Defaults |
-| **D** | **Overtime policy** | ot.{maxDailyHours, weeklyCeiling, premium, burnoutLoad} | 4 | Setup › Defaults |
-| **E** | **Cost model** | costs.{managerCost, managerRatio}, cx.costPerLostCustomer | 3 | Setup › Defaults |
-| **F** | **Customer behaviour** | cx.{customerBase, churnAbandon, churnWait, churnDigital, repeatUplift}, loops.{redial, deflection} | 7 | Setup › Defaults |
-| **G** | **Risk thresholds** — when a number turns amber/red | risk.{slaBreachRun, tippingMargin, burnout, trainingDebt, otStreakWeeks, borrowedShare, knockOnShare, overCapacityPct} × amber/red + unmannedStarvation.{floorCover, weeks} | 19 | **Debatable — see below** |
-| **H** | **Shared capacity** — service teams | per team: name, size, premiumPct, proficiency, triggerOccupancy, maxHoursPerWeek, agentCost, coversQueues | 8/team | **Setup › Queues** (they are capacity providers, siblings of queues) |
-| **I** | **Pattern libraries** | seasonality presets, arrival presets | list | Setup › Defaults |
+**Current build:** grouped list with derived volume + effective AHT, and an
+overlay drawer exposing **10 of ~30** parameters.
 
-**Already correctly placed elsewhere — leave them:** hiring caps + total
-ceiling, default buffer, S3 look-ahead months → **Levers** (D10: caps are a
-lever, not a world property).
+**Gaps:** 20 missing parameters (all of the pipeline, learning curve, burnout,
+manual hires, OT, backlog limit, concurrency, subtype). **Service teams** —
+shared capacity that covers queues — have no home at all. Neither do **queue
+interactions** (§3.6).
 
-### 4.1 Two placement calls worth making deliberately
-
-**G · Risk thresholds (19 fields).** These do not change the simulation — they
-change *when the risk register shouts*. Three options:
-1. Setup › Defaults (simple, keeps all config in one place)
-2. **Results › Risk register — an inline "thresholds" control** where you see
-   their effect *(recommended: they are a reading lens, not a world property,
-   and the register already says "thresholds in Setup" which we can honour by
-   linking)*
-3. Levers (they shape the decision but are not a decision)
-
-**H · Service teams.** They are shared capacity that covers queues — closer to
-a queue than a setting. Recommendation: a **"Shared capacity" group inside the
-Queues tab**, listed alongside the shared-queue group.
+**The reuse signal is missing.** The owner's point that *the same queues can be
+used on multiple flows* means a queue row should say **"used in N flows"**, the
+way service cards say "used in N profiles". Without it, you cannot see the blast
+radius of changing or deleting a queue — the delete guard blocks you, but
+nothing tells you *before* you try.
 
 ---
 
-## 5. Proposed structure (consolidated)
+### 3.3 Services — *"What do customers actually ask us for?"*
 
-### 5.1 Five tabs
-Structure · Queues · Services · Volume · Defaults & engine — with completion
-state on the tabs and a progress strip while incomplete (§2.3).
+| | |
+|---|---|
+| **Defines** | request type, activity, product-request type, optional AHT, **(proposed) owning brand + BU** |
+| **Feeds** | flows · volume mix |
+| **Cadence** | Set up front; extended occasionally |
+| **Owner** | Planner / business |
 
-### 5.2 Queue editor
-Master–detail, six family sections in one scroll, sticky family nav, modified
-dots per section. Within a family: common parameters first, an **"Advanced (n)"**
-disclosure for the long tail (burnout internals, training debt, priority).
-Manual hires as a week × heads table in Workforce, cross-linked from the Levers
-Manual-plan card.
+**Current build:** cards with chips, "used in N profiles", optional AHT — **and
+the journey chip strip**.
 
-### 5.3 Volume tab
-Profiles gain the demand shape the spec always called for:
-- **total volume** — flat daily figure *or* a **52-week series** (typed or imported)
-- **seasonality** — 12-point curve + preset chips
-- **arrival pattern** — draggable intraday curve + preset chips
+**The core problem:** the service card is doing **two jobs at once** — declaring
+*what the request is* and defining *how it gets processed*. Those have different
+owners, different cadences, and different reasons to change. That conflation is
+what the owner is pointing at.
 
-At profile level rather than queue level, because in v2 **demand enters at the
-profile** — the queue inherits the shape of what flows into it. (v1 put them on
-the queue only because that is where volume lived.) A queue-level override
-stays available in Inputs for stations that genuinely differ.
+**Gap:** no brand/BU attachment. Today the only link from a service to the org
+is indirect, through a volume profile — so *"which BU owns this service?"* has
+no direct answer; you have to reason backwards.
 
 ---
 
-## 6. Decisions
+### 3.4 Service flows — *"How does each request actually get processed?"*
 
-| # | Decision | Recommendation |
+| | |
+|---|---|
+| **Defines** | the ordered queue path, split % per step, sampling % for governance steps |
+| **Feeds** | **this is what derives queue workload** — the whole demand propagation |
+| **Cadence** | Designed once per service; revised when the process changes |
+| **Owner** | Planner / ops design |
+
+**Current build:** *does not exist as a surface.* It is a row list at the bottom
+of an expanded service card.
+
+**This is the finding that matters most.** The owner says Setup's goal *is* to
+set up service flows. In the build, flows are:
+- unnamed (they are just an array on a service),
+- invisible as a set — you cannot see all flows at once,
+- limited to **one per service**, so the same request cannot be processed
+  differently by two business units without duplicating the service,
+- and given the least prominent home of any concept in Setup.
+
+The most important idea in the model has the weakest representation.
+
+---
+
+### 3.5 Volume — *"How much arrives, and when?"*
+
+| | |
+|---|---|
+| **Defines** | totals at a node, service mix %, *(missing)* 52-week series, seasonality, arrival shape |
+| **Feeds** | every number downstream |
+| **Cadence** | **Refreshed on a forecast cycle** — monthly or quarterly |
+| **Owner** | **Often a different person** — the contributor |
+
+**Current build:** profile cards with applies-at, a single total, and mix rows.
+
+**Gaps:** the entire demand *shape* — 52-week series, seasonality curve, arrival
+pattern — which the original spec called for and I implemented as one number.
+
+**Note the cadence and owner:** this is the only Setup surface routinely touched
+by someone who should not be editing anything else. That is a strong argument
+for it being cleanly separable — and it makes the contributor-scope idea a
+natural fit here rather than a general permissions feature.
+
+---
+
+### 3.6 Global view — *"Does the world I built hang together?"*
+
+| | |
+|---|---|
+| **Shows** | every queue, the flows through it, the interactions between queues, orphans, unmodelled volume |
+| **Cadence** | After every significant edit — it is the completion check |
+
+**Current build:** an **Ecosystem Sankey on Home**, view-only.
+
+**Two problems.**
+
+1. **Wrong page.** It is framed as a homepage presentation; the owner describes
+   it as the verification step at the end of Setup.
+2. **It is the wrong graph.** The Sankey shows **volume flowing** (brand →
+   channel → service → queues → outcome). The owner asked for *"queues and
+   **interactions**"* — the capacity links *between* queues: shares-pool,
+   leverages-to, supports, converts-to. **That concept has no editable home in
+   v2 at all.** Only the `resourcing` type survives, in the drawer. v1 had it
+   (brief D12: an Interactions panel with typed edges, graph/table toggle,
+   tap-edge-to-edit).
+
+So "a global view of queues and interactions" needs the interactions to exist
+as editable objects *first*. That is a missing feature, not a missing view.
+
+---
+
+### 3.7 Defaults & engine — *"What physics does everything inherit?"*
+
+| | |
+|---|---|
+| **Defines** | the 67 globals (categories A–I, draft 2 §4) |
+| **Cadence** | Set once, tuned rarely |
+
+**Current build:** absent entirely.
+
+---
+
+## 4. What the purposes tell us about the structure
+
+### 4.1 Cadence and ownership vary wildly
+
+| Tab | Cadence | Typical owner |
 |---|---|---|
-| **D1** | Navigation grammar | **Adopt §2.1** — tabs / master–detail / scrolling sections / nesting-only-for-hierarchy |
-| **D2** | Setup layout | **Five sub-tabs**, drawer retired, completion on tabs + progress strip |
-| **D3** | Globals home | **Setup › Defaults & engine**, categories A–F + I |
-| **D4** | Risk thresholds (G) | **Results, inline on the risk register** — they are a reading lens |
-| **D5** | Service teams (H) | **Setup › Queues**, as shared capacity |
-| **D6** | Profile volume shape | **52-week series + seasonality + arrival**, at profile level |
-| **D7** | Manual hires | Queue editor › Workforce, cross-linked from Levers |
-| **D8** | Family seams (routing params) | Leave in current families; revisit a "Connections" group later |
-| **D9** | Contributor mode | Defer until after parity |
+| Structure | set once | admin |
+| Queues | tuned constantly | planner |
+| Services | set up front | planner / business |
+| Flows | on process change | ops design |
+| Volume | **every forecast cycle** | **contributor** |
+| Global view | after each edit | planner |
+| Defaults | set once | admin |
+
+Surfaces with different owners and different rhythms should be **separately
+addressable** — which is an argument for tabs that comes from *use*, not from
+aesthetics or from copying Results.
+
+### 4.2 The dependency order is clean and teachable
+
+```
+Structure → Queues → Services → Flows → Volume → [Map verifies]
+```
+
+That is almost exactly the order the owner said it in. The current build
+collapses *Flows* into *Services* and moves the *Map* off the page — those are
+the two deviations.
+
+### 4.3 Three findings, in priority order
+
+1. **Flows are the point of Setup and have the weakest home.** They deserve to
+   be first-class: named, listed, reusable across queues, and — if we want the
+   same service handled differently by two BUs — separable from the service.
+2. **Queue interactions do not exist.** "A global view of queues and
+   interactions" cannot be built until support / spill / pool links are
+   editable objects again.
+3. **Services float free of the org.** No direct brand/BU ownership, which also
+   makes volume profiles carry two jobs at once (where volume enters *and*
+   which services it feeds). Attaching services to brand+BU would simplify
+   profiles to "how much, split how".
 
 ---
 
-## 7. Build order
+## 5. Implied tab structure (for discussion, not decided)
 
-1. **Navigation shell** — five tabs, retire the drawer, master–detail in Queues.
-   Pure restructure, no new parameters; makes room for everything else.
-2. **Queue editor depth** — all ~30 parameters in six sections. Unblocks S4 and
-   the workforce pipeline.
-3. **Defaults & engine tab** — categories A–F, I.
-4. **Volume tab** — 52-week series, seasonality, arrival + preset libraries.
-5. **Service teams** into Queues; **risk thresholds** onto Results.
-6. Template gains a Volumes sheet to match (4).
+```
+Structure │ Queues │ Services │ Flows │ Volume │ Map │ Defaults
+```
+
+Seven is a lot. Two plausible compressions:
+
+- **Six:** merge *Services* and *Flows* into one tab with a master–detail split
+  (service list → its flows), keeping them conceptually distinct but
+  co-located.
+- **Five:** as above, plus fold *Map* into Home (status quo) — but that loses
+  the verification step the owner asked for.
+
+---
+
+## 6. Calls to make (once the purposes above are agreed)
+
+| # | Call | Why it matters |
+|---|---|---|
+| **C1** | Is a **flow** its own entity (one service → many flows), or the service's single journey? | Determines whether the same service can be processed differently per BU. Data-model change. |
+| **C2** | Do **services attach to brand + BU**? *(the catalog-global veto the brief left open)* | Determines whether ownership is answerable directly, and whether profiles simplify. |
+| **C3** | Does **Product** earn its place — brand→BU→product→channel, or brand→BU→channel? | Owner described two levels; build has four. |
+| **C4** | Do we restore **queue interactions** (support / spill / pool) as editable objects? | Prerequisite for the "queues and interactions" global view. |
+| **C5** | Where does the **global view** live — Setup tab, Home, or both? | It is a verification step, currently framed as a presentation. |
+| **C6** | Tab count — seven, six (services+flows merged), or five? | Follows from C1 and C5. |
