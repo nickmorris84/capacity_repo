@@ -1,10 +1,9 @@
-# Domain model — draft 3
+# Domain model — v1.0 (FINAL)
 
-**Status:** D1–D3, D6, variant rules and the volume cascade **settled**;
-draft 3 adds the **reference-data registry** (owner: "brand, bu, channel,
-process group etc need a place to be set up and stored") and re-frames
-process group and product as **defined entities, not tags**. Two placement
-confirmations remain (§9).
+**Status:** **complete — all decisions settled**, including P1 (process groups
+are per-BU; no cross-BU span) and P2 (product's parent is the brand). This is
+the baseline the Setup review and the `derive.js` rework build against.
+Changes from here require a deliberate revision of this document.
 
 ---
 
@@ -174,12 +173,8 @@ REVIEW-SETUP once §9 closes.
 | — | Variants | distinct names; group carries the collective reporting name; soft double-cover warning |
 | — | Volume | cascade of §6 |
 
-**Remaining placement confirmations**
-
-| # | Item | Proposal |
-|---|---|---|
-| ⬜ P1 | Can a process group span BUs? | **No — per-BU** (as stated). Cross-BU reporting can still roll up same-named groups; the entity stays owned by one BU. |
-| ⬜ P2 | Product's parent | **Brand** (products are a brand's commercial offerings; BUs service them). Alternative: under BU, mirroring the old tree. |
+| P1 | Process group span | **per-BU; no cross-BU span** (cross-BU reporting may roll up same-named groups) |
+| P2 | Product's parent | **brand** |
 
 ## 10. Deltas from the current build
 
