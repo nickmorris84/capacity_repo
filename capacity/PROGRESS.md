@@ -1,5 +1,9 @@
 # Progress
 
+> **Baseline: [SPEC-V2.md](./SPEC-V2.md)** — what the shipping v2.4 product *is*
+> (user guide · technical spec · how to extend it), kept current with the code.
+> This file is the running build log: how it got here, phase by phase.
+
 ## v2.4 STRUCTURAL REBUILD — Step 0: Golden masters ✅ COMPLETE (new gate green)
 
 Kicks off the v2.4 rebuild (new domain model Brand → BU → Product → Channel →
