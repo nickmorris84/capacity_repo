@@ -320,9 +320,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .glyph{font-size:10px}
 .glyph.ok{color:var(--green-ink)}
 .glyph.todo{color:var(--amber-ink)}
-.subtabs{display:flex; gap:2px; border-bottom:0.5px solid var(--line); margin-bottom:16px; overflow-x:auto}
-.subtabs button{display:flex; align-items:center; gap:6px; padding:8px 11px; border:none; border-bottom:2px solid transparent;
-  background:none; font:inherit; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
+.subtabs{display:flex; gap:6px; border-bottom:0.5px solid var(--line); margin-bottom:18px; overflow-x:auto}
+.subtabs button{display:flex; align-items:center; gap:6px; padding:9px 13px; border:none; border-bottom:2px solid transparent;
+  background:none; font:inherit; font-size:13px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
 .subtabs button.on{color:var(--blue-deep); font-weight:600; border-bottom-color:var(--blue)}
 .subtabs button:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
 .subtabs .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
@@ -362,6 +362,15 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .v3banner b{font-size:13px; color:var(--blue-deep)}
 .v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
 .v3banner .btn{margin-left:auto; white-space:nowrap}
+.structgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:10px; align-items:start}
+.steps{margin-top:2px}
+.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0}
+.steps.with-sample .steprow{grid-template-columns:44px minmax(150px,1.4fr) 64px 64px 44px minmax(110px,1fr) 26px}
+.steprow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+.steprow.head{border-bottom:0.5px solid var(--line); padding-bottom:3px; margin-bottom:2px}
+.stepno{font-size:11px; color:var(--ink-3)}
+.stepdash{color:var(--ink-3); text-align:center; font-size:11px}
+.steprow input[type="checkbox"]{justify-self:start; margin:0}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}

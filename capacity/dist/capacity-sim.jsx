@@ -3827,9 +3827,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .glyph{font-size:10px}
 .glyph.ok{color:var(--green-ink)}
 .glyph.todo{color:var(--amber-ink)}
-.subtabs{display:flex; gap:2px; border-bottom:0.5px solid var(--line); margin-bottom:16px; overflow-x:auto}
-.subtabs button{display:flex; align-items:center; gap:6px; padding:8px 11px; border:none; border-bottom:2px solid transparent;
-  background:none; font:inherit; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
+.subtabs{display:flex; gap:6px; border-bottom:0.5px solid var(--line); margin-bottom:18px; overflow-x:auto}
+.subtabs button{display:flex; align-items:center; gap:6px; padding:9px 13px; border:none; border-bottom:2px solid transparent;
+  background:none; font:inherit; font-size:13px; color:var(--ink-2); cursor:pointer; white-space:nowrap}
 .subtabs button.on{color:var(--blue-deep); font-weight:600; border-bottom-color:var(--blue)}
 .subtabs button:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
 .subtabs .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
@@ -3869,6 +3869,15 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .v3banner b{font-size:13px; color:var(--blue-deep)}
 .v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
 .v3banner .btn{margin-left:auto; white-space:nowrap}
+.structgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:10px; align-items:start}
+.steps{margin-top:2px}
+.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0}
+.steps.with-sample .steprow{grid-template-columns:44px minmax(150px,1.4fr) 64px 64px 44px minmax(110px,1fr) 26px}
+.steprow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+.steprow.head{border-bottom:0.5px solid var(--line); padding-bottom:3px; margin-bottom:2px}
+.stepno{font-size:11px; color:var(--ink-3)}
+.stepdash{color:var(--ink-3); text-align:center; font-size:11px}
+.steprow input[type="checkbox"]{justify-self:start; margin:0}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -4848,16 +4857,12 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
         firstTodo.next
       ] }),
       /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => setTab(firstTodo.key), children: "Go" })
-    ] }) : /* @__PURE__ */ jsxs2("div", { className: "pstrip done", role: "status", children: [
-      /* @__PURE__ */ jsx2("span", { className: "glyph ok", children: "\u25CF" }),
-      /* @__PURE__ */ jsx2("span", { children: "Model complete \u2014 every tab checks out." })
-    ] }),
+    ] }) : null,
     /* @__PURE__ */ jsx2("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
       const s = status.find((x) => x.key === k);
       return /* @__PURE__ */ jsxs2("button", { role: "tab", "aria-selected": tab === k, className: tab === k ? "on" : "", onClick: () => setTab(k), children: [
-        /* @__PURE__ */ jsx2("span", { className: "glyph " + (s.ok ? "ok" : "todo"), children: s.ok ? "\u25CF" : "\u25B2" }),
         label,
-        /* @__PURE__ */ jsx2("span", { className: "count", children: s.badge })
+        !s.ok ? /* @__PURE__ */ jsx2("span", { className: "glyph todo", children: "\u25B2" }) : null
       ] }, k);
     }) }),
     /* @__PURE__ */ jsxs2("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
@@ -4981,24 +4986,25 @@ function StructurePanel({ model, set }) {
   ));
   return /* @__PURE__ */ jsxs2(Fragment2, { children: [
     /* @__PURE__ */ jsx2("h3", { children: "Structure" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "The vocabulary of the estate \u2014 five independent lists, nothing interlinked. Request types is where they meet. Renames propagate everywhere; deletes are guarded while anything references the entry." }),
-    brandsL,
-    busL,
-    /* @__PURE__ */ jsxs2("div", { className: "reglist", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "reghead", children: [
-        /* @__PURE__ */ jsx2("b", { children: "Channels" }),
-        /* @__PURE__ */ jsx2("span", { className: "count", children: (model.channels || []).length })
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Brands, business units, channels, groups and products \u2014 set up here, wired together in Request types. Renames propagate; deletes are guarded while in use." }),
+    /* @__PURE__ */ jsxs2("div", { className: "structgrid", children: [
+      brandsL,
+      busL,
+      /* @__PURE__ */ jsxs2("div", { className: "reglist", children: [
+        /* @__PURE__ */ jsxs2("div", { className: "reghead", children: [
+          /* @__PURE__ */ jsx2("b", { children: "Channels" }),
+          /* @__PURE__ */ jsx2("span", { className: "count", children: (model.channels || []).length })
+        ] }),
+        (model.channels || []).length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: "none yet" }) : null,
+        (model.channels || []).map((c) => /* @__PURE__ */ jsx2(ChannelRow, { model, c, set }, c.id)),
+        offKeys.length ? /* @__PURE__ */ jsx2("div", { className: "regoff", children: offKeys.map((k) => /* @__PURE__ */ jsxs2("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
+          "+ ",
+          CHANNEL_LABELS[k]
+        ] }, k)) }) : null
       ] }),
-      /* @__PURE__ */ jsx2("p", { className: "hint", style: { marginBottom: 6 }, children: "Enable the subset of the taxonomy the estate uses; each enabled channel carries the defaults new processes inherit." }),
-      (model.channels || []).length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: "none yet" }) : null,
-      (model.channels || []).map((c) => /* @__PURE__ */ jsx2(ChannelRow, { model, c, set }, c.id)),
-      offKeys.length ? /* @__PURE__ */ jsx2("div", { className: "regoff", children: offKeys.map((k) => /* @__PURE__ */ jsxs2("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
-        "+ ",
-        CHANNEL_LABELS[k]
-      ] }, k)) }) : null
-    ] }),
-    groupsL,
-    prodsL
+      groupsL,
+      prodsL
+    ] })
   ] });
 }
 function QueuesPanel({ model, p }) {
@@ -5055,8 +5061,7 @@ function QueuesPanel({ model, p }) {
           /* @__PURE__ */ jsx2("span", { children: "Staffing" }),
           /* @__PURE__ */ jsx2("b", { children: q.staffing && q.staffing.wf ? "full physics carried" : q._modified ? "tuned" : "defaults" })
         ] }),
-        /* @__PURE__ */ jsx2("p", { className: "usage", children: usage && usage.processes ? `Used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}.` : "Not used by any process yet." }),
-        /* @__PURE__ */ jsx2("p", { className: "phase-note", children: "The full editor \u2014 six families \xD7 three tiers, manual hires, shared capacity \u2014 lands in a later phase." })
+        /* @__PURE__ */ jsx2("p", { className: "usage", children: usage && usage.processes ? `Used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}.` : "Not used by any process yet." })
       ] }) : null })
     ] })
   ] });
@@ -5085,26 +5090,35 @@ function ProcessEditor({ model, set, rt, proc }) {
   const chName = nameOf(model.channels, proc.channelId);
   const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
+  const hasGov = (proc.steps || []).some((s) => {
+    const q = (model.queues || []).find((x) => x.id === s.queueId);
+    return q && q.type === "governance";
+  });
   return /* @__PURE__ */ jsxs2("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
     /* @__PURE__ */ jsxs2("div", { className: "prochead", children: [
       /* @__PURE__ */ jsx2("span", { className: "chip on-toggle", children: chName }),
-      /* @__PURE__ */ jsx2("span", { className: "hint", children: "entry \u2192 steps in order; each step routes a % of what reaches it" }),
       /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.deleteProcess(model, rt.id, proc.channelId)), "aria-label": "Remove " + chName + " process", children: "\u2715" })
     ] }),
-    (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : null,
-    (proc.steps || []).map((s, i) => {
-      const q = (model.queues || []).find((x) => x.id === s.queueId);
-      const gov = q && q.type === "governance";
-      const p01 = (+s.splitPct || 0) / 100;
-      return /* @__PURE__ */ jsxs2("div", { className: "mixrow", children: [
-        /* @__PURE__ */ jsx2("span", { className: "jarr", style: { minWidth: 34 }, children: i === 0 ? "entry" : i + 1 + "." }),
-        /* @__PURE__ */ jsx2("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id)) }),
-        /* @__PURE__ */ jsx2("span", { className: "hint", children: "split" }),
-        /* @__PURE__ */ jsx2("input", { className: "num", value: s.splitPct, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
-        /* @__PURE__ */ jsx2("span", { className: "hint", children: "%" }),
-        gov ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
-          /* @__PURE__ */ jsx2("span", { className: "hint", children: "sample" }),
-          /* @__PURE__ */ jsx2(
+    (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : /* @__PURE__ */ jsxs2("div", { className: "steps" + (hasGov ? " with-sample" : ""), children: [
+      /* @__PURE__ */ jsxs2("div", { className: "steprow head", children: [
+        /* @__PURE__ */ jsx2("span", {}),
+        /* @__PURE__ */ jsx2("span", { children: "Queue" }),
+        /* @__PURE__ */ jsx2("span", { children: "Split %" }),
+        hasGov ? /* @__PURE__ */ jsx2("span", { children: "Sample %" }) : null,
+        /* @__PURE__ */ jsx2("span", { children: "Ends" }),
+        /* @__PURE__ */ jsx2("span", { children: "Outcome" }),
+        /* @__PURE__ */ jsx2("span", {})
+      ] }),
+      (proc.steps || []).map((s, i) => {
+        const q = (model.queues || []).find((x) => x.id === s.queueId);
+        const gov = q && q.type === "governance";
+        const p01 = (+s.splitPct || 0) / 100;
+        const reworkTitle = p01 > 0 && p01 < 1 ? `Routes ${s.splitPct}% of what reaches it. If this branch is rework, repeated rounds compound to an effective ${fmtPct(p01 / (1 - p01) * 100)}%.` : void 0;
+        return /* @__PURE__ */ jsxs2("div", { className: "steprow", children: [
+          /* @__PURE__ */ jsx2("span", { className: "stepno", children: i === 0 ? "entry" : i + 1 }),
+          /* @__PURE__ */ jsx2("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id)) }),
+          /* @__PURE__ */ jsx2("input", { className: "num", value: s.splitPct, title: reworkTitle, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
+          hasGov ? gov ? /* @__PURE__ */ jsx2(
             "input",
             {
               className: "num",
@@ -5113,25 +5127,16 @@ function ProcessEditor({ model, set, rt, proc }) {
               onChange: (e) => upd(i, { samplingPct: e.target.value === "" ? void 0 : +e.target.value }),
               "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} sampling percent`
             }
-          ),
-          /* @__PURE__ */ jsx2("span", { className: "hint", children: "%" })
-        ] }) : null,
-        /* @__PURE__ */ jsxs2("label", { className: "hint termlab", children: [
+          ) : /* @__PURE__ */ jsx2("span", { className: "stepdash", children: "\u2014" }) : null,
           /* @__PURE__ */ jsx2("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} terminal` }),
-          " ends"
-        ] }),
-        s.terminal ? /* @__PURE__ */ jsxs2("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
-          /* @__PURE__ */ jsx2("option", { value: "", children: "outcome\u2026" }),
-          (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx2("option", { value: o, children: o }, o))
-        ] }) : null,
-        p01 > 0 && p01 < 1 ? /* @__PURE__ */ jsxs2("span", { className: "hint rework", title: "If this branch is rework, repeated rounds collapse to an effective split of p/(1\u2212p).", children: [
-          "as rework \u21D2 eff. ",
-          fmtPct(p01 / (1 - p01) * 100),
-          "%"
-        ] }) : null,
-        /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
-      ] }, i);
-    }),
+          s.terminal ? /* @__PURE__ */ jsxs2("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
+            /* @__PURE__ */ jsx2("option", { value: "", children: "outcome\u2026" }),
+            (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx2("option", { value: o, children: o }, o))
+          ] }) : /* @__PURE__ */ jsx2("span", { className: "stepdash", children: "\u2014" }),
+          /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
+        ] }, i);
+      })
+    ] }),
     noTerminal ? /* @__PURE__ */ jsx2("p", { className: "errmsg", children: '\u2715 No terminal step \u2014 the process leads nowhere. Mark the final step "ends" and pick its outcome.' }) : null,
     /* @__PURE__ */ jsxs2("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }, children: [
       /* @__PURE__ */ jsx2(
@@ -5249,7 +5254,7 @@ function RequestTypesPanel({ model, set, p }) {
           ] })
         ] }),
         /* @__PURE__ */ jsx2("h4", { style: { marginTop: 14 }, children: "Assignment" }),
-        /* @__PURE__ */ jsx2("p", { className: "hint", children: "Pick the brands and business units this applies to \u2014 none selected means all." }),
+        /* @__PURE__ */ jsx2("p", { className: "hint", children: "None selected = applies to all." }),
         /* @__PURE__ */ jsx2(
           ToggleChips,
           {
@@ -5322,8 +5327,7 @@ function VolumePanel({ model, p }) {
     (p.notes || []).length ? /* @__PURE__ */ jsx2("div", { className: "valpanel", children: p.notes.map((n, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
       "\u25B2 ",
       n.message || String(n)
-    ] }, i)) }) : null,
-    /* @__PURE__ */ jsx2("p", { className: "phase-note", children: "The cascade grid \u2014 spine rows, type-anywhere, provenance badges, shapes \u2014 lands in a later phase." })
+    ] }, i)) }) : null
   ] });
 }
 function MapPanel({ p }) {
@@ -5341,8 +5345,7 @@ function MapPanel({ p }) {
         "\u25B2 ",
         w.message
       ] }, "w" + i))
-    ] }),
-    /* @__PURE__ */ jsx2("p", { className: "phase-note", children: "The visual map \u2014 flow edges from process steps, dashed capacity links \u2014 lands in a later phase." })
+    ] })
   ] });
 }
 function DefaultsPanel({ model }) {
@@ -5396,8 +5399,7 @@ function DefaultsPanel({ model }) {
           "%"
         ] })
       ] })
-    ] }),
-    /* @__PURE__ */ jsx2("p", { className: "phase-note", children: "The full Defaults form (categories A\xB7C\xB7D\xB7E\xB7F\xB7I) lands in a later phase." })
+    ] })
   ] });
 }
 

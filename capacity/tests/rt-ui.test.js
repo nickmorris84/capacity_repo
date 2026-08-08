@@ -115,10 +115,10 @@ await t("THE CASCADE PROOF: editing the 60% split to 100 moves the derived queue
   setV($$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || "")), 60);
 });
 
-await t("the p/(1−p) multi-round rework figure is computed per sub-100% branch", () => {
+await t("the p/(1−p) multi-round rework figure rides the split field's tooltip", () => {
   click(rtRow("New card application"));
-  const rework = $$(".rework", detail()).map((r) => r.textContent);
-  ok(rework.some((x) => /150%/.test(x)), "60% branch shows eff. 150% (0.6/0.4): " + rework.join(" | "));
+  const split = $$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || ""));
+  ok(/effective 150%/.test(split.getAttribute("title") || ""), "60% branch tooltip shows eff. 150% (0.6/0.4): " + split.getAttribute("title"));
 });
 
 await t("terminal + outcome: unticking 'ends' flags V3 live; reticking clears it", () => {
@@ -127,7 +127,7 @@ await t("terminal + outcome: unticking 'ends' flags V3 live; reticking clears it
   toggle(ends); // off
   ok(/leads nowhere/.test(detail().textContent), "inline V3 error");
   ok(/✕/.test(rtRow("Billing enquiry").textContent), "error glyph in the master list");
-  ok(subtab("Request types").textContent.includes("1 error"), "tab badge shows the error");
+  ok(subtab("Request types").textContent.includes("▲"), "tab marker shows the error");
   toggle(byLabel(/rt_billing ch_voice step 2 terminal/)); // on again
   setV(byLabel(/rt_billing ch_voice step 2 outcome/), "completed");
   ok(!/leads nowhere/.test(detail().textContent), "V3 clears");
@@ -154,7 +154,7 @@ await t("channel picker: adding a Voice process to the card journey, then removi
   ok(proc, "voice process created");
   ok(/inert until it routes/.test(proc.textContent), "empty-process hint");
   click($$(".btn", proc).find((b) => b.textContent === "+ Step"));
-  ok($$(".mixrow", $('[data-testid="process-rt_newcard-ch_voice"]')).length === 1, "entry step added");
+  ok($$(".steprow:not(.head)", $('[data-testid="process-rt_newcard-ch_voice"]')).length === 1, "entry step added");
   click($(".prochead .regdel", $('[data-testid="process-rt_newcard-ch_voice"]')));
   ok(!$('[data-testid="process-rt_newcard-ch_voice"]'), "process removed");
   ok($$(".chip.off", detail()).some((c) => /Voice/.test(c.textContent)), "channel offered again");

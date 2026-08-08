@@ -82,19 +82,18 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
       </div>
       <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined. Request types is the only place anything is wired together.</p>
 
-      {firstTodo
-        ? <div className="pstrip" role="status"><span className="glyph todo">▲</span><span><b>Next:</b> {firstTodo.next}</span>
-            <button className="btn sm" onClick={() => setTab(firstTodo.key)}>Go</button></div>
-        : <div className="pstrip done" role="status"><span className="glyph ok">●</span><span>Model complete — every tab checks out.</span></div>}
+      {firstTodo ? (
+        <div className="pstrip" role="status"><span className="glyph todo">▲</span><span><b>Next:</b> {firstTodo.next}</span>
+          <button className="btn sm" onClick={() => setTab(firstTodo.key)}>Go</button></div>
+      ) : null}
 
       <div className="subtabs" role="tablist" aria-label="Setup tabs">
         {SETUP_TABS.map(([k, label]) => {
           const s = status.find((x) => x.key === k);
           return (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
-              <span className={"glyph " + (s.ok ? "ok" : "todo")}>{s.ok ? "●" : "▲"}</span>
               {label}
-              <span className="count">{s.badge}</span>
+              {!s.ok ? <span className="glyph todo">▲</span> : null}
             </button>
           );
         })}
@@ -208,26 +207,27 @@ function StructurePanel({ model, set }) {
   return (
     <>
       <h3>Structure</h3>
-      <p className="hint">The vocabulary of the estate — five independent lists, nothing interlinked. Request types is where they meet. Renames propagate everywhere; deletes are guarded while anything references the entry.</p>
-      {brandsL}
-      {busL}
-      <div className="reglist">
-        <div className="reghead"><b>Channels</b><span className="count">{(model.channels || []).length}</span></div>
-        <p className="hint" style={{ marginBottom: 6 }}>Enable the subset of the taxonomy the estate uses; each enabled channel carries the defaults new processes inherit.</p>
-        {(model.channels || []).length === 0 ? <span className="hint">none yet</span> : null}
-        {(model.channels || []).map((c) => <ChannelRow key={c.id} model={model} c={c} set={set} />)}
-        {offKeys.length ? (
-          <div className="regoff">
-            {offKeys.map((k) => (
-              <button key={k} className="chip off" onClick={() => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] }))} aria-label={"Enable " + CHANNEL_LABELS[k]}>
-                + {CHANNEL_LABELS[k]}
-              </button>
-            ))}
-          </div>
-        ) : null}
+      <p className="hint">Brands, business units, channels, groups and products — set up here, wired together in Request types. Renames propagate; deletes are guarded while in use.</p>
+      <div className="structgrid">
+        {brandsL}
+        {busL}
+        <div className="reglist">
+          <div className="reghead"><b>Channels</b><span className="count">{(model.channels || []).length}</span></div>
+          {(model.channels || []).length === 0 ? <span className="hint">none yet</span> : null}
+          {(model.channels || []).map((c) => <ChannelRow key={c.id} model={model} c={c} set={set} />)}
+          {offKeys.length ? (
+            <div className="regoff">
+              {offKeys.map((k) => (
+                <button key={k} className="chip off" onClick={() => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] }))} aria-label={"Enable " + CHANNEL_LABELS[k]}>
+                  + {CHANNEL_LABELS[k]}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {groupsL}
+        {prodsL}
       </div>
-      {groupsL}
-      {prodsL}
     </>
   );
 }
@@ -266,7 +266,6 @@ function QueuesPanel({ model, p }) {
               <div className="kv"><span>Fallback AHT</span><b className="num">{fmt(q.fallbackAhtSec)} s</b></div>
               <div className="kv"><span>Staffing</span><b>{q.staffing && q.staffing.wf ? "full physics carried" : q._modified ? "tuned" : "defaults"}</b></div>
               <p className="usage">{usage && usage.processes ? `Used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}.` : "Not used by any process yet."}</p>
-              <p className="phase-note">The full editor — six families × three tiers, manual hires, shared capacity — lands in a later phase.</p>
             </> : null}
           </div>
         </div>
@@ -302,45 +301,47 @@ function ProcessEditor({ model, set, rt, proc }) {
   const chName = nameOf(model.channels, proc.channelId);
   const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
+  const hasGov = (proc.steps || []).some((s) => { const q = (model.queues || []).find((x) => x.id === s.queueId); return q && q.type === "governance"; });
   return (
     <div className="proc" data-testid={"process-" + rt.id + "-" + proc.channelId}>
       <div className="prochead">
         <span className="chip on-toggle">{chName}</span>
-        <span className="hint">entry → steps in order; each step routes a % of what reaches it</span>
         <button className="regdel" onClick={() => set(Ops.deleteProcess(model, rt.id, proc.channelId))} aria-label={"Remove " + chName + " process"}>✕</button>
       </div>
-      {(proc.steps || []).length === 0 ? <p className="hint" style={{ margin: "4px 0" }}>No steps yet — this process is inert until it routes somewhere.</p> : null}
-      {(proc.steps || []).map((s, i) => {
-        const q = (model.queues || []).find((x) => x.id === s.queueId);
-        const gov = q && q.type === "governance";
-        const p01 = (+s.splitPct || 0) / 100;
-        return (
-          <div className="mixrow" key={i}>
-            <span className="jarr" style={{ minWidth: 34 }}>{i === 0 ? "entry" : i + 1 + "."}</span>
-            <select value={s.queueId} onChange={(e) => upd(i, { queueId: e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} queue`}>
-              {(model.queues || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-            </select>
-            <span className="hint">split</span>
-            <input className="num" value={s.splitPct} onChange={(e) => upd(i, { splitPct: +e.target.value || 0 })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} split percent`} />
-            <span className="hint">%</span>
-            {gov ? <>
-              <span className="hint">sample</span>
-              <input className="num" value={s.samplingPct != null ? s.samplingPct : ""} placeholder="—"
-                onChange={(e) => upd(i, { samplingPct: e.target.value === "" ? undefined : +e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} sampling percent`} />
-              <span className="hint">%</span>
-            </> : null}
-            <label className="hint termlab"><input type="checkbox" checked={!!s.terminal} onChange={(e) => upd(i, { terminal: e.target.checked ? true : false })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} terminal`} /> ends</label>
-            {s.terminal ? (
-              <select value={s.outcome || ""} onChange={(e) => upd(i, { outcome: e.target.value || undefined })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} outcome`}>
-                <option value="">outcome…</option>
-                {(proc.outcomes || []).map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            ) : null}
-            {p01 > 0 && p01 < 1 ? <span className="hint rework" title="If this branch is rework, repeated rounds collapse to an effective split of p/(1−p).">as rework ⇒ eff. {fmtPct((p01 / (1 - p01)) * 100)}%</span> : null}
-            <button className="regdel" onClick={() => set(Ops.removeStep(model, rt.id, proc.channelId, i))} aria-label={`${rt.id} ${proc.channelId} remove step ${i + 1}`}>✕</button>
-          </div>
-        );
-      })}
+      {(proc.steps || []).length === 0 ? <p className="hint" style={{ margin: "4px 0" }}>No steps yet — this process is inert until it routes somewhere.</p> : (
+        <div className={"steps" + (hasGov ? " with-sample" : "")}>
+          <div className="steprow head"><span /><span>Queue</span><span>Split %</span>{hasGov ? <span>Sample %</span> : null}<span>Ends</span><span>Outcome</span><span /></div>
+          {(proc.steps || []).map((s, i) => {
+            const q = (model.queues || []).find((x) => x.id === s.queueId);
+            const gov = q && q.type === "governance";
+            const p01 = (+s.splitPct || 0) / 100;
+            const reworkTitle = p01 > 0 && p01 < 1
+              ? `Routes ${s.splitPct}% of what reaches it. If this branch is rework, repeated rounds compound to an effective ${fmtPct((p01 / (1 - p01)) * 100)}%.`
+              : undefined;
+            return (
+              <div className="steprow" key={i}>
+                <span className="stepno">{i === 0 ? "entry" : i + 1}</span>
+                <select value={s.queueId} onChange={(e) => upd(i, { queueId: e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} queue`}>
+                  {(model.queues || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                <input className="num" value={s.splitPct} title={reworkTitle} onChange={(e) => upd(i, { splitPct: +e.target.value || 0 })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} split percent`} />
+                {hasGov ? (gov
+                  ? <input className="num" value={s.samplingPct != null ? s.samplingPct : ""} placeholder="—"
+                      onChange={(e) => upd(i, { samplingPct: e.target.value === "" ? undefined : +e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} sampling percent`} />
+                  : <span className="stepdash">—</span>) : null}
+                <input type="checkbox" checked={!!s.terminal} onChange={(e) => upd(i, { terminal: e.target.checked ? true : false })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} terminal`} />
+                {s.terminal ? (
+                  <select value={s.outcome || ""} onChange={(e) => upd(i, { outcome: e.target.value || undefined })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} outcome`}>
+                    <option value="">outcome…</option>
+                    {(proc.outcomes || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : <span className="stepdash">—</span>}
+                <button className="regdel" onClick={() => set(Ops.removeStep(model, rt.id, proc.channelId, i))} aria-label={`${rt.id} ${proc.channelId} remove step ${i + 1}`}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {noTerminal ? <p className="errmsg">✕ No terminal step — the process leads nowhere. Mark the final step "ends" and pick its outcome.</p> : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
         <button className="btn sm" disabled={!(model.queues || []).length}
@@ -430,7 +431,7 @@ function RequestTypesPanel({ model, set, p }) {
             </div>
 
             <h4 style={{ marginTop: 14 }}>Assignment</h4>
-            <p className="hint">Pick the brands and business units this applies to — none selected means all.</p>
+            <p className="hint">None selected = applies to all.</p>
             <ToggleChips options={model.brands || []} selected={rt.brandIds || []} allLabel="no brands defined yet"
               onToggle={(id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...(rt.brandIds || []), id] }))} />
             <ToggleChips options={model.businessUnits || []} selected={rt.buIds || []} allLabel="no business units defined yet"
@@ -491,7 +492,6 @@ function VolumePanel({ model, p }) {
       {(p.notes || []).length ? <div className="valpanel">
         {p.notes.map((n, i) => <p key={i} className="warnmsg">▲ {n.message || String(n)}</p>)}
       </div> : null}
-      <p className="phase-note">The cascade grid — spine rows, type-anywhere, provenance badges, shapes — lands in a later phase.</p>
     </>
   );
 }
@@ -508,7 +508,6 @@ function MapPanel({ p }) {
         {errors.map((e, i) => <p key={"e" + i} className="errmsg">✕ {e.message}</p>)}
         {warnings.map((w, i) => <p key={"w" + i} className="warnmsg">▲ {w.message}</p>)}
       </div>
-      <p className="phase-note">The visual map — flow edges from process steps, dashed capacity links — lands in a later phase.</p>
     </>
   );
 }
@@ -528,7 +527,6 @@ function DefaultsPanel({ model }) {
         <div className="kv"><span>FTE basis</span><b className="num">{eng.hoursPerFteDay} h/day · {eng.daysWorkedPerFte} days/wk</b></div>
         <div className="kv"><span>Hiring</span><b className="num">cap {(ec.hiring || {}).cap} · buffer {Math.round(((ec.hiring || {}).buffer || 0) * 100)}%</b></div>
       </>}
-      <p className="phase-note">The full Defaults form (categories A·C·D·E·F·I) lands in a later phase.</p>
     </>
   );
 }

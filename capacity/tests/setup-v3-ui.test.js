@@ -50,19 +50,14 @@ async function main() {
 await t("mounts with zero console noise; six tabs in dependency order", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   ok(document.getElementById("root").children.length > 0, "rendered");
-  const labels = $$(".subtabs button").map((b) => {
-    const badge = b.querySelector(".count") ? b.querySelector(".count").textContent : "";
-    return b.textContent.replace(/[●▲]/g, "").replace(badge, "").trim();
-  });
+  const labels = $$(".subtabs button").map((b) => b.textContent.replace(/[●▲✕]/g, "").trim());
   eq(labels.join(" | "), "Structure | Queues | Request types | Volume | Map | Defaults", "tab order");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
-await t("the sample model is complete: every tab shows ● and the strip is green", () => {
-  const glyphs = $$(".subtabs .glyph").map((g) => g.textContent);
-  eq(glyphs.join(""), "●●●●●●", "all six complete");
-  ok($(".pstrip.done"), "progress strip shows done");
-  ok(/Model complete/.test($(".pstrip").textContent), "done copy");
+await t("the sample model is complete: no attention markers, no progress strip", () => {
+  eq($$(".subtabs .glyph").length, 0, "no glyphs when everything checks out");
+  ok(!$(".pstrip"), "the strip only appears while incomplete");
 });
 
 await t("tab navigation switches panels (Structure → Queues → Map)", () => {
@@ -138,7 +133,6 @@ await t("a broken process flags Request types and Map lists the error", () => {
   m = Ops.updateStep(m, "rt_billing", "ch_voice", 1, { terminal: false });
   act(() => { mod.exports.mount(c, { model: m }); });
   ok(subtab("Request types", c).textContent.includes("▲"), "Request types flagged");
-  ok(/1 error/.test(subtab("Request types", c).textContent), "error count in the badge");
   click(subtab("Map", c));
   ok(/leads nowhere/.test($('[data-testid="validation-panel"]', c).textContent), "V3 error listed in Map");
   c.remove();

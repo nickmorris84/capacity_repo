@@ -54,13 +54,13 @@ await t("mounts on Structure with five editable lists and add buttons", () => {
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
-await t("add: + Brand appends a row and the tab badge count moves", () => {
-  const badgeBefore = subtab("Structure").querySelector(".count").textContent;
+await t("add: + Brand appends a row and the list count moves", () => {
+  const countBefore = $(".reghead .count", reglist("Brands")).textContent;
   click($(".btn", reglist("Brands")));
   const rows = $$(".regrow", reglist("Brands"));
   eq(rows.length, 2, "two brand rows");
   ok($$("input", reglist("Brands")).some((i) => i.value === "New brand"), "seeded name");
-  ok(subtab("Structure").querySelector(".count").textContent !== badgeBefore, "badge count moved");
+  ok($(".reghead .count", reglist("Brands")).textContent !== countBefore, "list count moved");
 });
 
 await t("rename propagates by id: renaming Acme shows up in Request types' assignment", () => {
