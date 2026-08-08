@@ -360,7 +360,7 @@ var require_domain = __commonJS({
               out.push({ brandId, buId, requestTypeId: rt.id, channelId: p.channelId, rt, process: p });
       return out;
     }
-    var keyOf = (a) => [a.brandId || "", a.buId || "", a.requestTypeId || "", a.channelId || ""].join("|");
+    var keyOf2 = (a) => [a.brandId || "", a.buId || "", a.requestTypeId || "", a.channelId || ""].join("|");
     function validateDomain(model) {
       const errors = [], warnings = [];
       const ids = (list) => new Set((list || []).map((x) => x.id));
@@ -457,7 +457,7 @@ var require_domain = __commonJS({
     }
     module.exports = {
       LEVELS,
-      keyOf,
+      keyOf: keyOf2,
       leaves,
       assignedBrands,
       assignedBUs,
@@ -477,11 +477,11 @@ var require_domain = __commonJS({
 // model/cascade.js
 var require_cascade = __commonJS({
   "model/cascade.js"(exports, module) {
-    var { LEVELS, keyOf, leaves } = require_domain();
+    var { LEVELS, keyOf: keyOf2, leaves } = require_domain();
     function entryIndex(model) {
       const totals = /* @__PURE__ */ new Map(), shapes = /* @__PURE__ */ new Map();
       for (const e of model.volumeEntries || []) {
-        const k = keyOf(e.scope || {});
+        const k = keyOf2(e.scope || {});
         let daily = e.daily != null ? +e.daily : null;
         if (Array.isArray(e.weekly) && e.weekly.length) {
           const sum = e.weekly.reduce((a, v) => a + (+v || 0), 0);
@@ -525,7 +525,7 @@ var require_cascade = __commonJS({
       const nodes = /* @__PURE__ */ new Map();
       function rec(prefix, li, subset, total, shape, parentProv) {
         if (li === LEVELS.length) {
-          const n = nodes.get(keyOf(prefix)) || { prov: "none" };
+          const n = nodes.get(keyOf2(prefix)) || { prov: "none" };
           const l = subset[0];
           return [{
             brandId: l.brandId,
@@ -543,12 +543,12 @@ var require_cascade = __commonJS({
         const idsHere = [...new Set(subset.map((x) => x[lev]))];
         const kids = idsHere.map((id) => {
           const p = { ...prefix, [lev]: id };
-          const k = keyOf(p);
+          const k = keyOf2(p);
           return { id, key: k, prefix: p, entered: enteredMap.has(k) ? enteredMap.get(k) : null };
         });
-        const d = distribute(total, kids, notes, keyOf(prefix).replace(/\|+$/, "") || null);
-        if (total == null && d.parentTotal != null && !nodes.has(keyOf(prefix)))
-          nodes.set(keyOf(prefix), { total: d.parentTotal, prov: d.parentProv });
+        const d = distribute(total, kids, notes, keyOf2(prefix).replace(/\|+$/, "") || null);
+        if (total == null && d.parentTotal != null && !nodes.has(keyOf2(prefix)))
+          nodes.set(keyOf2(prefix), { total: d.parentTotal, prov: d.parentProv });
         let acc = [];
         for (const kid of kids) {
           const r = d.out.get(kid.key);
@@ -559,7 +559,7 @@ var require_cascade = __commonJS({
         }
         return acc;
       }
-      const rootKey = keyOf({});
+      const rootKey = keyOf2({});
       const rootTotal = enteredMap.has(rootKey) ? enteredMap.get(rootKey) : null;
       const resolved = L.length ? rec({}, 0, L, rootTotal, shapes.get(rootKey) || null, rootTotal != null ? "entered" : null) : [];
       for (let li = LEVELS.length - 1; li >= 0; li--) {
@@ -567,7 +567,7 @@ var require_cascade = __commonJS({
         for (const l of resolved) {
           const p = {};
           for (let i = 0; i < li; i++) p[LEVELS[i]] = l[LEVELS[i]];
-          const k = keyOf(p);
+          const k = keyOf2(p);
           sums.set(k, (sums.get(k) || 0) + l.total);
         }
         for (const [k, t] of sums) if (!nodes.has(k) || nodes.get(k).total == null) nodes.set(k, { total: t, prov: "sum" });
@@ -1070,7 +1070,7 @@ var require_engine = __commonJS({
       const m12 = months && months.length === 12 ? months : new Array(12).fill(1);
       return Array.from({ length: n }, (_, w) => base * (m12[monthForWeek(cfg, w)] ?? 1));
     }
-    var SEASONAL_PRESETS = {
+    var SEASONAL_PRESETS2 = {
       "Flat": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
       "Retail Christmas": [0.9, 0.85, 0.9, 0.95, 1, 1, 1, 1.05, 1.1, 1.15, 1.35, 1.5],
       "Summer lull": [1.05, 1.05, 1.05, 1, 0.95, 0.85, 0.8, 0.8, 0.95, 1.05, 1.1, 1.1],
@@ -2307,7 +2307,7 @@ var require_engine = __commonJS({
         // `crossSkill` field; the §14.3 migration shim derives outbound `supports`
         // from it at simulate time, so old and new configs behave identically.
         strategies: BUILTIN_STRATEGIES.map((s) => ({ ...s })),
-        seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS["Flat"]] },
+        seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS2["Flat"]] },
         queues: [
           { id: v1, name: "Voice \u2014 Billing", type: "voice", brandId: "b1", channel: "voice", priority: 1, dailyVolume: 2e3, aht: 300, profile: [...DEFAULT_PROFILE], asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, fte: 63, agentCost: 32e3, crossSkill: [v2], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
           { id: v2, name: "Voice \u2014 Technical", type: "voice", brandId: "b1", channel: "voice", priority: 2, dailyVolume: 900, aht: 420, profile: [...DEFAULT_PROFILE], asaTarget: 45, maxAbandon: 0.06, patience: 100, shrinkage: 0.3, fte: 47, agentCost: 32e3, crossSkill: [], weeklyVolumes: null, seasonal: null, concurrency: 1, digitalSlaMinutes: 5, digitalSlaPct: 0.8, backlogLimit: 150, deflectsTo: null, resourcing: "resourced", supports: [], wf: wf(), burn: burn() },
@@ -2476,7 +2476,7 @@ var require_engine = __commonJS({
         groups: [{ id: "g_por", name: "Plan of record", builtin: true }, { id: "g_none", name: "No scenarios", builtin: true, scenarioIds: [] }],
         hiring: { cap: 18, buffer: 0.1, activeStrategy: "S1", caps: { segments: {}, brands: {}, total: 18 } },
         strategies: BUILTIN_STRATEGIES.map((s) => ({ ...s })),
-        seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS["Flat"]] },
+        seasonality: { startMonth: 0, system: [...SEASONAL_PRESETS2["Flat"]] },
         queues: [],
         serviceTeams: [],
         costs: { managerCost: 48e3, managerCostMonthly: 4e3, managerRatio: 12 },
@@ -2559,7 +2559,7 @@ var require_engine = __commonJS({
       hoursPerHeadDay,
       monthOfWeek,
       seasonalMult,
-      SEASONAL_PRESETS,
+      SEASONAL_PRESETS: SEASONAL_PRESETS2,
       exogenousVolume,
       projectSupply,
       decideHiring,
@@ -2692,7 +2692,7 @@ var require_ops = __commonJS({
       canDeleteProduct: canDeleteProduct2,
       canDeleteQueue: canDeleteQueue3,
       canDeleteRequestType: canDeleteRequestType2,
-      keyOf
+      keyOf: keyOf2
     } = require_domain();
     var { CHANNELS: CHANNELS4 } = require_taxonomy();
     var { propagateDomain: propagateDomain2 } = require_propagate();
@@ -2932,18 +2932,18 @@ var require_ops = __commonJS({
       procOf(m, rtId, channelId).p.outcomes = [...outcomes];
       return m;
     }
-    function setVolumeEntry(model, scope, { daily, weekly } = {}) {
+    function setVolumeEntry2(model, scope, { daily, weekly } = {}) {
       const m = clone2(model);
-      m.volumeEntries = (m.volumeEntries || []).filter((e2) => keyOf(e2.scope || {}) !== keyOf(scope || {}));
+      m.volumeEntries = (m.volumeEntries || []).filter((e2) => keyOf2(e2.scope || {}) !== keyOf2(scope || {}));
       const e = { id: uid2("ve"), scope: { ...scope } };
       if (daily != null) e.daily = daily;
       if (weekly != null) e.weekly = [...weekly];
       if (e.daily != null || e.weekly != null) m.volumeEntries.push(e);
       return m;
     }
-    function clearVolumeEntry(model, scope) {
+    function clearVolumeEntry2(model, scope) {
       const m = clone2(model);
-      m.volumeEntries = (m.volumeEntries || []).filter((e) => keyOf(e.scope || {}) !== keyOf(scope || {}));
+      m.volumeEntries = (m.volumeEntries || []).filter((e) => keyOf2(e.scope || {}) !== keyOf2(scope || {}));
       return m;
     }
     function blankDomainModel(engineConfig) {
@@ -3056,8 +3056,8 @@ var require_ops = __commonJS({
       updateStep: updateStep2,
       removeStep: removeStep2,
       setOutcomes: setOutcomes2,
-      setVolumeEntry,
-      clearVolumeEntry,
+      setVolumeEntry: setVolumeEntry2,
+      clearVolumeEntry: clearVolumeEntry2,
       blankDomainModel,
       sampleDomainModel,
       buildDomainImportReport
@@ -3952,6 +3952,34 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
+.volgrid{min-width:560px}
+.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
+.volrow.head{border-bottom:0.5px solid var(--line)}
+.volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+.volrow.lvl0 .volname{font-weight:600}
+.volrow.lvl3 .volname{font-weight:500}
+.volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.volrow input{width:100%}
+.prov{font-size:10.5px; border-radius:999px; padding:1px 8px; text-align:center; white-space:nowrap}
+.prov.entered{background:var(--blue-tint); color:var(--blue-deep); font-weight:600}
+.prov.equal{background:var(--canvas); color:var(--ink-3); border:0.5px solid var(--line)}
+.prov.sum{background:var(--teal-bg); color:var(--teal)}
+.prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
+.prov.none{color:var(--ink-3)}
+.shapecell{text-align:left; font-size:11px}
+.shapecell.set{color:var(--purple); font-weight:600}
+.shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
+.shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
+.mapsvg{display:block}
+.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1; cursor:pointer}
+.mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
+.mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
+.mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
+.mnode .mmeta{font-size:9.5px; fill:var(--ink-3); pointer-events:none}
+.medge line{stroke:var(--ink-3); stroke-width:1}
+.medge.cap line{stroke:var(--purple)}
+.medge text{font-size:9px; fill:var(--ink-3); text-anchor:middle}
+.medge.cap text{fill:var(--purple)}
 
 /* ---- phone layout ---- */
 @media(max-width:640px){
@@ -4861,6 +4889,7 @@ function drawerPath(model, q) {
 // ui/v2/SetupV3Page.jsx
 var import_propagate = __toESM(require_propagate());
 var import_domain = __toESM(require_domain());
+var import_engine = __toESM(require_engine());
 var import_taxonomy3 = __toESM(require_taxonomy());
 var import_bridge = __toESM(require_bridge());
 var Ops = __toESM(require_ops());
@@ -4963,9 +4992,9 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       tab === "structure" && /* @__PURE__ */ jsx2(StructurePanel, { model, set: onModelChange }),
       tab === "queues" && /* @__PURE__ */ jsx2(QueuesPanel, { model, set: onModelChange, p }),
       tab === "requestTypes" && /* @__PURE__ */ jsx2(RequestTypesPanel, { model, set: onModelChange, p }),
-      tab === "volume" && /* @__PURE__ */ jsx2(VolumePanel, { model, p }),
-      tab === "map" && /* @__PURE__ */ jsx2(MapPanel, { p }),
-      tab === "defaults" && /* @__PURE__ */ jsx2(DefaultsPanel, { model })
+      tab === "volume" && /* @__PURE__ */ jsx2(VolumePanel, { model, set: onModelChange, p }),
+      tab === "map" && /* @__PURE__ */ jsx2(MapPanel, { model, p, onJump: setTab }),
+      tab === "defaults" && /* @__PURE__ */ jsx2(DefaultsPanel, { model, set: onModelChange })
     ] })
   ] });
 }
@@ -5690,104 +5719,402 @@ function RequestTypesPanel({ model, set, p }) {
     ] })
   ] });
 }
-function VolumePanel({ model, p }) {
-  const label = (scope) => {
-    const parts = [];
-    if (scope.brandId) parts.push(nameOf(model.brands, scope.brandId));
-    if (scope.buId) parts.push(nameOf(model.businessUnits, scope.buId));
-    if (scope.requestTypeId) parts.push(nameOf(model.requestTypes, scope.requestTypeId));
-    if (scope.channelId) parts.push(nameOf(model.channels, scope.channelId));
-    return parts.join(" \u203A ") || "Whole estate";
-  };
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Volume" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "State how much arrives, at whatever granularity you know. Totals cascade down; entered finer figures act as weights; equal split otherwise." }),
-    (model.volumeEntries || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No entries yet." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("table", { className: "vtable", children: [
-      /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { children: [
-        /* @__PURE__ */ jsx2("th", { children: "Applies at" }),
-        /* @__PURE__ */ jsx2("th", { className: "num", children: "Daily" }),
-        /* @__PURE__ */ jsx2("th", { children: "Shape" })
-      ] }) }),
-      /* @__PURE__ */ jsx2("tbody", { children: model.volumeEntries.map((e, i) => /* @__PURE__ */ jsxs2("tr", { children: [
-        /* @__PURE__ */ jsx2("td", { children: label(e.scope || {}) }),
-        /* @__PURE__ */ jsx2("td", { className: "num", children: fmt2(e.daily) }),
-        /* @__PURE__ */ jsx2("td", { children: e.weekly ? "52-week series" : "flat" })
-      ] }, e.id || i)) })
-    ] }) }),
-    (p.notes || []).length ? /* @__PURE__ */ jsx2("div", { className: "valpanel", children: p.notes.map((n, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
-      "\u25B2 ",
-      n.message || String(n)
-    ] }, i)) }) : null
-  ] });
+var PROV_LABELS = { entered: "entered", scaled: "scaled", equal: "equal split", sum: "sum", none: "\u2014" };
+function entryAt(model, scope) {
+  const k = (0, import_domain.keyOf)(scope || {});
+  return (model.volumeEntries || []).find((e) => (0, import_domain.keyOf)(e.scope || {}) === k);
 }
-function MapPanel({ p }) {
-  const { ok, errors, warnings } = p.validation;
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Map" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Prove the world hangs together \u2014 generated from the model, nothing authored here." }),
-    /* @__PURE__ */ jsxs2("div", { className: "valpanel", "data-testid": "validation-panel", children: [
-      ok && !warnings.length ? /* @__PURE__ */ jsx2("p", { className: "okmsg", children: "\u25CF No issues \u2014 every process reaches an end point and every reference resolves." }) : null,
-      errors.map((e, i) => /* @__PURE__ */ jsxs2("p", { className: "errmsg", children: [
+function ShapeEditor({ model, set, scope, entry, daily }) {
+  const [text, setText] = useState2(entry && entry.weekly ? entry.weekly.map((v) => Math.round(v)).join(", ") : "");
+  const [err, setErr] = useState2(null);
+  const apply = (weekly) => {
+    const d = entry && entry.daily != null ? entry.daily : daily;
+    set(Ops.setVolumeEntry(model, scope, { daily: d, weekly }));
+  };
+  return /* @__PURE__ */ jsxs2("div", { className: "shapebox", "data-testid": "shape-editor", children: [
+    /* @__PURE__ */ jsx2("div", { className: "regoff", children: Object.keys(import_engine.SEASONAL_PRESETS).map((name) => /* @__PURE__ */ jsx2("button", { className: "chip off", onClick: () => {
+      const d = (entry && entry.daily != null ? entry.daily : daily) || 0;
+      if (name === "Flat") {
+        set(Ops.setVolumeEntry(model, scope, { daily: d }));
+        setText("");
+        setErr(null);
+        return;
+      }
+      const preset = import_engine.SEASONAL_PRESETS[name];
+      const weekly = Array.from({ length: 52 }, (_, w) => Math.round(d * preset[Math.min(11, Math.floor(w * 12 / 52))]));
+      apply(weekly);
+      setText(weekly.join(", "));
+      setErr(null);
+    }, children: name }, name)) }),
+    /* @__PURE__ */ jsx2(
+      "textarea",
+      {
+        rows: 2,
+        value: text,
+        placeholder: "52 weekly values, comma-separated \u2014 or pick a preset",
+        "aria-label": "Weekly series",
+        onChange: (e) => setText(e.target.value)
+      }
+    ),
+    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => {
+        const vals = text.split(/[\s,;]+/).filter(Boolean).map(Number);
+        if (vals.length !== 52 || vals.some(isNaN)) {
+          setErr(`need 52 numbers, got ${vals.filter((v) => !isNaN(v)).length}`);
+          return;
+        }
+        apply(vals);
+        setErr(null);
+      }, children: "Apply series" }),
+      err ? /* @__PURE__ */ jsxs2("span", { className: "hint", style: { color: "var(--red-ink)" }, children: [
         "\u2715 ",
-        e.message
-      ] }, "e" + i)),
-      warnings.map((w, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
-        "\u25B2 ",
-        w.message
-      ] }, "w" + i))
+        err
+      ] }) : null
     ] })
   ] });
 }
-function DefaultsPanel({ model }) {
+function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsShape }) {
+  const [shapeOpen, setShapeOpen] = useState2(false);
+  const entry = entryAt(model, scope);
+  const total = node ? node.total : 0;
+  const prov = node ? node.prov : "none";
+  const shown = total ? Math.round(total * 10) / 10 : prov === "entered" ? 0 : "";
+  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
+    /* @__PURE__ */ jsxs2("div", { className: "volrow lvl" + level, "data-key": (0, import_domain.keyOf)(scope), children: [
+      /* @__PURE__ */ jsx2("span", { className: "volname", style: { paddingLeft: level * 18 }, children: name }),
+      /* @__PURE__ */ jsx2(
+        "input",
+        {
+          className: "num",
+          value: shown === "" ? "" : shown,
+          placeholder: "\u2014",
+          "aria-label": "Volume at " + name,
+          onChange: (e) => {
+            const v = e.target.value.trim();
+            if (v === "") set(Ops.clearVolumeEntry(model, scope));
+            else set(Ops.setVolumeEntry(model, scope, { daily: +v || 0, ...entry && entry.weekly ? { weekly: entry.weekly } : {} }));
+          }
+        }
+      ),
+      /* @__PURE__ */ jsxs2("span", { className: "prov " + prov, children: [
+        PROV_LABELS[prov] || prov,
+        prov === "scaled" ? " \u25B2" : ""
+      ] }),
+      /* @__PURE__ */ jsx2(
+        "button",
+        {
+          className: "linkbtn shapecell" + (hasOwnShape ? " set" : ""),
+          onClick: () => setShapeOpen(!shapeOpen),
+          "aria-expanded": shapeOpen,
+          "aria-label": "Shape at " + name,
+          children: hasOwnShape ? "52-wk \u25CF" : inheritsShape ? "inherited" : "flat"
+        }
+      )
+    ] }),
+    shapeOpen ? /* @__PURE__ */ jsx2(ShapeEditor, { model, set, scope, entry, daily: total }) : null
+  ] });
+}
+function VolumePanel({ model, set, p }) {
+  const rows = [];
+  const seen = /* @__PURE__ */ new Set();
+  const hasShapeAt = (scope) => {
+    const e = entryAt(model, scope);
+    return !!(e && e.weekly);
+  };
+  rows.push({ level: 0, name: "Whole estate", scope: {} });
+  for (const leaf of p.leaves) {
+    const bKey = leaf.brandId;
+    if (!seen.has(bKey)) {
+      seen.add(bKey);
+      rows.push({ level: 1, name: nameOf(model.brands, leaf.brandId), scope: { brandId: leaf.brandId } });
+    }
+    const buKey = leaf.brandId + "|" + leaf.buId;
+    if (!seen.has(buKey)) {
+      seen.add(buKey);
+      rows.push({ level: 2, name: nameOf(model.businessUnits, leaf.buId), scope: { brandId: leaf.brandId, buId: leaf.buId } });
+    }
+    const rtKey = buKey + "|" + leaf.requestTypeId;
+    if (!seen.has(rtKey)) {
+      seen.add(rtKey);
+      rows.push({ level: 3, name: leaf.rt.name, scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId } });
+    }
+    rows.push({ level: 4, name: nameOf(model.channels, leaf.channelId), scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId } });
+  }
+  const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
+  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
+    /* @__PURE__ */ jsx2("h3", { children: "Volume" }),
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Type at any row \u2014 the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently." }),
+    rows.length <= 1 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "Assign request types first \u2014 the spine builds itself from them." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("div", { className: "volgrid", "data-testid": "cascade-grid", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "volrow head", children: [
+        /* @__PURE__ */ jsx2("span", { className: "volname", children: "Spine" }),
+        /* @__PURE__ */ jsx2("span", { children: "Daily" }),
+        /* @__PURE__ */ jsx2("span", { children: "Provenance" }),
+        /* @__PURE__ */ jsx2("span", { children: "Shape" })
+      ] }),
+      rows.map((r) => {
+        const anc = [];
+        if (r.scope.brandId) {
+          anc.push({});
+          anc.push({ brandId: r.scope.brandId });
+          if (r.scope.buId) anc.push({ brandId: r.scope.brandId, buId: r.scope.buId });
+          if (r.scope.requestTypeId) anc.push({ brandId: r.scope.brandId, buId: r.scope.buId, requestTypeId: r.scope.requestTypeId });
+          anc.pop();
+        }
+        return /* @__PURE__ */ jsx2(
+          VolRow,
+          {
+            model,
+            set,
+            level: r.level,
+            name: r.name,
+            scope: r.scope,
+            node: p.nodes.get((0, import_domain.keyOf)(r.scope)),
+            hasOwnShape: hasShapeAt(r.scope),
+            inheritsShape: anc.some((a) => hasShapeAt(a))
+          },
+          (0, import_domain.keyOf)(r.scope)
+        );
+      })
+    ] }) }),
+    (p.notes || []).length || uncovered.length ? /* @__PURE__ */ jsxs2("div", { className: "valpanel", "data-testid": "volume-notes", children: [
+      (p.notes || []).map((n, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+        "\u25B2 ",
+        n.message || String(n)
+      ] }, "n" + i)),
+      uncovered.map((w, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+        "\u25B2 ",
+        w.message
+      ] }, "u" + i))
+    ] }) : null
+  ] });
+}
+var NODE_W = 168;
+var NODE_H = 52;
+var COL_W = 212;
+var ROW_H = 76;
+function buildMap(model, p) {
+  const depth = /* @__PURE__ */ new Map();
+  for (const rt of model.requestTypes || [])
+    for (const proc of rt.processes || [])
+      proc.steps.forEach((s, i) => {
+        if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
+      });
+  const maxD = Math.max(0, ...depth.values());
+  const cols = [];
+  for (const q of model.queues || []) {
+    const d = depth.has(q.id) ? depth.get(q.id) : maxD + 1;
+    (cols[d] = cols[d] || []).push(q);
+  }
+  const pos = /* @__PURE__ */ new Map();
+  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + d * COL_W, y: 24 + i * ROW_H })));
+  const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
+  const teamY = 24 + Math.max(1, ...cols.map((c) => (c || []).length)) * ROW_H + 10;
+  teams.forEach((tm, i) => pos.set("team:" + tm.id, { x: 20 + i * COL_W, y: teamY }));
+  const flow = [], seenF = /* @__PURE__ */ new Set();
+  for (const rt of model.requestTypes || [])
+    for (const proc of rt.processes || [])
+      for (let i = 0; i + 1 < proc.steps.length; i++) {
+        const s = proc.steps[i + 1];
+        const label = s.splitPct + "%" + (s.samplingPct != null ? " \xB7 sample " + s.samplingPct + "%" : "");
+        const k = proc.steps[i].queueId + ">" + s.queueId + ">" + label;
+        if (!seenF.has(k)) {
+          seenF.add(k);
+          flow.push({ from: proc.steps[i].queueId, to: s.queueId, label });
+        }
+      }
+  const cap = [], seenC = /* @__PURE__ */ new Set();
+  for (const q of model.queues || []) {
+    const st = q.staffing || {};
+    for (const t of st.supports || []) {
+      const k = q.id + ">" + t;
+      if (pos.has(t) && !seenC.has(k)) {
+        seenC.add(k);
+        cap.push({ from: q.id, to: t, label: "supports" });
+      }
+    }
+    for (const t of st.crossSkill || []) {
+      const k = [q.id, t].sort().join(">");
+      if (pos.has(t) && !seenC.has(k)) {
+        seenC.add(k);
+        cap.push({ from: q.id, to: t, label: "cross-skill" });
+      }
+    }
+  }
+  for (const tm of teams)
+    for (const t of tm.coversQueues || [])
+      if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
+  const width = 40 + (maxD + 2) * COL_W;
+  const height = teamY + (teams.length ? NODE_H + 30 : 6);
+  return { pos, flow, cap, teams, width, height };
+}
+function MapPanel({ model, p, onJump }) {
+  const { ok, errors, warnings } = p.validation;
+  const [selQ, setSelQ] = useState2(null);
+  const m = buildMap(model, p);
+  const center = (id) => {
+    const c = m.pos.get(id);
+    return c ? { cx: c.x + NODE_W / 2, cy: c.y + NODE_H / 2 } : null;
+  };
+  const edge = (e, i, dashed) => {
+    const a = center(e.from), b = center(e.to);
+    if (!a || !b) return null;
+    const midX = (a.cx + b.cx) / 2, midY = (a.cy + b.cy) / 2;
+    return /* @__PURE__ */ jsxs2("g", { className: dashed ? "medge cap" : "medge flow", children: [
+      /* @__PURE__ */ jsx2("line", { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, strokeDasharray: dashed ? "5 4" : void 0, markerEnd: dashed ? void 0 : "url(#arr)" }),
+      /* @__PURE__ */ jsx2("text", { x: midX, y: midY - 4, children: e.label })
+    ] }, (dashed ? "c" : "f") + i);
+  };
+  const issues = [
+    ...errors.map((e) => ({ tone: "err", message: e.message, tab: "requestTypes", tabName: "Request types" })),
+    ...warnings.map((w) => ({
+      tone: "warn",
+      message: w.message,
+      tab: w.kind === "uncovered_volume" ? "volume" : "requestTypes",
+      tabName: w.kind === "uncovered_volume" ? "Volume" : "Request types"
+    })),
+    ...(p.notes || []).map((n) => ({ tone: "warn", message: n.message, tab: "volume", tabName: "Volume" }))
+  ];
+  const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
+  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
+    /* @__PURE__ */ jsx2("h3", { children: "Map" }),
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Generated from the model on every view \u2014 flow from process steps, capacity links dashed. Nothing is authored here." }),
+    (model.queues || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("svg", { className: "mapsvg", "data-testid": "map-svg", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
+      /* @__PURE__ */ jsx2("defs", { children: /* @__PURE__ */ jsx2("marker", { id: "arr", markerWidth: "8", markerHeight: "8", refX: "7", refY: "3", orient: "auto", children: /* @__PURE__ */ jsx2("path", { d: "M0,0 L7,3 L0,6 z", fill: "var(--ink-3)" }) }) }),
+      m.flow.map((e, i) => edge(e, i, false)),
+      m.cap.map((e, i) => edge(e, i, true)),
+      (model.queues || []).map((q) => {
+        const c = m.pos.get(q.id);
+        const d = p.queues.get(q.id);
+        return /* @__PURE__ */ jsxs2("g", { className: "mnode" + (selQ === q.id ? " on" : ""), onClick: () => setSelQ(selQ === q.id ? null : q.id), "data-node": q.id, children: [
+          /* @__PURE__ */ jsx2("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
+          /* @__PURE__ */ jsx2("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: q.name.length > 22 ? q.name.slice(0, 21) + "\u2026" : q.name }),
+          /* @__PURE__ */ jsxs2("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+            fmt2(d ? d.volume : 0),
+            "/day \xB7 ",
+            QTYPE_LABELS[q.type] || q.type
+          ] })
+        ] }, q.id);
+      }),
+      m.teams.map((tm) => {
+        const c = m.pos.get("team:" + tm.id);
+        return /* @__PURE__ */ jsxs2("g", { className: "mnode team", "data-node": "team:" + tm.id, children: [
+          /* @__PURE__ */ jsx2("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9", strokeDasharray: "5 4" }),
+          /* @__PURE__ */ jsx2("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: tm.name }),
+          /* @__PURE__ */ jsxs2("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+            tm.size,
+            " FTE shared"
+          ] })
+        ] }, tm.id);
+      })
+    ] }) }),
+    selected ? /* @__PURE__ */ jsx2("div", { className: "valpanel", "data-testid": "map-node-detail", children: /* @__PURE__ */ jsxs2("p", { style: { fontSize: 12.5 }, children: [
+      /* @__PURE__ */ jsx2("b", { children: selected.name }),
+      " \xB7 ",
+      QTYPE_LABELS[selected.type] || selected.type,
+      " \xB7 ",
+      fmt2((p.queues.get(selected.id) || {}).volume || 0),
+      "/day",
+      /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginLeft: 10 }, onClick: () => onJump && onJump("queues"), children: "Edit in Queues" })
+    ] }) }) : null,
+    /* @__PURE__ */ jsxs2("div", { className: "valpanel", "data-testid": "validation-panel", children: [
+      ok && !warnings.length && !(p.notes || []).length ? /* @__PURE__ */ jsx2("p", { className: "okmsg", children: "\u25CF No issues \u2014 every process reaches an end point and every reference resolves." }) : null,
+      issues.map((it, i) => /* @__PURE__ */ jsxs2("p", { className: it.tone === "err" ? "errmsg" : "warnmsg", style: { display: "flex", gap: 8, alignItems: "baseline" }, children: [
+        /* @__PURE__ */ jsxs2("span", { style: { flex: 1 }, children: [
+          it.tone === "err" ? "\u2715" : "\u25B2",
+          " ",
+          it.message
+        ] }),
+        /* @__PURE__ */ jsxs2("button", { className: "linkbtn", onClick: () => onJump && onJump(it.tab), children: [
+          "Fix in ",
+          it.tabName,
+          " \u2192"
+        ] })
+      ] }, i))
+    ] })
+  ] });
+}
+function G({ name, children }) {
+  return /* @__PURE__ */ jsxs2("section", { className: "fam-sec", children: [
+    /* @__PURE__ */ jsx2("div", { className: "famhead", children: /* @__PURE__ */ jsx2("b", { children: name }) }),
+    /* @__PURE__ */ jsx2("div", { className: "fields", children })
+  ] });
+}
+function DefaultsPanel({ model, set }) {
   const ec = model.engineConfig;
-  const eng = ec && ec.engine || {};
+  if (!ec) return /* @__PURE__ */ jsxs2(Fragment2, { children: [
+    /* @__PURE__ */ jsx2("h3", { children: "Defaults" }),
+    /* @__PURE__ */ jsx2("p", { className: "warnmsg", children: "\u25B2 No engine defaults attached \u2014 import a model or start from the sample." })
+  ] });
+  const eng = ec.engine || {}, hiring = ec.hiring || {}, costs = ec.costs || {}, cx = ec.cx || {};
+  const ot = (ec.settings || {}).ot || { maxDailyHours: 2, weeklyCeiling: 10, premium: 1.5, burnoutLoad: 10 };
+  const season = ec.seasonality || { startMonth: 0, system: new Array(12).fill(1) };
+  const updEC = (block, patch) => {
+    const m = JSON.parse(JSON.stringify(model));
+    m.engineConfig[block] = { ...m.engineConfig[block] || {}, ...patch };
+    set(m);
+  };
+  const updOt = (patch) => {
+    const m = JSON.parse(JSON.stringify(model));
+    m.engineConfig.settings = m.engineConfig.settings || {};
+    m.engineConfig.settings.ot = { ...ot, ...patch };
+    set(m);
+  };
+  const presetName = Object.keys(import_engine.SEASONAL_PRESETS).find((k) => JSON.stringify(import_engine.SEASONAL_PRESETS[k]) === JSON.stringify(season.system)) || "";
   return /* @__PURE__ */ jsxs2(Fragment2, { children: [
     /* @__PURE__ */ jsx2("h3", { children: "Defaults" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Global physics every queue inherits unless it overrides them." }),
-    !ec ? /* @__PURE__ */ jsx2("p", { className: "warnmsg", children: "\u25B2 No engine defaults attached \u2014 import a model or start from the sample." }) : /* @__PURE__ */ jsxs2(Fragment2, { children: [
-      /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-        /* @__PURE__ */ jsx2("span", { children: "Horizon" }),
-        /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-          eng.horizonWeeks || 52,
-          " weeks"
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues." }),
+    /* @__PURE__ */ jsxs2(G, { name: "Simulation frame", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Horizon (weeks)", value: eng.horizonWeeks, onChange: (v) => updEC("engine", { horizonWeeks: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Day start (h)", value: eng.dayStart, onChange: (v) => updEC("engine", { dayStart: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Day end (h)", value: eng.dayEnd, onChange: (v) => updEC("engine", { dayEnd: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Interval (min)", value: eng.intervalMin, onChange: (v) => updEC("engine", { intervalMin: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Days per week", value: eng.daysPerWeek, onChange: (v) => updEC("engine", { daysPerWeek: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Hours per FTE day", value: eng.hoursPerFteDay, onChange: (v) => updEC("engine", { hoursPerFteDay: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Days worked per FTE", value: eng.daysWorkedPerFte, onChange: (v) => updEC("engine", { daysWorkedPerFte: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eng.occupancyCeiling || 0.85) * 100), onChange: (v) => updEC("engine", { occupancyCeiling: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Cross-skill proficiency (%)", value: Math.round((eng.crossSkillProficiency || 0.9) * 100), onChange: (v) => updEC("engine", { crossSkillProficiency: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+        /* @__PURE__ */ jsx2("label", { children: "Currency" }),
+        /* @__PURE__ */ jsx2("input", { value: eng.currency || "\xA3", "aria-label": "Currency", onChange: (e) => updEC("engine", { currency: e.target.value }) })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs2(G, { name: "Workforce policy", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Hiring cap (/wk)", value: hiring.cap, onChange: (v) => updEC("hiring", { cap: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Hiring buffer (%)", value: Math.round((hiring.buffer || 0) * 100), onChange: (v) => updEC("hiring", { buffer: n0(v) / 100 }) })
+    ] }),
+    /* @__PURE__ */ jsxs2(G, { name: "Overtime", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Max OT (h/day)", value: ot.maxDailyHours, onChange: (v) => updOt({ maxDailyHours: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "OT ceiling (h/wk)", value: ot.weeklyCeiling, onChange: (v) => updOt({ weeklyCeiling: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "OT premium (\xD7)", value: ot.premium, onChange: (v) => updOt({ premium: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "OT burnout load", value: ot.burnoutLoad, onChange: (v) => updOt({ burnoutLoad: n0(v) }) })
+    ] }),
+    /* @__PURE__ */ jsxs2(G, { name: "Cost model", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Manager cost (\xA3/yr)", value: costs.managerCost, onChange: (v) => updEC("costs", { managerCost: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Manager ratio (1:n)", value: costs.managerRatio, onChange: (v) => updEC("costs", { managerRatio: n0(v) }) })
+    ] }),
+    /* @__PURE__ */ jsxs2(G, { name: "Customer behaviour", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Customer base", value: cx.customerBase, onChange: (v) => updEC("cx", { customerBase: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Cost per lost customer (\xA3)", value: cx.costPerLostCustomer, onChange: (v) => updEC("cx", { costPerLostCustomer: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Churn on abandon (%)", value: Math.round((cx.churnAbandon || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnAbandon: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Churn on long wait (%)", value: Math.round((cx.churnWait || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnWait: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Churn on digital miss (%)", value: Math.round((cx.churnDigital || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnDigital: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Repeat uplift (\xD7)", value: cx.repeatUplift, onChange: (v) => updEC("cx", { repeatUplift: n0(v) }) })
+    ] }),
+    /* @__PURE__ */ jsxs2(G, { name: "Pattern libraries", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+        /* @__PURE__ */ jsx2("label", { children: "System seasonality" }),
+        /* @__PURE__ */ jsxs2("select", { value: presetName, "aria-label": "System seasonality", onChange: (e) => {
+          const nm = e.target.value;
+          if (nm) updEC("seasonality", { system: [...import_engine.SEASONAL_PRESETS[nm]] });
+        }, children: [
+          presetName === "" ? /* @__PURE__ */ jsx2("option", { value: "", children: "custom" }) : null,
+          Object.keys(import_engine.SEASONAL_PRESETS).map((k) => /* @__PURE__ */ jsx2("option", { value: k, children: k }, k))
         ] })
       ] }),
-      /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-        /* @__PURE__ */ jsx2("span", { children: "Operating day" }),
-        /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-          eng.dayStart,
-          ":00 \u2013 ",
-          eng.dayEnd,
-          ":00 \xB7 ",
-          eng.intervalMin,
-          "-min intervals"
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-        /* @__PURE__ */ jsx2("span", { children: "Occupancy ceiling" }),
-        /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-          Math.round((eng.occupancyCeiling || 0.85) * 100),
-          "%"
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-        /* @__PURE__ */ jsx2("span", { children: "FTE basis" }),
-        /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-          eng.hoursPerFteDay,
-          " h/day \xB7 ",
-          eng.daysWorkedPerFte,
-          " days/wk"
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-        /* @__PURE__ */ jsx2("span", { children: "Hiring" }),
-        /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-          "cap ",
-          (ec.hiring || {}).cap,
-          " \xB7 buffer ",
-          Math.round(((ec.hiring || {}).buffer || 0) * 100),
-          "%"
-        ] })
+      /* @__PURE__ */ jsx2(NumF, { label: "Season start month (0\u201311)", value: season.startMonth, onChange: (v) => updEC("seasonality", { startMonth: n0(v) }) }),
+      /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
+        /* @__PURE__ */ jsx2("label", { children: "Presets" }),
+        /* @__PURE__ */ jsx2("p", { className: "hint", children: "The same library powers the shape chips on the Volume tab." })
       ] })
     ] })
   ] });
@@ -5798,10 +6125,10 @@ import { useState as useState5, useMemo as useMemo4, Fragment as Fragment3 } fro
 
 // ui/v2/compute.js
 var import_adapter = __toESM(require_adapter());
-var import_engine2 = __toESM(require_engine());
+var import_engine3 = __toESM(require_engine());
 
 // ui/sim-set.js
-var import_engine = __toESM(require_engine());
+var import_engine2 = __toESM(require_engine());
 import { useRef, useState as useState3, useEffect, useMemo as useMemo3 } from "react";
 
 // ui/views.js
@@ -5850,10 +6177,10 @@ function richMatrix(cfg) {
   const cells = {};
   for (const g of groups) {
     const ids = groupScenarioIds(cfg, g.id);
-    const scoped = (0, import_engine2.applyGroupScope)(cfg, g.id);
+    const scoped = (0, import_engine3.applyGroupScope)(cfg, g.id);
     cells[g.id] = {};
     for (const s of strategies) {
-      const sim = (0, import_engine2.simulate)(scoped, { strategy: s.id, viewIds: ids });
+      const sim = (0, import_engine3.simulate)(scoped, { strategy: s.id, viewIds: ids });
       let redWeeks = 0, greenQW = 0, totalQW = 0;
       for (const w of sim.weeks) {
         if (cfg.queues.some((q) => w.queues[q.id].status === "red")) redWeeks++;
@@ -5884,8 +6211,8 @@ function computeBase(model) {
   return { cfg, matrix, strategies, groups };
 }
 function computeDetail(cfg, selected) {
-  const scoped = (0, import_engine2.applyGroupScope)(cfg, selected.gid);
-  const detail = (0, import_engine2.simulate)(scoped, { strategy: selected.sid, viewIds: groupScenarioIds(cfg, selected.gid), captureDaily: true });
+  const scoped = (0, import_engine3.applyGroupScope)(cfg, selected.gid);
+  const detail = (0, import_engine3.simulate)(scoped, { strategy: selected.sid, viewIds: groupScenarioIds(cfg, selected.gid), captureDaily: true });
   return { detail, summary: detail.summary };
 }
 function pickSelection(selected, base) {
@@ -5893,7 +6220,7 @@ function pickSelection(selected, base) {
 }
 function quickHeadline(model) {
   const cfg = (0, import_adapter.v2ToEngineConfig)(model);
-  const sim = (0, import_engine2.simulate)(cfg, { strategy: "S1" });
+  const sim = (0, import_engine3.simulate)(cfg, { strategy: "S1" });
   const w = sim.weeks;
   const lastWk = w[w.length - 1];
   const availFte = cfg.queues.reduce((a, q) => a + (lastWk.queues[q.id].active || 0), 0);
@@ -7130,12 +7457,12 @@ function App({ initialModel }) {
 }
 
 // ui/v2/app-main.jsx
-var import_engine3 = __toESM(require_engine());
+var import_engine4 = __toESM(require_engine());
 var import_migrate = __toESM(require_migrate());
 import { jsx as jsx7 } from "react/jsx-runtime";
 var OWNER = "nick_morris";
 function seedModel() {
-  return (0, import_migrate.migrateV1ToV2)((0, import_engine3.makeDefaultConfig)());
+  return (0, import_migrate.migrateV1ToV2)((0, import_engine4.makeDefaultConfig)());
 }
 function injectStyle() {
   if (typeof document === "undefined" || document.getElementById("capacity-v2-style")) return;

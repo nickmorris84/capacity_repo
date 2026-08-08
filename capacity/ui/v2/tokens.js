@@ -378,6 +378,34 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
+.volgrid{min-width:560px}
+.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
+.volrow.head{border-bottom:0.5px solid var(--line)}
+.volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+.volrow.lvl0 .volname{font-weight:600}
+.volrow.lvl3 .volname{font-weight:500}
+.volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.volrow input{width:100%}
+.prov{font-size:10.5px; border-radius:999px; padding:1px 8px; text-align:center; white-space:nowrap}
+.prov.entered{background:var(--blue-tint); color:var(--blue-deep); font-weight:600}
+.prov.equal{background:var(--canvas); color:var(--ink-3); border:0.5px solid var(--line)}
+.prov.sum{background:var(--teal-bg); color:var(--teal)}
+.prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
+.prov.none{color:var(--ink-3)}
+.shapecell{text-align:left; font-size:11px}
+.shapecell.set{color:var(--purple); font-weight:600}
+.shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
+.shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
+.mapsvg{display:block}
+.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1; cursor:pointer}
+.mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
+.mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
+.mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
+.mnode .mmeta{font-size:9.5px; fill:var(--ink-3); pointer-events:none}
+.medge line{stroke:var(--ink-3); stroke-width:1}
+.medge.cap line{stroke:var(--purple)}
+.medge text{font-size:9px; fill:var(--ink-3); text-anchor:middle}
+.medge.cap text{fill:var(--purple)}
 
 /* ---- phone layout ---- */
 @media(max-width:640px){

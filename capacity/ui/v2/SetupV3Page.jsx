@@ -12,7 +12,8 @@
  */
 import { useState, useMemo } from "react";
 import { propagateDomain } from "../../model/propagate.js";
-import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
+import { queueUsage, keyOf, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
+import { SEASONAL_PRESETS } from "../../engine/engine.js";
 import { CHANNELS } from "../../model/taxonomy.js";
 import { engineTypeOf, engineQueueDefaults } from "../../model/bridge.js";
 import * as Ops from "../../model/ops.js";
@@ -105,9 +106,9 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
         {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
-        {tab === "volume" && <VolumePanel model={model} p={p} />}
-        {tab === "map" && <MapPanel p={p} />}
-        {tab === "defaults" && <DefaultsPanel model={model} />}
+        {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
+        {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
+        {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
       </div>
     </div>
   );
@@ -719,72 +720,344 @@ function RequestTypesPanel({ model, set, p }) {
   );
 }
 
-// ---- 4 · Volume — entries + cascade summary (grid lands in U5) ---------------
-function VolumePanel({ model, p }) {
-  const label = (scope) => {
-    const parts = [];
-    if (scope.brandId) parts.push(nameOf(model.brands, scope.brandId));
-    if (scope.buId) parts.push(nameOf(model.businessUnits, scope.buId));
-    if (scope.requestTypeId) parts.push(nameOf(model.requestTypes, scope.requestTypeId));
-    if (scope.channelId) parts.push(nameOf(model.channels, scope.channelId));
-    return parts.join(" › ") || "Whole estate";
+// ---- 4 · Volume — the cascade grid (U5) --------------------------------------
+// Rows are the spine (estate → brand → BU → request type → channel). Type a
+// number at ANY row: it becomes an entered figure and everything beneath
+// re-resolves live (entered finer figures act as weights; equal split
+// otherwise; over-runs scaled AND flagged — V5). Provenance badge on every
+// row. A row can also carry a 52-week series (typed, or expanded from a
+// seasonality preset) — shapes cascade down and aggregate up to queues.
+const PROV_LABELS = { entered: "entered", scaled: "scaled", equal: "equal split", sum: "sum", none: "—" };
+
+function entryAt(model, scope) {
+  const k = keyOf(scope || {});
+  return (model.volumeEntries || []).find((e) => keyOf(e.scope || {}) === k);
+}
+
+function ShapeEditor({ model, set, scope, entry, daily }) {
+  const [text, setText] = useState(entry && entry.weekly ? entry.weekly.map((v) => Math.round(v)).join(", ") : "");
+  const [err, setErr] = useState(null);
+  const apply = (weekly) => {
+    const d = entry && entry.daily != null ? entry.daily : daily;
+    set(Ops.setVolumeEntry(model, scope, { daily: d, weekly }));
   };
   return (
+    <div className="shapebox" data-testid="shape-editor">
+      <div className="regoff">
+        {Object.keys(SEASONAL_PRESETS).map((name) => (
+          <button key={name} className="chip off" onClick={() => {
+            const d = (entry && entry.daily != null ? entry.daily : daily) || 0;
+            if (name === "Flat") { set(Ops.setVolumeEntry(model, scope, { daily: d })); setText(""); setErr(null); return; }
+            const preset = SEASONAL_PRESETS[name];
+            const weekly = Array.from({ length: 52 }, (_, w) => Math.round(d * preset[Math.min(11, Math.floor((w * 12) / 52))]));
+            apply(weekly); setText(weekly.join(", ")); setErr(null);
+          }}>{name}</button>
+        ))}
+      </div>
+      <textarea rows={2} value={text} placeholder="52 weekly values, comma-separated — or pick a preset"
+        aria-label="Weekly series" onChange={(e) => setText(e.target.value)} />
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="btn sm" onClick={() => {
+          const vals = text.split(/[\s,;]+/).filter(Boolean).map(Number);
+          if (vals.length !== 52 || vals.some(isNaN)) { setErr(`need 52 numbers, got ${vals.filter((v) => !isNaN(v)).length}`); return; }
+          apply(vals); setErr(null);
+        }}>Apply series</button>
+        {err ? <span className="hint" style={{ color: "var(--red-ink)" }}>✕ {err}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsShape }) {
+  const [shapeOpen, setShapeOpen] = useState(false);
+  const entry = entryAt(model, scope);
+  const total = node ? node.total : 0;
+  const prov = node ? node.prov : "none";
+  const shown = total ? Math.round(total * 10) / 10 : (prov === "entered" ? 0 : "");
+  return (
     <>
-      <h3>Volume</h3>
-      <p className="hint">State how much arrives, at whatever granularity you know. Totals cascade down; entered finer figures act as weights; equal split otherwise.</p>
-      {(model.volumeEntries || []).length === 0 ? <p className="hint">No entries yet.</p> : (
-        <div className="scrollx"><table className="vtable">
-          <thead><tr><th>Applies at</th><th className="num">Daily</th><th>Shape</th></tr></thead>
-          <tbody>
-            {model.volumeEntries.map((e, i) => (
-              <tr key={e.id || i}>
-                <td>{label(e.scope || {})}</td>
-                <td className="num">{fmt(e.daily)}</td>
-                <td>{e.weekly ? "52-week series" : "flat"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
-      )}
-      {(p.notes || []).length ? <div className="valpanel">
-        {p.notes.map((n, i) => <p key={i} className="warnmsg">▲ {n.message || String(n)}</p>)}
-      </div> : null}
+      <div className={"volrow lvl" + level} data-key={keyOf(scope)}>
+        <span className="volname" style={{ paddingLeft: level * 18 }}>{name}</span>
+        <input className="num" value={shown === "" ? "" : shown} placeholder="—" aria-label={"Volume at " + name}
+          onChange={(e) => {
+            const v = e.target.value.trim();
+            if (v === "") set(Ops.clearVolumeEntry(model, scope));
+            else set(Ops.setVolumeEntry(model, scope, { daily: +v || 0, ...(entry && entry.weekly ? { weekly: entry.weekly } : {}) }));
+          }} />
+        <span className={"prov " + prov}>{PROV_LABELS[prov] || prov}{prov === "scaled" ? " ▲" : ""}</span>
+        <button className={"linkbtn shapecell" + (hasOwnShape ? " set" : "")} onClick={() => setShapeOpen(!shapeOpen)} aria-expanded={shapeOpen}
+          aria-label={"Shape at " + name}>
+          {hasOwnShape ? "52-wk ●" : inheritsShape ? "inherited" : "flat"}
+        </button>
+      </div>
+      {shapeOpen ? <ShapeEditor model={model} set={set} scope={scope} entry={entry} daily={total} /> : null}
     </>
   );
 }
 
-// ---- 5 · Map — validation panel (the generated visual lands in U6) -----------
-function MapPanel({ p }) {
+function VolumePanel({ model, set, p }) {
+  // Spine tree from the resolved leaves (assignment-driven).
+  const rows = [];
+  const seen = new Set();
+  const hasShapeAt = (scope) => { const e = entryAt(model, scope); return !!(e && e.weekly); };
+  rows.push({ level: 0, name: "Whole estate", scope: {} });
+  for (const leaf of p.leaves) {
+    const bKey = leaf.brandId;
+    if (!seen.has(bKey)) { seen.add(bKey); rows.push({ level: 1, name: nameOf(model.brands, leaf.brandId), scope: { brandId: leaf.brandId } }); }
+    const buKey = leaf.brandId + "|" + leaf.buId;
+    if (!seen.has(buKey)) { seen.add(buKey); rows.push({ level: 2, name: nameOf(model.businessUnits, leaf.buId), scope: { brandId: leaf.brandId, buId: leaf.buId } }); }
+    const rtKey = buKey + "|" + leaf.requestTypeId;
+    if (!seen.has(rtKey)) { seen.add(rtKey); rows.push({ level: 3, name: leaf.rt.name, scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId } }); }
+    rows.push({ level: 4, name: nameOf(model.channels, leaf.channelId), scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId } });
+  }
+  const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
+  return (
+    <>
+      <h3>Volume</h3>
+      <p className="hint">Type at any row — the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently.</p>
+      {rows.length <= 1 ? <p className="hint">Assign request types first — the spine builds itself from them.</p> : (
+        <div className="scrollx">
+          <div className="volgrid" data-testid="cascade-grid">
+            <div className="volrow head"><span className="volname">Spine</span><span>Daily</span><span>Provenance</span><span>Shape</span></div>
+            {rows.map((r) => {
+              const anc = [];
+              if (r.scope.brandId) {
+                anc.push({});
+                anc.push({ brandId: r.scope.brandId });
+                if (r.scope.buId) anc.push({ brandId: r.scope.brandId, buId: r.scope.buId });
+                if (r.scope.requestTypeId) anc.push({ brandId: r.scope.brandId, buId: r.scope.buId, requestTypeId: r.scope.requestTypeId });
+                anc.pop(); // self is not an ancestor
+              }
+              return (
+                <VolRow key={keyOf(r.scope)} model={model} set={set} level={r.level} name={r.name} scope={r.scope}
+                  node={p.nodes.get(keyOf(r.scope))} hasOwnShape={hasShapeAt(r.scope)}
+                  inheritsShape={anc.some((a) => hasShapeAt(a))} />
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {(p.notes || []).length || uncovered.length ? (
+        <div className="valpanel" data-testid="volume-notes">
+          {(p.notes || []).map((n, i) => <p key={"n" + i} className="warnmsg">▲ {n.message || String(n)}</p>)}
+          {uncovered.map((w, i) => <p key={"u" + i} className="warnmsg">▲ {w.message}</p>)}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+// ---- 5 · Map — a pure generated artefact (U6) --------------------------------
+// Nothing is authored here, ever. Queues are nodes placed by journey depth;
+// flow edges come entirely from process steps (split % · sampling); capacity-
+// sharing (supports, cross-skill, service teams) draws DASHED, visually
+// distinct from flow. The validation panel lives here, each issue with a
+// jump-link to the tab that fixes it.
+const NODE_W = 168, NODE_H = 52, COL_W = 212, ROW_H = 76;
+
+function buildMap(model, p) {
+  const depth = new Map();
+  for (const rt of model.requestTypes || [])
+    for (const proc of rt.processes || [])
+      proc.steps.forEach((s, i) => {
+        if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
+      });
+  const maxD = Math.max(0, ...depth.values());
+  const cols = [];
+  for (const q of model.queues || []) {
+    const d = depth.has(q.id) ? depth.get(q.id) : maxD + 1;
+    (cols[d] = cols[d] || []).push(q);
+  }
+  const pos = new Map();
+  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + d * COL_W, y: 24 + i * ROW_H })));
+  const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
+  const teamY = 24 + Math.max(1, ...cols.map((c) => (c || []).length)) * ROW_H + 10;
+  teams.forEach((tm, i) => pos.set("team:" + tm.id, { x: 20 + i * COL_W, y: teamY }));
+
+  const flow = [], seenF = new Set();
+  for (const rt of model.requestTypes || [])
+    for (const proc of rt.processes || [])
+      for (let i = 0; i + 1 < proc.steps.length; i++) {
+        const s = proc.steps[i + 1];
+        const label = s.splitPct + "%" + (s.samplingPct != null ? " · sample " + s.samplingPct + "%" : "");
+        const k = proc.steps[i].queueId + ">" + s.queueId + ">" + label;
+        if (!seenF.has(k)) { seenF.add(k); flow.push({ from: proc.steps[i].queueId, to: s.queueId, label }); }
+      }
+  const cap = [], seenC = new Set();
+  for (const q of model.queues || []) {
+    const st = q.staffing || {};
+    for (const t of st.supports || []) { const k = q.id + ">" + t; if (pos.has(t) && !seenC.has(k)) { seenC.add(k); cap.push({ from: q.id, to: t, label: "supports" }); } }
+    for (const t of st.crossSkill || []) { const k = [q.id, t].sort().join(">"); if (pos.has(t) && !seenC.has(k)) { seenC.add(k); cap.push({ from: q.id, to: t, label: "cross-skill" }); } }
+  }
+  for (const tm of teams)
+    for (const t of tm.coversQueues || [])
+      if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
+  const width = 40 + (maxD + 2) * COL_W;
+  const height = teamY + (teams.length ? NODE_H + 30 : 6);
+  return { pos, flow, cap, teams, width, height };
+}
+
+function MapPanel({ model, p, onJump }) {
   const { ok, errors, warnings } = p.validation;
+  const [selQ, setSelQ] = useState(null);
+  const m = buildMap(model, p);
+  const center = (id) => { const c = m.pos.get(id); return c ? { cx: c.x + NODE_W / 2, cy: c.y + NODE_H / 2 } : null; };
+  const edge = (e, i, dashed) => {
+    const a = center(e.from), b = center(e.to);
+    if (!a || !b) return null;
+    const midX = (a.cx + b.cx) / 2, midY = (a.cy + b.cy) / 2;
+    return (
+      <g key={(dashed ? "c" : "f") + i} className={dashed ? "medge cap" : "medge flow"}>
+        <line x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy} strokeDasharray={dashed ? "5 4" : undefined} markerEnd={dashed ? undefined : "url(#arr)"} />
+        <text x={midX} y={midY - 4}>{e.label}</text>
+      </g>
+    );
+  };
+  const issues = [
+    ...errors.map((e) => ({ tone: "err", message: e.message, tab: "requestTypes", tabName: "Request types" })),
+    ...warnings.map((w) => ({
+      tone: "warn", message: w.message,
+      tab: w.kind === "uncovered_volume" ? "volume" : "requestTypes",
+      tabName: w.kind === "uncovered_volume" ? "Volume" : "Request types",
+    })),
+    ...(p.notes || []).map((n) => ({ tone: "warn", message: n.message, tab: "volume", tabName: "Volume" })),
+  ];
+  const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return (
     <>
       <h3>Map</h3>
-      <p className="hint">Prove the world hangs together — generated from the model, nothing authored here.</p>
+      <p className="hint">Generated from the model on every view — flow from process steps, capacity links dashed. Nothing is authored here.</p>
+      {(model.queues || []).length === 0 ? <p className="hint">The map draws itself once queues and processes exist.</p> : (
+        <div className="scrollx">
+          <svg className="mapsvg" data-testid="map-svg" width={m.width} height={m.height} viewBox={`0 0 ${m.width} ${m.height}`}>
+            <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-3)" /></marker></defs>
+            {m.flow.map((e, i) => edge(e, i, false))}
+            {m.cap.map((e, i) => edge(e, i, true))}
+            {(model.queues || []).map((q) => {
+              const c = m.pos.get(q.id);
+              const d = p.queues.get(q.id);
+              return (
+                <g key={q.id} className={"mnode" + (selQ === q.id ? " on" : "")} onClick={() => setSelQ(selQ === q.id ? null : q.id)} data-node={q.id}>
+                  <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" />
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{q.name.length > 22 ? q.name.slice(0, 21) + "…" : q.name}</text>
+                  <text className="mmeta" x={c.x + 10} y={c.y + 38}>{fmt(d ? d.volume : 0)}/day · {QTYPE_LABELS[q.type] || q.type}</text>
+                </g>
+              );
+            })}
+            {m.teams.map((tm) => {
+              const c = m.pos.get("team:" + tm.id);
+              return (
+                <g key={tm.id} className="mnode team" data-node={"team:" + tm.id}>
+                  <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" strokeDasharray="5 4" />
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{tm.name}</text>
+                  <text className="mmeta" x={c.x + 10} y={c.y + 38}>{tm.size} FTE shared</text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+      {selected ? (
+        <div className="valpanel" data-testid="map-node-detail">
+          <p style={{ fontSize: 12.5 }}><b>{selected.name}</b> · {QTYPE_LABELS[selected.type] || selected.type} · {fmt((p.queues.get(selected.id) || {}).volume || 0)}/day
+            <button className="btn sm" style={{ marginLeft: 10 }} onClick={() => onJump && onJump("queues")}>Edit in Queues</button></p>
+        </div>
+      ) : null}
       <div className="valpanel" data-testid="validation-panel">
-        {ok && !warnings.length ? <p className="okmsg">● No issues — every process reaches an end point and every reference resolves.</p> : null}
-        {errors.map((e, i) => <p key={"e" + i} className="errmsg">✕ {e.message}</p>)}
-        {warnings.map((w, i) => <p key={"w" + i} className="warnmsg">▲ {w.message}</p>)}
+        {ok && !warnings.length && !(p.notes || []).length ? <p className="okmsg">● No issues — every process reaches an end point and every reference resolves.</p> : null}
+        {issues.map((it, i) => (
+          <p key={i} className={it.tone === "err" ? "errmsg" : "warnmsg"} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+            <span style={{ flex: 1 }}>{it.tone === "err" ? "✕" : "▲"} {it.message}</span>
+            <button className="linkbtn" onClick={() => onJump && onJump(it.tab)}>Fix in {it.tabName} →</button>
+          </p>
+        ))}
       </div>
     </>
   );
 }
 
-// ---- 6 · Defaults — the physics everything inherits --------------------------
-function DefaultsPanel({ model }) {
+// ---- 6 · Defaults — what everything inherits (U6) ----------------------------
+// One scrolling form over the engineConfig carry: A simulation frame ·
+// C workforce policy · D overtime · E cost model · F customer behaviour ·
+// I pattern libraries (applied in Volume). Channel defaults live in
+// Structure; service teams in Queues; risk thresholds read in Results.
+function G({ name, children }) {
+  return <section className="fam-sec"><div className="famhead"><b>{name}</b></div><div className="fields">{children}</div></section>;
+}
+function DefaultsPanel({ model, set }) {
   const ec = model.engineConfig;
-  const eng = (ec && ec.engine) || {};
+  if (!ec) return (
+    <>
+      <h3>Defaults</h3>
+      <p className="warnmsg">▲ No engine defaults attached — import a model or start from the sample.</p>
+    </>
+  );
+  const eng = ec.engine || {}, hiring = ec.hiring || {}, costs = ec.costs || {}, cx = ec.cx || {};
+  const ot = ((ec.settings || {}).ot) || { maxDailyHours: 2, weeklyCeiling: 10, premium: 1.5, burnoutLoad: 10 };
+  const season = ec.seasonality || { startMonth: 0, system: new Array(12).fill(1) };
+  const updEC = (block, patch) => {
+    const m = JSON.parse(JSON.stringify(model));
+    m.engineConfig[block] = { ...(m.engineConfig[block] || {}), ...patch };
+    set(m);
+  };
+  const updOt = (patch) => {
+    const m = JSON.parse(JSON.stringify(model));
+    m.engineConfig.settings = m.engineConfig.settings || {};
+    m.engineConfig.settings.ot = { ...ot, ...patch };
+    set(m);
+  };
+  const presetName = Object.keys(SEASONAL_PRESETS).find((k) => JSON.stringify(SEASONAL_PRESETS[k]) === JSON.stringify(season.system)) || "";
   return (
     <>
       <h3>Defaults</h3>
-      <p className="hint">Global physics every queue inherits unless it overrides them.</p>
-      {!ec ? <p className="warnmsg">▲ No engine defaults attached — import a model or start from the sample.</p> : <>
-        <div className="kv"><span>Horizon</span><b className="num">{eng.horizonWeeks || 52} weeks</b></div>
-        <div className="kv"><span>Operating day</span><b className="num">{eng.dayStart}:00 – {eng.dayEnd}:00 · {eng.intervalMin}-min intervals</b></div>
-        <div className="kv"><span>Occupancy ceiling</span><b className="num">{Math.round((eng.occupancyCeiling || 0.85) * 100)}%</b></div>
-        <div className="kv"><span>FTE basis</span><b className="num">{eng.hoursPerFteDay} h/day · {eng.daysWorkedPerFte} days/wk</b></div>
-        <div className="kv"><span>Hiring</span><b className="num">cap {(ec.hiring || {}).cap} · buffer {Math.round(((ec.hiring || {}).buffer || 0) * 100)}%</b></div>
-      </>}
+      <p className="hint">Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues.</p>
+      <G name="Simulation frame">
+        <NumF label="Horizon (weeks)" value={eng.horizonWeeks} onChange={(v) => updEC("engine", { horizonWeeks: n0(v) })} />
+        <NumF label="Day start (h)" value={eng.dayStart} onChange={(v) => updEC("engine", { dayStart: n0(v) })} />
+        <NumF label="Day end (h)" value={eng.dayEnd} onChange={(v) => updEC("engine", { dayEnd: n0(v) })} />
+        <NumF label="Interval (min)" value={eng.intervalMin} onChange={(v) => updEC("engine", { intervalMin: n0(v) })} />
+        <NumF label="Days per week" value={eng.daysPerWeek} onChange={(v) => updEC("engine", { daysPerWeek: n0(v) })} />
+        <NumF label="Hours per FTE day" value={eng.hoursPerFteDay} onChange={(v) => updEC("engine", { hoursPerFteDay: n0(v) })} />
+        <NumF label="Days worked per FTE" value={eng.daysWorkedPerFte} onChange={(v) => updEC("engine", { daysWorkedPerFte: n0(v) })} />
+        <NumF label="Occupancy ceiling (%)" value={Math.round((eng.occupancyCeiling || 0.85) * 100)} onChange={(v) => updEC("engine", { occupancyCeiling: n0(v) / 100 })} />
+        <NumF label="Cross-skill proficiency (%)" value={Math.round((eng.crossSkillProficiency || 0.9) * 100)} onChange={(v) => updEC("engine", { crossSkillProficiency: n0(v) / 100 })} />
+        <div className="field"><label>Currency</label><input value={eng.currency || "£"} aria-label="Currency" onChange={(e) => updEC("engine", { currency: e.target.value })} /></div>
+      </G>
+      <G name="Workforce policy">
+        <NumF label="Hiring cap (/wk)" value={hiring.cap} onChange={(v) => updEC("hiring", { cap: n0(v) })} />
+        <NumF label="Hiring buffer (%)" value={Math.round((hiring.buffer || 0) * 100)} onChange={(v) => updEC("hiring", { buffer: n0(v) / 100 })} />
+      </G>
+      <G name="Overtime">
+        <NumF label="Max OT (h/day)" value={ot.maxDailyHours} onChange={(v) => updOt({ maxDailyHours: n0(v) })} />
+        <NumF label="OT ceiling (h/wk)" value={ot.weeklyCeiling} onChange={(v) => updOt({ weeklyCeiling: n0(v) })} />
+        <NumF label="OT premium (×)" value={ot.premium} onChange={(v) => updOt({ premium: n0(v) })} />
+        <NumF label="OT burnout load" value={ot.burnoutLoad} onChange={(v) => updOt({ burnoutLoad: n0(v) })} />
+      </G>
+      <G name="Cost model">
+        <NumF label="Manager cost (£/yr)" value={costs.managerCost} onChange={(v) => updEC("costs", { managerCost: n0(v) })} />
+        <NumF label="Manager ratio (1:n)" value={costs.managerRatio} onChange={(v) => updEC("costs", { managerRatio: n0(v) })} />
+      </G>
+      <G name="Customer behaviour">
+        <NumF label="Customer base" value={cx.customerBase} onChange={(v) => updEC("cx", { customerBase: n0(v) })} />
+        <NumF label="Cost per lost customer (£)" value={cx.costPerLostCustomer} onChange={(v) => updEC("cx", { costPerLostCustomer: n0(v) })} />
+        <NumF label="Churn on abandon (%)" value={Math.round((cx.churnAbandon || 0) * 1000) / 10} onChange={(v) => updEC("cx", { churnAbandon: n0(v) / 100 })} />
+        <NumF label="Churn on long wait (%)" value={Math.round((cx.churnWait || 0) * 1000) / 10} onChange={(v) => updEC("cx", { churnWait: n0(v) / 100 })} />
+        <NumF label="Churn on digital miss (%)" value={Math.round((cx.churnDigital || 0) * 1000) / 10} onChange={(v) => updEC("cx", { churnDigital: n0(v) / 100 })} />
+        <NumF label="Repeat uplift (×)" value={cx.repeatUplift} onChange={(v) => updEC("cx", { repeatUplift: n0(v) })} />
+      </G>
+      <G name="Pattern libraries">
+        <div className="field"><label>System seasonality</label>
+          <select value={presetName} aria-label="System seasonality" onChange={(e) => {
+            const nm = e.target.value;
+            if (nm) updEC("seasonality", { system: [...SEASONAL_PRESETS[nm]] });
+          }}>
+            {presetName === "" ? <option value="">custom</option> : null}
+            {Object.keys(SEASONAL_PRESETS).map((k) => <option key={k} value={k}>{k}</option>)}
+          </select></div>
+        <NumF label="Season start month (0–11)" value={season.startMonth} onChange={(v) => updEC("seasonality", { startMonth: n0(v) })} />
+        <div className="field" style={{ gridColumn: "1/-1" }}><label>Presets</label>
+          <p className="hint">The same library powers the shape chips on the Volume tab.</p></div>
+      </G>
     </>
   );
 }

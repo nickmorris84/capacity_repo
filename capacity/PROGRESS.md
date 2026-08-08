@@ -6,6 +6,38 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — U5 + U6: Volume cascade grid · Map · Defaults ✅ (two new gates)
+
+**U5 — the cascade grid** (REVIEW-SETUP §3.4). Rows are the spine (estate →
+brand → BU → request type → channel), one value input per row, a provenance
+badge (`entered` · `equal split` · `scaled ▲` · `sum`) and a shape cell.
+Type at ANY row: entered figures are authoritative beneath them, entered
+finer figures act as weights, the rest split equally, over-runs are scaled
+AND spelled out in the notes panel (V5, "scaled ×0.6"). Shape cell opens an
+editor: seasonality presets expand to 52-week series against the row's
+daily figure, or paste 52 values (wrong counts rejected with a reason);
+children show `inherited`. `tests/volume-ui.test.js` (7) — including THE
+OWNER'S WORKED EXAMPLE driven through the UI: brand 10,000 + Collections
+5,000 ⇒ siblings 2,500 each [equal], two-channel type splits 1,250/1,250.
+
+**U6 — Map + Defaults** (REVIEW-SETUP §3.5–3.6). The Map is a PURE generated
+artefact: queue nodes placed by journey depth with derived vol/day, flow
+edges entirely from process steps (labelled `split % · sample %`),
+capacity links (supports · cross-skill · service-team covers) DASHED and
+purple, distinct from flow; tap a node → details + "Edit in Queues"; the
+validation panel lives here with a jump-link per issue (V3 → Request
+types, V1/V5 → Volume); empty models render a hint, never a crash.
+Defaults is one scrolling form over the engineConfig carry: Simulation
+frame (10 fields) · Workforce policy (hiring cap/buffer) · Overtime
+(settings.ot ×4) · Cost model · Customer behaviour (6) · Pattern
+libraries (system seasonality preset + start month — the same library
+powering Volume's shape chips). `tests/map-defaults-ui.test.js` (7).
+
+**Full suite: 32 gates green; dist rebuilt; artifact republished.** All six
+tabs are now live editors. Next: F1 — re-plumb Levers/Results to the
+bridge, swap the packaged app to the new Setup, rewrite SPEC-V2, re-score
+GAP-ANALYSIS. Style pass to follow F1 (owner: "get it working, then style").
+
 ## DOMAIN REDESIGN — U4: the Queues tab ✅ (new gate green)
 
 The deep editor per REVIEW-SETUP §3.2 (after the U3-checkpoint lighten pass

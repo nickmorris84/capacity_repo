@@ -102,18 +102,25 @@ await t("Request types is a master–detail editor: rows, assignment, step wirin
   ok(/outcomes:/.test(det.textContent), "outcomes listed");
 });
 
-await t("Volume lists entries with scope labels and daily figures", () => {
+await t("Volume renders the cascade grid with the spine and provenance", () => {
   click(subtab("Volume"));
-  const rows = $$(".vtable tbody tr");
-  eq(rows.length, 2, "two sample entries");
-  ok(rows.some((r) => /Acme › Customer Service › Billing enquiry/.test(r.textContent) && /2,398/.test(r.textContent)), "billing entry with address and daily");
+  const grid = $('[data-testid="cascade-grid"]');
+  ok(grid, "cascade grid present");
+  const rows = $$(".volrow:not(.head)", grid);
+  ok(rows.length >= 7, "estate + brand + BU + rt + channel rows: " + rows.length);
+  const billing = rows.find((r) => /Billing enquiry/.test(r.textContent));
+  ok(billing && /entered/.test(billing.textContent), "entered provenance on the billing row");
+  const estate = rows.find((r) => /Whole estate/.test(r.textContent));
+  ok(/sum/.test(estate.textContent), "estate row sums");
 });
 
 await t("Defaults reads the attached engine config", () => {
   click(subtab("Defaults"));
   const p = $('[role="tabpanel"]');
-  ok(/52 weeks/.test(p.textContent), "horizon shown");
-  ok(/Occupancy ceiling/.test(p.textContent) && /85%/.test(p.textContent), "occupancy shown");
+  const horizon = $$("input", p).find((i) => /Horizon/.test(i.getAttribute("aria-label") || ""));
+  eq(horizon.value, "52", "horizon loaded");
+  const occ = $$("input", p).find((i) => /Occupancy ceiling/.test(i.getAttribute("aria-label") || ""));
+  eq(occ.value, "85", "occupancy loaded");
 });
 
 await t("a blank model drives the progress strip: names the next step, Go jumps there", () => {
