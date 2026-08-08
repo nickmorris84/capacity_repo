@@ -476,7 +476,7 @@ function VolumePanel({ model, p }) {
       <h3>Volume</h3>
       <p className="hint">State how much arrives, at whatever granularity you know. Totals cascade down; entered finer figures act as weights; equal split otherwise.</p>
       {(model.volumeEntries || []).length === 0 ? <p className="hint">No entries yet.</p> : (
-        <table className="vtable">
+        <div className="scrollx"><table className="vtable">
           <thead><tr><th>Applies at</th><th className="num">Daily</th><th>Shape</th></tr></thead>
           <tbody>
             {model.volumeEntries.map((e, i) => (
@@ -487,7 +487,7 @@ function VolumePanel({ model, p }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
       {(p.notes || []).length ? <div className="valpanel">
         {p.notes.map((n, i) => <p key={i} className="warnmsg">▲ {n.message || String(n)}</p>)}

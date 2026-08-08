@@ -3878,6 +3878,26 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .stepno{font-size:11px; color:var(--ink-3)}
 .stepdash{color:var(--ink-3); text-align:center; font-size:11px}
 .steprow input[type="checkbox"]{justify-self:start; margin:0}
+.scrollx{overflow-x:auto}
+
+/* ---- phone layout ---- */
+@media(max-width:640px){
+  .shell{padding:0 10px 44px}
+  header.top{flex-wrap:wrap; row-gap:6px}
+  .tabs{overflow-x:auto; max-width:100%}
+  .v3banner{flex-direction:column; align-items:stretch; gap:8px}
+  .v3banner .btn{margin-left:0}
+  .pstrip{flex-wrap:wrap}
+  .pstrip .btn{margin-left:0}
+  .structgrid{grid-template-columns:1fr}
+  .regmain input{flex:1 1 120px; min-width:0}
+  .blocked{white-space:normal}
+  .steps{overflow-x:auto; padding-bottom:4px}
+  .steprow{min-width:520px}
+  .mdlist button{grid-template-columns:1fr}
+  .mdlist button .qstats{grid-row:auto; grid-column:1}
+  .mddetail{padding:12px}
+}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -5312,7 +5332,7 @@ function VolumePanel({ model, p }) {
   return /* @__PURE__ */ jsxs2(Fragment2, { children: [
     /* @__PURE__ */ jsx2("h3", { children: "Volume" }),
     /* @__PURE__ */ jsx2("p", { className: "hint", children: "State how much arrives, at whatever granularity you know. Totals cascade down; entered finer figures act as weights; equal split otherwise." }),
-    (model.volumeEntries || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No entries yet." }) : /* @__PURE__ */ jsxs2("table", { className: "vtable", children: [
+    (model.volumeEntries || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No entries yet." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("table", { className: "vtable", children: [
       /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { children: [
         /* @__PURE__ */ jsx2("th", { children: "Applies at" }),
         /* @__PURE__ */ jsx2("th", { className: "num", children: "Daily" }),
@@ -5323,7 +5343,7 @@ function VolumePanel({ model, p }) {
         /* @__PURE__ */ jsx2("td", { className: "num", children: fmt2(e.daily) }),
         /* @__PURE__ */ jsx2("td", { children: e.weekly ? "52-week series" : "flat" })
       ] }, e.id || i)) })
-    ] }),
+    ] }) }),
     (p.notes || []).length ? /* @__PURE__ */ jsx2("div", { className: "valpanel", children: p.notes.map((n, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
       "\u25B2 ",
       n.message || String(n)
