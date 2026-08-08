@@ -2449,13 +2449,21 @@ var require_ops = __commonJS({
     var renameProduct2 = renameInList("products");
     var deleteProduct2 = deleteFromList("products", canDeleteProduct2);
     function addChannel2(model, { key, id, name, defaults } = {}) {
-      if (!CHANNELS3.includes(key)) return model;
-      if ((model.channels || []).some((c) => c.key === key)) return model;
+      const taxonomy = CHANNELS3.includes(key);
+      if (taxonomy && (model.channels || []).some((c) => c.key === key)) return model;
+      if (!taxonomy && !(name && String(name).trim())) return model;
       const m = clone2(model);
       m.channels = m.channels || [];
-      m.channels.push({ id: id || "ch_" + key, key, name: name || key, ...defaults ? { defaults } : {} });
+      const k = taxonomy ? key : key || uid("chk");
+      m.channels.push({ id: id || (taxonomy ? "ch_" + key : uid("ch")), key: k, name: name || key, ...defaults ? { defaults } : {} });
       return m;
     }
+    function withDefaultChannels(model) {
+      let m = model;
+      for (const key of CHANNELS3) m = addChannel2(m, { key, name: CHANNEL_NAMES[key] });
+      return m;
+    }
+    var CHANNEL_NAMES = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
     var renameChannel2 = renameInList("channels");
     var deleteChannel2 = deleteFromList("channels", canDeleteChannel2);
     function setChannelDefaults2(model, channelId, patch) {
@@ -2656,7 +2664,7 @@ var require_ops = __commonJS({
     function blankDomainModel2(engineConfig) {
       const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
       if (engineConfig) m.engineConfig = engineConfig;
-      return m;
+      return withDefaultChannels(m);
     }
     function sampleDomainModel() {
       return {
@@ -2745,6 +2753,8 @@ var require_ops = __commonJS({
       renameChannel: renameChannel2,
       deleteChannel: deleteChannel2,
       setChannelDefaults: setChannelDefaults2,
+      withDefaultChannels,
+      CHANNEL_NAMES,
       addQueue: addQueue2,
       updateQueue: updateQueue2,
       updateQueueStaffing: updateQueueStaffing2,
@@ -4024,8 +4034,17 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .scrollx{overflow-x:auto}
 .mdgroup{margin-bottom:10px}
 .mdgrouplab{font-size:10.5px; color:var(--ink-3); font-weight:600; margin:2px 0 4px}
-.fam-sec{border-top:0.5px solid var(--line); padding:10px 0 12px; margin-top:10px}
-.famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.fam-sec{border-top:0.5px solid var(--line); padding:0; margin-top:0}
+.famhead{display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; font:inherit;
+  text-align:left; padding:11px 2px; cursor:pointer}
+.famhead .chev{margin-left:auto; font-size:8px; color:var(--ink-3); transition:transform 0.12s}
+.fam-sec.open .famhead .chev{transform:rotate(180deg)}
+.famhead:hover b{color:var(--blue-deep)}
+.famhead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+/* Collapse via CSS, not conditional rendering: the fields stay mounted so a
+   half-typed value survives a toggle. */
+.fambody{display:none; padding:0 2px 12px}
+.fam-sec.open .fambody{display:block}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
 .volgrid{min-width:560px}
@@ -4427,7 +4446,7 @@ function ChannelRow({ model, c, set }) {
       guard: (0, import_domain.canDeleteChannel)(model, c.id),
       onDelete: () => set(Ops.deleteChannel(model, c.id)),
       extra: /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx("span", { className: "tax", children: CHANNEL_LABELS[c.key] || c.key }),
+        /* @__PURE__ */ jsx("span", { className: "tax", children: CHANNEL_LABELS[c.key] || "custom" }),
         /* @__PURE__ */ jsxs("button", { className: "linkbtn", onClick: () => setOpen(!open), "aria-expanded": open, children: [
           "defaults",
           Object.keys(d).length ? " \u25CF" : "",
@@ -4451,6 +4470,31 @@ function ChannelRow({ model, c, set }) {
       ] }) : null
     }
   );
+}
+function AddChannel({ model, set }) {
+  const [name, setName] = useState("");
+  const commit = () => {
+    const n = name.trim();
+    if (!n) return;
+    set(Ops.addChannel(model, { name: n }));
+    setName("");
+  };
+  return /* @__PURE__ */ jsxs("span", { style: { display: "inline-flex", gap: 6, alignItems: "center" }, children: [
+    /* @__PURE__ */ jsx(
+      "input",
+      {
+        className: "outin",
+        value: name,
+        placeholder: "add a channel\u2026",
+        "aria-label": "New channel name",
+        onChange: (e) => setName(e.target.value),
+        onKeyDown: (e) => {
+          if (e.key === "Enter") commit();
+        }
+      }
+    ),
+    /* @__PURE__ */ jsx("button", { className: "btn sm", disabled: !name.trim(), onClick: commit, children: "Add" })
+  ] });
 }
 function StructurePanel({ model, set }) {
   const plain = [
@@ -4496,10 +4540,13 @@ function StructurePanel({ model, set }) {
         ] }),
         (model.channels || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : null,
         (model.channels || []).map((c) => /* @__PURE__ */ jsx(ChannelRow, { model, c, set }, c.id)),
-        offKeys.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offKeys.map((k) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
-          "+ ",
-          CHANNEL_LABELS[k]
-        ] }, k)) }) : null
+        /* @__PURE__ */ jsxs("div", { className: "regoff", children: [
+          offKeys.map((k) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
+            "+ ",
+            CHANNEL_LABELS[k]
+          ] }, k)),
+          /* @__PURE__ */ jsx(AddChannel, { model, set })
+        ] })
       ] }),
       groupsL,
       prodsL
@@ -4522,16 +4569,20 @@ function NumF({ label, value, onChange, placeholder }) {
   ] });
 }
 var n0 = (v) => +v || 0;
-function Fam({ fam, name, children, advanced }) {
+function Fam({ fam, name, children, advanced, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   const [adv, setAdv] = useState(false);
-  return /* @__PURE__ */ jsxs("section", { className: "fam-sec", children: [
-    /* @__PURE__ */ jsxs("div", { className: "famhead", children: [
+  return /* @__PURE__ */ jsxs("section", { className: "fam-sec" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs("button", { className: "famhead", onClick: () => setOpen(!open), "aria-expanded": open, children: [
       /* @__PURE__ */ jsx("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
       /* @__PURE__ */ jsx("b", { children: name }),
-      advanced ? /* @__PURE__ */ jsx("button", { className: "linkbtn", style: { marginLeft: "auto" }, onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null
+      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
     ] }),
-    children,
-    adv && advanced ? /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: advanced.body }) : null
+    /* @__PURE__ */ jsxs("div", { className: "fambody", children: [
+      children,
+      advanced ? /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null,
+      adv && advanced ? /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: advanced.body }) : null
+    ] })
   ] });
 }
 function QueueChips({ model, selfId, list, onToggle, label }) {
@@ -4543,7 +4594,7 @@ function QueueChips({ model, selfId, list, onToggle, label }) {
     }) })
   ] });
 }
-function QueueDetail({ model, set, q, d, detailRef }) {
+function QueueDetail({ model, set, q, d, detailRef, onClosed }) {
   const st = q.staffing || {};
   const et = (0, import_bridge.engineTypeOf)(q);
   const DEF = (0, import_bridge.engineQueueDefaults)(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
@@ -4559,14 +4610,17 @@ function QueueDetail({ model, set, q, d, detailRef }) {
   const voice = et.type === "voice";
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
-  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "queue-detail", ref: detailRef, tabIndex: -1, "aria-label": q.name, children: [
-    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs("h4", { style: { marginRight: "auto" }, children: [
-        q.name,
-        q._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" }) : null
-      ] }),
+  return /* @__PURE__ */ jsxs("div", { className: "dbody", "data-testid": "queue-detail", ref: detailRef, tabIndex: -1, "aria-label": q.name, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: q._modified ? /* @__PURE__ */ jsxs(Fragment, { children: [
+        "Tuned",
+        /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" })
+      ] }) : "Defaults" }),
       /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(Ops.resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
-      guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
+      guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => {
+        set(Ops.deleteQueue(model, q.id));
+        onClosed && onClosed();
+      }, children: "Delete" }) : /* @__PURE__ */ jsx("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
     ] }),
     /* @__PURE__ */ jsxs("p", { className: "hint derived-strip", children: [
       "Derived: ",
@@ -4588,6 +4642,7 @@ function QueueDetail({ model, set, q, d, detailRef }) {
       {
         fam: "inputs",
         name: "Inputs",
+        defaultOpen: true,
         advanced: { count: voice ? 2 : 5, body: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
           /* @__PURE__ */ jsx(NumF, { label: "Priority", value: eff.priority, onChange: (v) => upd({ priority: n0(v) }) }),
           !voice ? /* @__PURE__ */ jsxs(Fragment, { children: [
@@ -4739,12 +4794,15 @@ function QueueDetail({ model, set, q, d, detailRef }) {
     /* @__PURE__ */ jsx(Fam, { fam: "outputs", name: "Outputs", children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
   ] });
 }
-function TeamDetail({ model, set, team, detailRef }) {
+function TeamDetail({ model, set, team, detailRef, onClosed }) {
   const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
-  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "team-detail", ref: detailRef, tabIndex: -1, "aria-label": team.name, children: [
-    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: team.name }),
-      /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
+  return /* @__PURE__ */ jsxs("div", { className: "dbody", "data-testid": "team-detail", ref: detailRef, tabIndex: -1, "aria-label": team.name, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: "Shared capacity" }),
+      /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => {
+        set(Ops.deleteServiceTeam(model, team.id));
+        onClosed && onClosed();
+      }, children: "Delete" })
     ] }),
     /* @__PURE__ */ jsx("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
     /* @__PURE__ */ jsxs("div", { className: "fields", children: [
@@ -4780,10 +4838,12 @@ function TeamDetail({ model, set, team, detailRef }) {
 function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
   const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
-  const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
+  const [sel, setSel] = useState(null);
   const detailRef = useRevealOnSelect(sel && sel.id);
-  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) || queues[0] : null;
+  const close = () => setSel(null);
+  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
   const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
+  const open = !!(q || team);
   const groups = [];
   const byKey = /* @__PURE__ */ new Map();
   for (const x of queues) {
@@ -4798,77 +4858,85 @@ function QueuesPanel({ model, set, p }) {
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs("h3", { children: [
       "Queues ",
-      /* @__PURE__ */ jsx("small", { children: "volume and AHT are derived" })
+      /* @__PURE__ */ jsx("small", { children: "volume and AHT are derived \u2014 tap a queue to edit" })
     ] }),
-    /* @__PURE__ */ jsxs("div", { className: "md", children: [
-      /* @__PURE__ */ jsxs("div", { children: [
-        groups.map((label) => /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
-          /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: label }),
-          /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": label, children: byKey.get(label).map((x) => {
-            const dx = p.queues.get(x.id);
-            const u = (0, import_domain.queueUsage)(model, x.id);
-            const on = sel && sel.kind === "queue" && sel.id === x.id;
-            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
-              /* @__PURE__ */ jsxs("b", { children: [
-                x.name,
-                x._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
-              ] }),
-              /* @__PURE__ */ jsxs("small", { children: [
-                QTYPE_LABELS[x.type] || x.type,
-                u.processes ? ` \xB7 ${u.processes} process${u.processes === 1 ? "" : "es"} \xB7 ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " \xB7 unused"
-              ] }),
-              /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
-                fmt(dx ? dx.volume : 0),
-                "/day \xB7 ",
-                fmt(dx ? dx.effectiveAht : x.fallbackAhtSec),
-                " s",
-                dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
-              ] })
-            ] }, x.id);
-          }) })
-        ] }, label)),
-        /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => {
-          const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
-          set(m2);
-          setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
-        }, children: "+ Queue" }),
-        /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
-          /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: "Shared capacity" }),
-          /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
-            const on = sel && sel.kind === "team" && sel.id === x.id;
-            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": !!on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
-              /* @__PURE__ */ jsx("b", { children: x.name }),
-              /* @__PURE__ */ jsxs("small", { children: [
-                "service team \xB7 covers ",
-                (x.coversQueues || []).length,
-                " queue",
-                (x.coversQueues || []).length === 1 ? "" : "s"
-              ] }),
-              /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
-                x.size,
-                " FTE"
-              ] })
-            ] }, x.id);
-          }) }),
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              className: "btn sm",
-              style: { marginTop: 4 },
-              disabled: !model.engineConfig,
-              title: model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first \u2014 shared teams live in the engine config.",
-              onClick: () => {
-                const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
-                set(m2);
-                setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
-              },
-              children: "+ Shared team"
-            }
-          )
-        ] })
+    /* @__PURE__ */ jsx("div", { children: /* @__PURE__ */ jsxs("div", { children: [
+      groups.map((label) => /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
+        /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: label }),
+        /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": label, children: byKey.get(label).map((x) => {
+          const dx = p.queues.get(x.id);
+          const u = (0, import_domain.queueUsage)(model, x.id);
+          const on = sel && sel.kind === "queue" && sel.id === x.id;
+          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
+            /* @__PURE__ */ jsxs("b", { children: [
+              x.name,
+              x._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
+            ] }),
+            /* @__PURE__ */ jsxs("small", { children: [
+              QTYPE_LABELS[x.type] || x.type,
+              u.processes ? ` \xB7 ${u.processes} process${u.processes === 1 ? "" : "es"} \xB7 ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " \xB7 unused"
+            ] }),
+            /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
+              fmt(dx ? dx.volume : 0),
+              "/day \xB7 ",
+              fmt(dx ? dx.effectiveAht : x.fallbackAhtSec),
+              " s",
+              dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
+            ] })
+          ] }, x.id);
+        }) })
+      ] }, label)),
+      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => {
+        const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
+        set(m2);
+        setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
+      }, children: "+ Queue" }),
+      /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
+        /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: "Shared capacity" }),
+        /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
+          const on = sel && sel.kind === "team" && sel.id === x.id;
+          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": !!on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
+            /* @__PURE__ */ jsx("b", { children: x.name }),
+            /* @__PURE__ */ jsxs("small", { children: [
+              "service team \xB7 covers ",
+              (x.coversQueues || []).length,
+              " queue",
+              (x.coversQueues || []).length === 1 ? "" : "s"
+            ] }),
+            /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
+              x.size,
+              " FTE"
+            ] })
+          ] }, x.id);
+        }) }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            className: "btn sm",
+            style: { marginTop: 4 },
+            disabled: !model.engineConfig,
+            title: model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first \u2014 shared teams live in the engine config.",
+            onClick: () => {
+              const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
+              set(m2);
+              setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
+            },
+            children: "+ Shared team"
+          }
+        )
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsx("div", { className: "scrim" + (open ? " on" : ""), onClick: close }),
+    /* @__PURE__ */ jsx("aside", { className: "drawer" + (open ? " on" : ""), "aria-label": q ? "Edit queue" : "Edit shared team", "aria-hidden": !open, children: open ? /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsxs("div", { className: "dhead", children: [
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h3", { children: q ? q.name : team.name }),
+          /* @__PURE__ */ jsx("p", { children: q ? (QTYPE_LABELS[q.type] || q.type) + (q.homeBrandId ? " \xB7 " + nameOf(model.brands, q.homeBrandId) : " \xB7 no home") : "shared capacity" })
+        ] }),
+        /* @__PURE__ */ jsx("button", { className: "close", onClick: close, "aria-label": "Close", children: "\u2715" })
       ] }),
-      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id), detailRef }) : team ? /* @__PURE__ */ jsx(TeamDetail, { model, set, team, detailRef }) : /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "queue-detail", ref: detailRef, tabIndex: -1, children: /* @__PURE__ */ jsx("p", { className: "hint", children: "Select a queue or shared team." }) })
-    ] })
+      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id), detailRef, onClosed: close }) : /* @__PURE__ */ jsx(TeamDetail, { model, set, team, detailRef, onClosed: close })
+    ] }) : null })
   ] });
 }
 var fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");

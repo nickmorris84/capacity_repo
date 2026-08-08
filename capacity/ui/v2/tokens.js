@@ -392,8 +392,17 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .scrollx{overflow-x:auto}
 .mdgroup{margin-bottom:10px}
 .mdgrouplab{font-size:10.5px; color:var(--ink-3); font-weight:600; margin:2px 0 4px}
-.fam-sec{border-top:0.5px solid var(--line); padding:10px 0 12px; margin-top:10px}
-.famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.fam-sec{border-top:0.5px solid var(--line); padding:0; margin-top:0}
+.famhead{display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; font:inherit;
+  text-align:left; padding:11px 2px; cursor:pointer}
+.famhead .chev{margin-left:auto; font-size:8px; color:var(--ink-3); transition:transform 0.12s}
+.fam-sec.open .famhead .chev{transform:rotate(180deg)}
+.famhead:hover b{color:var(--blue-deep)}
+.famhead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+/* Collapse via CSS, not conditional rendering: the fields stay mounted so a
+   half-typed value survives a toggle. */
+.fambody{display:none; padding:0 2px 12px}
+.fam-sec.open .fambody{display:block}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
 .volgrid{min-width:560px}

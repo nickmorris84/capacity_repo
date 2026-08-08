@@ -69,14 +69,27 @@ const renameProduct = renameInList("products");
 const deleteProduct = deleteFromList("products", canDeleteProduct);
 
 // Channels are enabled from the fixed taxonomy — one per key, defaults editable.
+// The four taxonomy channels are the defaults every estate gets; anything else
+// is a custom channel the owner adds (a key outside the taxonomy is allowed and
+// gets a generated one). Taxonomy channels stay one-per-key so the enable chips
+// cannot double-add; custom channels are only deduped by name.
 function addChannel(model, { key, id, name, defaults } = {}) {
-  if (!CHANNELS.includes(key)) return model;
-  if ((model.channels || []).some((c) => c.key === key)) return model; // one per key
+  const taxonomy = CHANNELS.includes(key);
+  if (taxonomy && (model.channels || []).some((c) => c.key === key)) return model;
+  if (!taxonomy && !(name && String(name).trim())) return model; // custom needs a name
   const m = clone(model);
   m.channels = m.channels || [];
-  m.channels.push({ id: id || "ch_" + key, key, name: name || key, ...(defaults ? { defaults } : {}) });
+  const k = taxonomy ? key : (key || uid("chk"));
+  m.channels.push({ id: id || (taxonomy ? "ch_" + key : uid("ch")), key: k, name: name || key, ...(defaults ? { defaults } : {}) });
   return m;
 }
+// Every taxonomy channel, seeded so a new estate can use them immediately.
+function withDefaultChannels(model) {
+  let m = model;
+  for (const key of CHANNELS) m = addChannel(m, { key, name: CHANNEL_NAMES[key] });
+  return m;
+}
+const CHANNEL_NAMES = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
 const renameChannel = renameInList("channels");
 const deleteChannel = deleteFromList("channels", canDeleteChannel);
 function setChannelDefaults(model, channelId, patch) {
@@ -256,7 +269,7 @@ function clearVolumeEntry(model, scope) {
 function blankDomainModel(engineConfig) {
   const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
   if (engineConfig) m.engineConfig = engineConfig;
-  return m;
+  return withDefaultChannels(m);
 }
 
 // A worked demo estate — deterministic ids, valid, with a shared governance
@@ -322,7 +335,7 @@ module.exports = {
   addBusinessUnit, renameBusinessUnit, deleteBusinessUnit,
   addProcessGroup, renameProcessGroup, deleteProcessGroup,
   addProduct, renameProduct, deleteProduct,
-  addChannel, renameChannel, deleteChannel, setChannelDefaults,
+  addChannel, renameChannel, deleteChannel, setChannelDefaults, withDefaultChannels, CHANNEL_NAMES,
   addQueue, updateQueue, updateQueueStaffing, resetQueueStaffing, deleteQueue,
   addServiceTeam, updateServiceTeam, deleteServiceTeam,
   addRequestType, updateRequestType, setAssignment, deleteRequestType,

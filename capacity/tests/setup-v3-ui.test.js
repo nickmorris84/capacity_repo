@@ -70,23 +70,31 @@ await t("tab navigation switches panels (Structure → Queues → Map)", () => {
   ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "Map validation clean for the sample");
 });
 
-await t("Queues master–detail: grouped rows with DERIVED stats and a six-family editor", () => {
+await t("Queues: a row list you drill into — the editor opens as a drawer", () => {
   click(subtab("Queues"));
   const rows = $$(".mdlist button");
   ok(rows.length >= 4, "queue rows listed (plus any shared teams)");
+  ok(!$(".drawer.on"), "no drawer until a queue is picked — the list is the landing view");
   const inbound = rows.find((r) => /Inbound — Billing/.test(r.textContent));
   ok(/2,398\/day/.test(inbound.textContent.replace(/\s+/g, " ")), "derived 2,398/day on the row: " + inbound.textContent);
   click(inbound);
+  ok($(".drawer.on"), "drawer opens on click");
+  ok(/Inbound — Billing/.test($(".dhead h3").textContent), "drawer is titled with the queue");
   const det = $('[data-testid="queue-detail"]');
-  ok(/Inbound — Billing/.test($("h4", det).textContent), "detail shows the selected queue");
-  ok(/2,398\/day/.test(det.textContent), "derived strip in detail");
+  ok(/2,398\/day/.test(det.textContent), "derived strip in the drawer");
   ok(/used in 1 process across 1 brand/.test(det.textContent), "blast radius line");
   ok(!$$("input", det).some((i) => /2,?398/.test(i.value)), "derived volume is never an input");
   const fams = $$(".famhead b", det).map((b) => b.textContent);
   eq(fams.join("|"), "Inputs|Performance|Efficiency|Workforce|Customer|Outputs", "six KPI families");
+  // Each family is a section that opens on demand — only Inputs starts open.
+  eq($$(".fam-sec.open", det).length, 1, "one family open by default");
+  click($$(".famhead", det)[1]);
+  eq($$(".fam-sec.open", det).length, 2, "clicking a family header opens it");
   const apps = rows.find((r) => /Case — Applications/.test(r.textContent));
   click(apps);
-  ok(/Case — Applications/.test($("h4", $('[data-testid="queue-detail"]')).textContent), "selection moves the detail pane");
+  ok(/Case — Applications/.test($(".dhead h3").textContent), "picking another queue retitles the drawer");
+  click($(".drawer .close"));
+  ok(!$(".drawer.on"), "drawer closes");
 });
 
 await t("Request types is a master–detail editor: rows, assignment, step wiring", () => {

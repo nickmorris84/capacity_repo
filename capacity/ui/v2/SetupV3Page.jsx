@@ -233,7 +233,7 @@ function ChannelRow({ model, c, set }) {
     <RegRow entity={c} onRename={(name) => set(Ops.renameChannel(model, c.id, name))}
       guard={canDeleteChannel(model, c.id)} onDelete={() => set(Ops.deleteChannel(model, c.id))}
       extra={<>
-        <span className="tax">{CHANNEL_LABELS[c.key] || c.key}</span>
+        <span className="tax">{CHANNEL_LABELS[c.key] || "custom"}</span>
         <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}<span className="chev">▼</span></button>
       </>}>
       {open ? (
@@ -248,6 +248,26 @@ function ChannelRow({ model, c, set }) {
         </div>
       ) : null}
     </RegRow>
+  );
+}
+
+// The four taxonomy channels come seeded; anything beyond them (WhatsApp, web
+// chat, a partner channel) is added here and behaves identically thereafter.
+function AddChannel({ model, set }) {
+  const [name, setName] = useState("");
+  const commit = () => {
+    const n = name.trim();
+    if (!n) return;
+    set(Ops.addChannel(model, { name: n }));
+    setName("");
+  };
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+      <input className="outin" value={name} placeholder="add a channel…" aria-label="New channel name"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }} />
+      <button className="btn sm" disabled={!name.trim()} onClick={commit}>Add</button>
+    </span>
   );
 }
 
@@ -277,15 +297,14 @@ function StructurePanel({ model, set }) {
           <div className="reghead"><b>Channels</b><span className="count">{(model.channels || []).length}</span></div>
           {(model.channels || []).length === 0 ? <span className="hint">none yet</span> : null}
           {(model.channels || []).map((c) => <ChannelRow key={c.id} model={model} c={c} set={set} />)}
-          {offKeys.length ? (
-            <div className="regoff">
-              {offKeys.map((k) => (
-                <button key={k} className="chip off" onClick={() => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] }))} aria-label={"Enable " + CHANNEL_LABELS[k]}>
-                  + {CHANNEL_LABELS[k]}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <div className="regoff">
+            {offKeys.map((k) => (
+              <button key={k} className="chip off" onClick={() => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] }))} aria-label={"Enable " + CHANNEL_LABELS[k]}>
+                + {CHANNEL_LABELS[k]}
+              </button>
+            ))}
+            <AddChannel model={model} set={set} />
+          </div>
         </div>
         {groupsL}
         {prodsL}
@@ -308,15 +327,23 @@ function NumF({ label, value, onChange, placeholder }) {
 }
 const n0 = (v) => +v || 0;
 
-function Fam({ fam, name, children, advanced }) {
+// A KPI family: collapsed by default so the drawer opens as six scannable
+// headings rather than thirty fields. Collapse is CSS-driven (the body stays in
+// the DOM) so nothing re-mounts and in-progress edits survive a toggle.
+function Fam({ fam, name, children, advanced, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   const [adv, setAdv] = useState(false);
   return (
-    <section className="fam-sec">
-      <div className="famhead"><span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b>
-        {advanced ? <button className="linkbtn" style={{ marginLeft: "auto" }} onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "Hide advanced" : `Advanced (${advanced.count})`}</button> : null}
+    <section className={"fam-sec" + (open ? " open" : "")}>
+      <button className="famhead" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b>
+        <span className="chev">▼</span>
+      </button>
+      <div className="fambody">
+        {children}
+        {advanced ? <button className="linkbtn" onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "Hide advanced" : `Advanced (${advanced.count})`}</button> : null}
+        {adv && advanced ? <div style={{ marginTop: 8 }}>{advanced.body}</div> : null}
       </div>
-      {children}
-      {adv && advanced ? <div style={{ marginTop: 8 }}>{advanced.body}</div> : null}
     </section>
   );
 }
@@ -334,7 +361,7 @@ function QueueChips({ model, selfId, list, onToggle, label }) {
   );
 }
 
-function QueueDetail({ model, set, q, d, detailRef }) {
+function QueueDetail({ model, set, q, d, detailRef, onClosed }) {
   const st = q.staffing || {};
   const et = engineTypeOf(q);
   const DEF = engineQueueDefaults(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
@@ -351,17 +378,17 @@ function QueueDetail({ model, set, q, d, detailRef }) {
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
   return (
-    <div className="mddetail" data-testid="queue-detail" ref={detailRef} tabIndex={-1} aria-label={q.name}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h4 style={{ marginRight: "auto" }}>{q.name}{q._modified ? <span className="moddot" style={{ marginLeft: 6 }} aria-label="modified" /> : null}</h4>
+    <div className="dbody" data-testid="queue-detail" ref={detailRef} tabIndex={-1} aria-label={q.name}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <h4 style={{ marginRight: "auto" }}>{q._modified ? <>Tuned<span className="moddot" style={{ marginLeft: 6 }} aria-label="modified" /></> : "Defaults"}</h4>
         <button className="btn sm" onClick={() => set(Ops.resetQueueStaffing(model, q.id))}>Reset to defaults</button>
         {guard.ok
-          ? <button className="btn sm danger" onClick={() => set(Ops.deleteQueue(model, q.id))}>Delete</button>
+          ? <button className="btn sm danger" onClick={() => { set(Ops.deleteQueue(model, q.id)); onClosed && onClosed(); }}>Delete</button>
           : <span className="hint blocked" style={{ marginLeft: 0 }} title={"Referenced by " + guardSummary(guard)}>▲ in use</span>}
       </div>
       <p className="hint derived-strip">Derived: <b className="num">{fmt(d ? d.volume : 0)}/day</b> · eff. AHT <b className="num">{fmt(d ? d.effectiveAht : q.fallbackAhtSec)} s</b>{d && d.ahtMarker !== "queue" ? ` (${d.ahtMarker})` : ""} · {usage.processes ? `used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}` : "not used by any process yet"}</p>
 
-      <Fam fam="inputs" name="Inputs"
+      <Fam fam="inputs" name="Inputs" defaultOpen
         advanced={{ count: voice ? 2 : 5, body: (
           <div className="fields">
             <NumF label="Priority" value={eff.priority} onChange={(v) => upd({ priority: n0(v) })} />
@@ -487,13 +514,13 @@ function QueueDetail({ model, set, q, d, detailRef }) {
   );
 }
 
-function TeamDetail({ model, set, team, detailRef }) {
+function TeamDetail({ model, set, team, detailRef, onClosed }) {
   const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
   return (
-    <div className="mddetail" data-testid="team-detail" ref={detailRef} tabIndex={-1} aria-label={team.name}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <h4 style={{ marginRight: "auto" }}>{team.name}</h4>
-        <button className="btn sm danger" onClick={() => set(Ops.deleteServiceTeam(model, team.id))}>Delete</button>
+    <div className="dbody" data-testid="team-detail" ref={detailRef} tabIndex={-1} aria-label={team.name}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <h4 style={{ marginRight: "auto" }}>Shared capacity</h4>
+        <button className="btn sm danger" onClick={() => { set(Ops.deleteServiceTeam(model, team.id)); onClosed && onClosed(); }}>Delete</button>
       </div>
       <p className="hint">Shared capacity — spills into the queues it covers when they run hot.</p>
       <div className="fields">
@@ -521,10 +548,12 @@ function TeamDetail({ model, set, team, detailRef }) {
 function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
   const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
-  const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
+  const [sel, setSel] = useState(null);
   const detailRef = useRevealOnSelect(sel && sel.id);
-  const q = sel && sel.kind === "queue" ? (queues.find((x) => x.id === sel.id) || queues[0]) : null;
+  const close = () => setSel(null);
+  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
   const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
+  const open = !!(q || team);
   // group by home: brand › BU · brand-only · Global
   const groups = [];
   const byKey = new Map();
@@ -538,8 +567,8 @@ function QueuesPanel({ model, set, p }) {
   groups.sort((a, b) => (a === "Global — no home" ? 1 : b === "Global — no home" ? -1 : 0));
   return (
     <>
-      <h3>Queues <small>volume and AHT are derived</small></h3>
-      <div className="md">
+      <h3>Queues <small>volume and AHT are derived — tap a queue to edit</small></h3>
+      <div>
         <div>
           {groups.map((label) => (
             <div className="mdgroup" key={label}>
@@ -585,10 +614,27 @@ function QueuesPanel({ model, set, p }) {
             }}>+ Shared team</button>
           </div>
         </div>
-        {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} />
-          : team ? <TeamDetail model={model} set={set} team={team} detailRef={detailRef} />
-          : <div className="mddetail" data-testid="queue-detail" ref={detailRef} tabIndex={-1}><p className="hint">Select a queue or shared team.</p></div>}
       </div>
+
+      {/* Drill-down: the row list stays the surface, the ~30 parameters live in
+          a drawer over it. Full-width on a phone, so the editor is never a
+          cramped column and never renders below the whole list. */}
+      <div className={"scrim" + (open ? " on" : "")} onClick={close} />
+      <aside className={"drawer" + (open ? " on" : "")} aria-label={q ? "Edit queue" : "Edit shared team"} aria-hidden={!open}>
+        {open ? (
+          <>
+            <div className="dhead">
+              <div>
+                <h3>{q ? q.name : team.name}</h3>
+                <p>{q ? (QTYPE_LABELS[q.type] || q.type) + (q.homeBrandId ? " · " + nameOf(model.brands, q.homeBrandId) : " · no home") : "shared capacity"}</p>
+              </div>
+              <button className="close" onClick={close} aria-label="Close">✕</button>
+            </div>
+            {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} onClosed={close} />
+              : <TeamDetail model={model} set={set} team={team} detailRef={detailRef} onClosed={close} />}
+          </>
+        ) : null}
+      </aside>
     </>
   );
 }

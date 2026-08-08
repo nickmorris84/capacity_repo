@@ -131,6 +131,38 @@ await t("business units / groups / products add and rename like brands", () => {
   ok(/in use/.test($$(".regrow", bu)[0].textContent), "sample BU referenced → blocked");
 });
 
+await t("a new estate carries every default channel, ready to use", () => {
+  const c = document.createElement("div"); document.body.appendChild(c);
+  const Ops = require("../model/ops.js");
+  act(() => { mod.exports.mount(c, { model: Ops.blankDomainModel() }); });
+  const ch = $$(".reglist", c).find((l) => $(".reghead b", l).textContent === "Channels");
+  eq($$(".regrow", ch).length, 4, "all four taxonomy channels seeded");
+  const names = $$(".regrow input", ch).map((i) => i.value).sort();
+  eq(names.join(", "), "Customer management, Digital, Third party, Voice", "named, not raw keys");
+  c.remove();
+});
+
+await t("channels beyond the taxonomy can be added and behave like the rest", () => {
+  const ch = () => reglist("Channels");
+  const before = $$(".regrow", ch()).length;
+  const input = $$("input", ch()).find((i) => i.getAttribute("aria-label") === "New channel name");
+  ok(input, "an add-a-channel field exists");
+  const addBtn = () => $$("button", ch()).find((b) => b.textContent === "Add");
+  ok(addBtn().disabled, "Add is inert until the channel is named");
+  setV(input, "WhatsApp");
+  click(addBtn());
+  eq($$(".regrow", ch()).length, before + 1, "custom channel added");
+  const row = $$(".regrow", ch()).find((r) => $("input", r).value === "WhatsApp");
+  ok(row, "listed by name");
+  ok(/custom/.test(row.textContent), "marked custom, not a raw key");
+  // it is a first-class channel: renameable, deletable while unused, and it
+  // carries its own channel defaults like any taxonomy channel
+  ok($(".regdel", row), "deletable while unused");
+  ok($$("button", row).some((b) => /defaults/.test(b.textContent)), "carries channel defaults");
+  setV($("input", row), "WhatsApp Business");
+  ok($$(".regrow input", ch()).some((i) => i.value === "WhatsApp Business"), "renames like the rest");
+});
+
 await t("zero unexpected console output across the whole run", () => {
   eq(consoleEvents.length, 0, "console noise: " + consoleEvents.join(" | "));
 });
