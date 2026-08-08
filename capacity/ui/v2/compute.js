@@ -9,7 +9,14 @@
  * one source of truth with the existing simulation layer.
  */
 import { v2ToEngineConfig } from "../../model/adapter.js";
+import { domainToEngineConfig } from "../../model/bridge.js";
 import { simulate, applyGroupScope } from "../../engine/engine.js";
+
+// One cfg boundary, two model generations: the domain model (v3 — flat
+// registry + requestTypes) goes through the bridge; the v2.4 model keeps the
+// old adapter. Everything downstream sees the same v1-shaped engine cfg.
+export const toEngineCfg = (model) =>
+  model && model.requestTypes && model.volumeEntries ? domainToEngineConfig(model) : v2ToEngineConfig(model);
 import { bestCell } from "../sim-set.js";
 import { strategyList, groupScenarioIds } from "../views.js";
 
@@ -48,7 +55,7 @@ function richMatrix(cfg) {
 // Selection-independent base: the engine cfg + decision matrix + axes. Memoise
 // this on the model — running the 4×N matrix once, not per cell selection.
 export function computeBase(model) {
-  const cfg = v2ToEngineConfig(model);
+  const cfg = toEngineCfg(model);
   const matrix = richMatrix(cfg);
   const strategies = strategyList(cfg);          // [{ id, name, baseType, forwardMonths? }]
   const groups = (cfg.groups || []).map((g) => ({ id: g.id, name: g.name }));
@@ -78,7 +85,7 @@ export function pickSelection(selected, base) {
 // Cheap per-simulation headline for a Home card: ONE run (S1 · plan of record),
 // not the 4×N matrix. Returns the chip figures + worst RAG for the card.
 export function quickHeadline(model) {
-  const cfg = v2ToEngineConfig(model);
+  const cfg = toEngineCfg(model);
   const sim = simulate(cfg, { strategy: "S1" });
   const w = sim.weeks;
   const lastWk = w[w.length - 1];

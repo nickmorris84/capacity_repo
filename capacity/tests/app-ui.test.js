@@ -60,34 +60,31 @@ await t("Home → Open enters the Setup workspace", () => {
   eq(activeTab(), "Setup", "landed on Setup");
 });
 
-await t("the four tabs navigate across all surfaces", () => {
+await t("the four tabs navigate across all surfaces (Setup is the six-tab shell)", () => {
   navTab("Levers"); eq(activeTab(), "Levers", "→ Levers");
   ok($(".mx .cell"), "Levers matrix renders");
   navTab("Results"); eq(activeTab(), "Results", "→ Results");
   ok($(".sub"), "Results lenses render");
   navTab("Setup"); eq(activeTab(), "Setup", "→ Setup");
-  ok($$(".sec").length === 4, "Setup four sections");
+  eq($$(".subtabs [role='tab']").length, 6, "Setup shows six tabs");
   navTab("Home"); ok($(".grid .card"), "→ Home launcher");
 });
 
 await t("a Setup edit is reflected on Results (single shared model)", async () => {
-  // Enter Setup, open the Queues section, capture a derived volume, then edit a
-  // profile total and confirm the Results Data lens sees the new volume.
+  // Enter Setup → Volume, double the estate total in the cascade grid, and
+  // confirm the Results Data lens still renders volumes from the shared model.
   click($$(".card .open").find((b) => b.textContent === "Open")); // → Setup
-  // Open the Channel volume profiles section and double the first profile total.
-  const profSec = $$(".sec").find((s) => /Channel volume profiles/.test(s.textContent));
-  if (!profSec.classList.contains("open")) click(profSec.querySelector(".sechead"));
-  const card = profSec.querySelectorAll(".card")[0];
-  if (!card.classList.contains("open")) click(card.querySelector(".cardhead"));
-  const totalInput = card.querySelector('.field input.num');
-  const before = +totalInput.value;
-  setV(totalInput, before * 2);
-  // Go to Results → Data; the grid volumes should have grown (shared model).
+  click($$(".subtabs button").find((b) => b.textContent.includes("Volume")));
+  const estate = $$(".volrow:not(.head)").find((r) => /Whole estate/.test(r.textContent));
+  ok(estate, "estate row present in the cascade grid");
+  const input = estate.querySelector("input");
+  const before = +input.value;
+  ok(before > 0, "estate total resolved: " + input.value);
+  setV(input, Math.round(before * 2));
+  eq(+estate.querySelector("input").value, Math.round(before * 2), "estate total re-resolves to the entered figure");
   navTab("Results");
   const dataBtn = $$(".sub button").find((b) => b.textContent === "Data"); click(dataBtn);
   ok($(".dtab"), "data grid present after edit");
-  // Some queue's weekly volume should be non-trivially larger than the pre-edit
-  // baseline — proving Setup and Results share one model through the adapter.
   const anyVol = $$(".dtab td.num").map((td) => +td.textContent.replace(/[^\d]/g, "")).filter((n) => n > 0);
   ok(anyVol.length > 0, "data volumes rendered from the edited model");
 });
@@ -105,15 +102,14 @@ await t("a Levers matrix cell drives the Results context (shared selection)", as
   ok(/Plan of record/.test(scen.options[scen.selectedIndex].textContent), "Results scenario follows the tapped cell");
 });
 
-await t("New simulation opens an empty Setup wizard and still runs the engine", async () => {
+await t("New simulation opens the empty six-tab shell and still runs the engine", async () => {
   navTab("Home");
   click($$(".btn.primary").find((b) => /New simulation/.test(b.textContent)));
   click($$(".fork .t").find((x) => x.textContent === "Whole ecosystem")); // a fork → new blank sim
   await settle(120);
-  eq(activeTab(), "Setup", "lands on Setup as the empty-state wizard");
-  const structBadge = $$(".sec").find((s) => /Structure/.test(s.querySelector(".sechead b").textContent)).querySelector(".badge").textContent;
-  ok(/0 BUs/.test(structBadge), "structure starts empty: " + structBadge);
-  ok($$(".qline").length === 0, "no queues yet in the empty simulation");
+  eq(activeTab(), "Setup", "lands on Setup as the empty state");
+  ok($(".pstrip") && /Next:/.test($(".pstrip").textContent), "the progress strip names the first step");
+  ok(/none yet/.test($('[role="tabpanel"]').textContent), "registry starts empty");
   // The empty simulation must not crash Levers/Results (0 queues).
   const before = consoleEvents.length;
   navTab("Results"); await settle(150);
@@ -121,15 +117,15 @@ await t("New simulation opens an empty Setup wizard and still runs the engine", 
   eq(consoleEvents.length, before, "empty simulation runs clean: " + consoleEvents.slice(before).join(" | "));
 });
 
-await t("the model autosaves and restores across a fresh mount", async () => {
+await t("the model autosaves to the v3 key and restores across a fresh mount", async () => {
   navTab("Home"); await settle(60);
   await settle(400); // let the debounced autosave fire
-  ok(window.localStorage.getItem("capacity.v2.model"), "model persisted to storage");
+  ok(window.localStorage.getItem("capacity.v3.model"), "model persisted to the v3 key");
   // Fresh mount into a new container restores from storage (not the seed).
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c); });
   await settle(80);
-  ok(window.localStorage.getItem("capacity.v2.model"), "restore path exercised without error");
+  ok(window.localStorage.getItem("capacity.v3.model"), "restore path exercised without error");
 });
 
 await t("zero unexpected console output across the whole run", () => {

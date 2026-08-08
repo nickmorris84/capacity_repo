@@ -1,14 +1,21 @@
 # Capacity Simulator — v2.4 specification & user guide
 
-**Status:** shipping. Build order (Steps 0–6) + integration complete.
-**Suite:** 21 gates · 262 tests · 0 failures.
+> **⚠ SUPERSEDED IN PART by [SPEC-V3.md](./SPEC-V3.md)** (the domain-model
+> rebuild, F1 complete). The Setup surface, domain model, derivation,
+> persistence and template sections below (§2–§4, §10–§11, §14, §17–§18)
+> describe the RETIRED v2.4 Setup and are kept as migration-source
+> documentation. Still current: §12 the preserved engine contract, §5–§6
+> Levers/Results, §16 UI conventions, §19 build outputs, §22 invariants.
+
+**Status:** superseded as baseline by SPEC-V3 (the app now ships the six-tab
+domain Setup). v2.4 modules remain in-tree and gate-covered as the
+migration source.
 **Engine:** preserved byte-for-byte from v1 (`git diff engine/` is empty).
 **Default build:** `dist/capacity-sim.html`.
 
-This is the **baseline document**. It describes what exists today, precisely
-enough to change it safely. Part I is the user guide, Part II the technical
-spec, Part III the guide to extending it. When you change behaviour, change
-this document in the same commit.
+This described the v2.4 baseline. For anything Setup/model-layer, read
+SPEC-V3.md first. When you change behaviour, change SPEC-V3 in the same
+commit.
 
 ---
 

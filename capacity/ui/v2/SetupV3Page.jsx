@@ -59,7 +59,34 @@ export function computeStatus(model, p) {
   ];
 }
 
-export default function SetupV3Page({ model, onModelChange, onNav = () => {}, onOpenClassic }) {
+// Import validation report for template v3 uploads — counts + errors (red) +
+// warnings (amber), dismissible; nothing is ever applied silently.
+function DomainImportReport({ report, onDismiss }) {
+  const err = report.error;
+  const errors = report.errors || [], warnings = report.warnings || [];
+  const tone = err || errors.length ? "err" : warnings.length ? "warn" : "ok";
+  const bg = tone === "err" ? "var(--red-bg)" : tone === "warn" ? "var(--amber-bg)" : "var(--green-bg)";
+  const ink = tone === "err" ? "var(--red-ink)" : tone === "warn" ? "var(--amber-ink)" : "var(--green-ink)";
+  const c = report.counts || {};
+  return (
+    <div data-testid="import-report" role="status" style={{ border: "0.5px solid " + ink, background: bg, color: ink, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>{tone === "err" ? "✕ Import failed" : "Template imported" + (report.filename ? ` — ${report.filename}` : "")}</b>
+        <button className="close" onClick={onDismiss} aria-label="Dismiss import report" style={{ marginLeft: "auto", color: ink, background: "none", border: "none", cursor: "pointer" }}>✕</button>
+      </div>
+      {err ? <p style={{ fontSize: 12.5, marginTop: 4 }}>{err}</p> : <>
+        <p style={{ fontSize: 12.5, marginTop: 4 }}>
+          Loaded {c.brands || 0} brand{c.brands === 1 ? "" : "s"} · {c.queues || 0} queue{c.queues === 1 ? "" : "s"} · {c.requestTypes || 0} request type{c.requestTypes === 1 ? "" : "s"} · {c.volumeEntries || 0} volume entr{c.volumeEntries === 1 ? "y" : "ies"}.
+          {errors.length ? ` ${errors.length} error${errors.length === 1 ? "" : "s"} must be fixed.` : warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"} to review.` : " No issues."}
+        </p>
+        {errors.slice(0, 5).map((e, i) => <p key={"e" + i} style={{ fontSize: 12, marginTop: 2 }}>✕ {e.message}</p>)}
+        {warnings.slice(0, 5).map((w, i) => <p key={"w" + i} style={{ fontSize: 12, marginTop: 2 }}>▲ {w.message}</p>)}
+      </>}
+    </div>
+  );
+}
+
+export default function SetupV3Page({ model, onModelChange, onNav = () => {}, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
   const p = useMemo(() => propagateDomain(model), [model]);
   const status = useMemo(() => computeStatus(model, p), [model, p]);
   const [tab, setTab] = useState("structure");
@@ -84,6 +111,8 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         {onOpenClassic ? <button className="linkbtn" onClick={onOpenClassic}>← classic Setup</button> : null}
       </div>
       <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined. Request types is the only place anything is wired together.</p>
+
+      {importReport ? <DomainImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
       {firstTodo ? (
         <div className="pstrip" role="status"><span className="glyph todo">▲</span><span><b>Next:</b> {firstTodo.next}</span>
@@ -110,6 +139,16 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
         {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
       </div>
+
+      {onDownloadTemplate || onUploadTemplate ? (
+        <div className="importbox">
+          <p><b>Load from the template.</b> Five sheets mirror the model — Registry, Queues, Request types, Steps, Volume entries. Download comes pre-filled; re-upload validates before anything changes.</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {onDownloadTemplate ? <button className="btn sm" onClick={() => onDownloadTemplate(model)}>Download template</button> : null}
+            {onUploadTemplate ? <button className="btn sm primary" onClick={() => onUploadTemplate()}>Upload data</button> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

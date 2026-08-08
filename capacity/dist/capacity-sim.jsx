@@ -41,310 +41,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// model/taxonomy.js
-var require_taxonomy = __commonJS({
-  "model/taxonomy.js"(exports, module) {
-    var CHANNELS4 = ["voice", "third_party", "digital", "customer_management"];
-    var ACTIVITIES2 = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
-    var PRODUCT_REQUESTS = ["new", "existing"];
-    var QUEUE_TYPES2 = ["inbound_call", "outbound_call", "case_processing", "governance"];
-    module.exports = { CHANNELS: CHANNELS4, ACTIVITIES: ACTIVITIES2, PRODUCT_REQUESTS, QUEUE_TYPES: QUEUE_TYPES2 };
-  }
-});
-
-// model/derive.js
-var require_derive = __commonJS({
-  "model/derive.js"(exports, module) {
-    var LEVEL_DEPTH = { bu: 1, product: 2, channel: 3 };
-    function indexStructure2(model) {
-      const nodes = /* @__PURE__ */ new Map();
-      const add = (id, level, name, parentId) => {
-        const parent = parentId != null ? nodes.get(parentId) : null;
-        const path = parent ? [...parent.path, id] : [id];
-        const label = parent ? `${parent.label} \u203A ${name}` : name;
-        nodes.set(id, { id, level, name, parentId: parentId ?? null, path, label });
-      };
-      for (const b of model.brands || []) {
-        add(b.id, "brand", b.name, null);
-        for (const bu of b.businessUnits || []) {
-          add(bu.id, "bu", bu.name, b.id);
-          for (const p of bu.products || []) {
-            add(p.id, "product", p.name, bu.id);
-            for (const ch of p.channels || []) {
-              add(ch.id, "channel", ch.channel, p.id);
-            }
-          }
-        }
-      }
-      const isAncestorOrSelf = (ancId, descId) => {
-        const d = nodes.get(descId);
-        return !!d && d.path.includes(ancId);
-      };
-      return { nodes, isAncestorOrSelf };
-    }
-    var profileNodeId = (profile) => profile.appliesAt && profile.appliesAt.nodeId;
-    function deriveServiceVolumes2(model, struct = indexStructure2(model)) {
-      const perService = /* @__PURE__ */ new Map();
-      for (const prof of model.profiles || []) {
-        const nodeId = profileNodeId(prof);
-        for (const m of prof.mix || []) {
-          if (!perService.has(m.serviceId)) perService.set(m.serviceId, []);
-          perService.get(m.serviceId).push({
-            profileId: prof.id,
-            nodeId,
-            pct: m.pct || 0,
-            total: prof.totalVolume || 0
-          });
-        }
-      }
-      const out = /* @__PURE__ */ new Map();
-      for (const [serviceId, contribs] of perService) {
-        const kept = contribs.map((c) => ({ ...c, superseded: false }));
-        for (const c of kept) {
-          for (const d of kept) {
-            if (c === d || c.nodeId == null || d.nodeId == null) continue;
-            if (c.nodeId !== d.nodeId && struct.isAncestorOrSelf(c.nodeId, d.nodeId)) {
-              c.superseded = true;
-            }
-          }
-        }
-        let volume = 0;
-        const sources = kept.map((c) => {
-          const v = c.superseded ? 0 : c.total * c.pct / 100;
-          volume += v;
-          return { profileId: c.profileId, nodeId: c.nodeId, pct: c.pct, total: c.total, volume: v, superseded: c.superseded };
-        });
-        out.set(serviceId, { volume, sources });
-      }
-      return out;
-    }
-    function deriveQueueWorkload2(model, opts = {}) {
-      const struct = opts.struct || indexStructure2(model);
-      const svcVol = opts.serviceVolumes || deriveServiceVolumes2(model, struct);
-      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
-      const serviceById = new Map((model.services || []).map((s) => [s.id, s]));
-      const agg = /* @__PURE__ */ new Map();
-      for (const svc of model.services || []) {
-        const sv = svcVol.get(svc.id);
-        const serviceVolume = sv ? sv.volume : 0;
-        for (const step of svc.journey || []) {
-          const q = queueById.get(step.queueId);
-          if (!q) continue;
-          const split = (step.splitPct != null ? step.splitPct : 100) / 100;
-          const sampling = (step.samplingPct != null ? step.samplingPct : 100) / 100;
-          const stepVolume = serviceVolume * split * sampling;
-          const svcAht = svc.ahtSec != null ? svc.ahtSec : q.fallbackAhtSec;
-          const ahtSource = svc.ahtSec != null ? "svc" : "fallback";
-          if (!agg.has(q.id)) agg.set(q.id, { volume: 0, minuteSum: 0, byService: [] });
-          const a = agg.get(q.id);
-          a.volume += stepVolume;
-          a.minuteSum += stepVolume * svcAht;
-          a.byService.push({
-            serviceId: svc.id,
-            serviceName: svc.name,
-            volume: stepVolume,
-            aht: svcAht,
-            ahtSource,
-            splitPct: step.splitPct != null ? step.splitPct : 100,
-            samplingPct: step.samplingPct != null ? step.samplingPct : 100
-          });
-        }
-      }
-      const out = /* @__PURE__ */ new Map();
-      for (const q of model.queues || []) {
-        const a = agg.get(q.id) || { volume: 0, minuteSum: 0, byService: [] };
-        const effectiveAht = a.volume > 0 ? a.minuteSum / a.volume : q.fallbackAhtSec;
-        const contributing = a.byService.filter((s) => s.volume > 0);
-        const marker = contributing.length <= 1 ? contributing[0] && contributing[0].ahtSource === "svc" ? "svc" : "queue" : "weighted";
-        out.set(q.id, {
-          queueId: q.id,
-          name: q.name,
-          type: q.type,
-          shared: q.attachment && q.attachment.kind === "shared",
-          volume: a.volume,
-          effectiveAht,
-          ahtMarker: marker,
-          byService: a.byService.sort((x, y) => y.volume - x.volume)
-        });
-      }
-      return out;
-    }
-    function crossStructureWarnings(model, struct = indexStructure2(model)) {
-      const warnings = [];
-      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
-      const svcVol = deriveServiceVolumes2(model, struct);
-      for (const svc of model.services || []) {
-        const sv = svcVol.get(svc.id);
-        const sources = sv ? sv.sources.filter((s) => !s.superseded && s.nodeId != null && s.volume > 0) : [];
-        if (!sources.length) continue;
-        for (const step of svc.journey || []) {
-          const q = queueById.get(step.queueId);
-          if (!q || !q.attachment || q.attachment.kind !== "structural") continue;
-          const chId = q.attachment.channelInstanceId;
-          const qn = struct.nodes.get(chId);
-          for (const src of sources) {
-            if (struct.isAncestorOrSelf(src.nodeId, chId)) continue;
-            const fn = struct.nodes.get(src.nodeId);
-            warnings.push({
-              kind: "cross_structure",
-              profileId: src.profileId,
-              serviceId: svc.id,
-              serviceName: svc.name,
-              queueId: q.id,
-              queueName: q.name,
-              queuePath: qn ? qn.label : chId,
-              feedNodePath: fn ? fn.label : src.nodeId,
-              message: `Service "${svc.name}" routes to structural queue "${q.name}" (${qn ? qn.label : chId}) but volume from ${fn ? fn.label : src.nodeId} enters outside that path.`
-            });
-          }
-        }
-      }
-      return warnings;
-    }
-    function mixWarnings(model) {
-      const warnings = [];
-      for (const prof of model.profiles || []) {
-        const sum = (prof.mix || []).reduce((a, m) => a + (m.pct || 0), 0);
-        if (sum < 100 - 1e-9) {
-          warnings.push({
-            kind: "unmodelled_remainder",
-            profileId: prof.id,
-            sumPct: sum,
-            remainderPct: 100 - sum,
-            message: `Profile mix sums to ${sum}% \u2014 ${(100 - sum).toFixed(1)}% of volume is unmodelled.`
-          });
-        }
-      }
-      return warnings;
-    }
-    function sharedQueueAllocation(model, opts = {}) {
-      const struct = opts.struct || indexStructure2(model);
-      const svcVol = opts.serviceVolumes || deriveServiceVolumes2(model, struct);
-      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
-      const out = /* @__PURE__ */ new Map();
-      for (const q of model.queues || []) {
-        if (!q.attachment || q.attachment.kind !== "shared") continue;
-        const byNode = /* @__PURE__ */ new Map();
-        for (const svc of model.services || []) {
-          const step = (svc.journey || []).find((s) => s.queueId === q.id);
-          if (!step) continue;
-          const sv = svcVol.get(svc.id);
-          if (!sv || sv.volume <= 0) continue;
-          const split = (step.splitPct != null ? step.splitPct : 100) / 100;
-          const sampling = (step.samplingPct != null ? step.samplingPct : 100) / 100;
-          const svcAht = svc.ahtSec != null ? svc.ahtSec : q.fallbackAhtSec;
-          const activeSources = sv.sources.filter((s) => !s.superseded && s.volume > 0);
-          const denom = activeSources.reduce((a, s) => a + s.volume, 0) || 1;
-          for (const src of activeSources) {
-            const nodeShare = src.volume / denom;
-            const minutes = sv.volume * split * sampling * svcAht * nodeShare;
-            byNode.set(src.nodeId, (byNode.get(src.nodeId) || 0) + minutes);
-          }
-        }
-        let total = 0;
-        for (const m of byNode.values()) total += m;
-        const rows = [...byNode.entries()].map(([nodeId, minutes]) => ({
-          nodeId,
-          label: (struct.nodes.get(nodeId) || {}).label || nodeId,
-          minutes,
-          sharePct: total > 0 ? minutes / total * 100 : 0
-        })).sort((a, b) => b.minutes - a.minutes);
-        out.set(q.id, { queueId: q.id, name: q.name, totalMinutes: total, byNode: rows });
-      }
-      return out;
-    }
-    function canDeleteQueue3(model, queueId) {
-      const blockedBy = (model.services || []).filter((s) => (s.journey || []).some((step) => step.queueId === queueId)).map((s) => ({ serviceId: s.id, serviceName: s.name }));
-      return { ok: blockedBy.length === 0, blockedBy };
-    }
-    function canDeleteService2(model, serviceId) {
-      const blockedBy = (model.profiles || []).filter((p) => (p.mix || []).some((m) => m.serviceId === serviceId)).map((p) => ({ profileId: p.id }));
-      return { ok: blockedBy.length === 0, blockedBy };
-    }
-    function validateModel(model, struct = indexStructure2(model)) {
-      const errors = [], warnings = [];
-      const queueIds = new Set((model.queues || []).map((q) => q.id));
-      const serviceIds = new Set((model.services || []).map((s) => s.id));
-      for (const svc of model.services || []) {
-        for (const step of svc.journey || []) {
-          if (!queueIds.has(step.queueId)) {
-            errors.push({
-              kind: "dangling_journey_queue",
-              serviceId: svc.id,
-              queueId: step.queueId,
-              message: `Service "${svc.name}" journey references missing queue ${step.queueId}.`
-            });
-          }
-        }
-      }
-      for (const prof of model.profiles || []) {
-        for (const m of prof.mix || []) {
-          if (!serviceIds.has(m.serviceId)) {
-            errors.push({
-              kind: "dangling_mix_service",
-              profileId: prof.id,
-              serviceId: m.serviceId,
-              message: `Profile ${prof.id} mix references missing service ${m.serviceId}.`
-            });
-          }
-        }
-        const nodeId = profileNodeId(prof);
-        if (nodeId != null && !struct.nodes.has(nodeId)) {
-          errors.push({
-            kind: "dangling_profile_node",
-            profileId: prof.id,
-            nodeId,
-            message: `Profile ${prof.id} applies at missing structure node ${nodeId}.`
-          });
-        }
-        const sum = (prof.mix || []).reduce((a, m) => a + (m.pct || 0), 0);
-        if (sum > 100 + 1e-9) {
-          errors.push({
-            kind: "mix_over_100",
-            profileId: prof.id,
-            sumPct: sum,
-            message: `Profile ${prof.id} mix sums to ${sum}% (>100%).`
-          });
-        }
-      }
-      warnings.push(...mixWarnings(model));
-      warnings.push(...crossStructureWarnings(model, struct));
-      return { ok: errors.length === 0, errors, warnings };
-    }
-    function derive2(model) {
-      const struct = indexStructure2(model);
-      const serviceVolumes = deriveServiceVolumes2(model, struct);
-      const queues = deriveQueueWorkload2(model, { struct, serviceVolumes });
-      const sharedAllocation = sharedQueueAllocation(model, { struct, serviceVolumes });
-      const validation = validateModel(model, struct);
-      return {
-        serviceVolumes: mapToObj(serviceVolumes),
-        queues: mapToObj(queues),
-        sharedAllocation: mapToObj(sharedAllocation),
-        validation
-      };
-    }
-    function mapToObj(m) {
-      const o = {};
-      for (const [k, v] of m) o[k] = v;
-      return o;
-    }
-    module.exports = {
-      LEVEL_DEPTH,
-      indexStructure: indexStructure2,
-      deriveServiceVolumes: deriveServiceVolumes2,
-      deriveQueueWorkload: deriveQueueWorkload2,
-      crossStructureWarnings,
-      mixWarnings,
-      sharedQueueAllocation,
-      canDeleteQueue: canDeleteQueue3,
-      canDeleteService: canDeleteService2,
-      validateModel,
-      derive: derive2
-    };
-  }
-});
-
 // model/domain.js
 var require_domain = __commonJS({
   "model/domain.js"(exports, module) {
@@ -652,7 +348,7 @@ var require_engine = __commonJS({
       const t = sum(a) || 1;
       return a.map((v) => v / t);
     };
-    var uid2 = () => Math.random().toString(36).slice(2, 9);
+    var uid = () => Math.random().toString(36).slice(2, 9);
     var DEFAULT_PROFILE = [
       0.35,
       0.55,
@@ -2245,7 +1941,7 @@ var require_engine = __commonJS({
       for (const q of cfg.queues) {
         const series = weeks.map((w) => w.queues[q.id]);
         const last = series[series.length - 1];
-        const row2 = {
+        const row = {
           name: q.name,
           type: q.type,
           resourcing: q.resourcing || "resourced",
@@ -2258,16 +1954,16 @@ var require_engine = __commonJS({
           churnCount: sum(series.map((s) => s.leavers || 0))
         };
         const avgActive = sum(series.map((s) => s.active != null ? s.active : s.trained + s.ramp)) / Math.max(1, series.length);
-        row2.churnPct = avgActive > 1e-9 ? row2.churnCount / avgActive : 0;
-        hiring.queues[q.id] = row2;
+        row.churnPct = avgActive > 1e-9 ? row.churnCount / avgActive : 0;
+        hiring.queues[q.id] = row;
         for (const g of [groups[q.type] || (groups[q.type] = blankAggRow()), groups.overall]) {
-          g.volume += row2.volume;
-          g.required += row2.required;
-          g.hiring += row2.hiring;
-          g.pipelineEnd += row2.pipelineEnd;
-          g.training += row2.training;
-          g.active += row2.active;
-          g.churnCount += row2.churnCount;
+          g.volume += row.volume;
+          g.required += row.required;
+          g.hiring += row.hiring;
+          g.pipelineEnd += row.pipelineEnd;
+          g.training += row.training;
+          g.active += row.active;
+          g.churnCount += row.churnCount;
           g._avgActive += avgActive;
         }
       }
@@ -2571,7 +2267,7 @@ var require_engine = __commonJS({
       clamp,
       norm,
       sum,
-      uid: uid2,
+      uid,
       stretchCurve,
       // Revision 1 (SPEC §14)
       BUILTIN_STRATEGIES,
@@ -2614,6 +2310,17 @@ var require_engine = __commonJS({
   }
 });
 
+// model/taxonomy.js
+var require_taxonomy = __commonJS({
+  "model/taxonomy.js"(exports, module) {
+    var CHANNELS3 = ["voice", "third_party", "digital", "customer_management"];
+    var ACTIVITIES2 = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
+    var PRODUCT_REQUESTS = ["new", "existing"];
+    var QUEUE_TYPES2 = ["inbound_call", "outbound_call", "case_processing", "governance"];
+    module.exports = { CHANNELS: CHANNELS3, ACTIVITIES: ACTIVITIES2, PRODUCT_REQUESTS, QUEUE_TYPES: QUEUE_TYPES2 };
+  }
+});
+
 // model/bridge.js
 var require_bridge = __commonJS({
   "model/bridge.js"(exports, module) {
@@ -2649,7 +2356,7 @@ var require_bridge = __commonJS({
         burn: { occThreshold: 0.85, sensitivity: 1.5, recovery: 8, maxAttritionMult: 2, absenceUplift: 0.05 }
       };
     }
-    function domainToEngineConfig(model) {
+    function domainToEngineConfig2(model) {
       const base = model.engineConfig;
       if (!base) throw new Error("domainToEngineConfig: model carries no engineConfig (migrate first, or attach one)");
       const p = propagateDomain2(model);
@@ -2677,7 +2384,7 @@ var require_bridge = __commonJS({
       });
       return { ...base, queues };
     }
-    module.exports = { domainToEngineConfig, engineTypeOf: engineTypeOf2, engineQueueDefaults: engineQueueDefaults2 };
+    module.exports = { domainToEngineConfig: domainToEngineConfig2, engineTypeOf: engineTypeOf2, engineQueueDefaults: engineQueueDefaults2 };
   }
 });
 
@@ -2694,11 +2401,11 @@ var require_ops = __commonJS({
       canDeleteRequestType: canDeleteRequestType2,
       keyOf: keyOf2
     } = require_domain();
-    var { CHANNELS: CHANNELS4 } = require_taxonomy();
+    var { CHANNELS: CHANNELS3 } = require_taxonomy();
     var { propagateDomain: propagateDomain2 } = require_propagate();
     var clone2 = (m) => JSON.parse(JSON.stringify(m));
-    var _seq2 = 0;
-    var uid2 = (p) => `${p}_${(++_seq2).toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    var _seq = 0;
+    var uid = (p) => `${p}_${(++_seq).toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     function applyPatch(target, patch) {
       for (const [k, v] of Object.entries(patch)) {
         if (v === void 0) delete target[k];
@@ -2709,7 +2416,7 @@ var require_ops = __commonJS({
       return (model, item = {}) => {
         const m = clone2(model);
         m[listKey] = m[listKey] || [];
-        m[listKey].push({ id: item.id || uid2(prefix), name: item.name || prefix, ...item });
+        m[listKey].push({ id: item.id || uid(prefix), name: item.name || prefix, ...item });
         return m;
       };
     }
@@ -2732,17 +2439,17 @@ var require_ops = __commonJS({
     var addBrand2 = addToList("brands", "b");
     var renameBrand2 = renameInList("brands");
     var deleteBrand2 = deleteFromList("brands", canDeleteBrand2);
-    var addBusinessUnit3 = addToList("businessUnits", "bu");
+    var addBusinessUnit2 = addToList("businessUnits", "bu");
     var renameBusinessUnit2 = renameInList("businessUnits");
     var deleteBusinessUnit2 = deleteFromList("businessUnits", canDeleteBU2);
     var addProcessGroup2 = addToList("processGroups", "pg");
     var renameProcessGroup2 = renameInList("processGroups");
     var deleteProcessGroup2 = deleteFromList("processGroups", canDeleteGroup2);
-    var addProduct3 = addToList("products", "prod");
+    var addProduct2 = addToList("products", "prod");
     var renameProduct2 = renameInList("products");
     var deleteProduct2 = deleteFromList("products", canDeleteProduct2);
     function addChannel2(model, { key, id, name, defaults } = {}) {
-      if (!CHANNELS4.includes(key)) return model;
+      if (!CHANNELS3.includes(key)) return model;
       if ((model.channels || []).some((c) => c.key === key)) return model;
       const m = clone2(model);
       m.channels = m.channels || [];
@@ -2772,11 +2479,11 @@ var require_ops = __commonJS({
       failedToChurnPct: 6,
       attritionPct: 26
     };
-    function addQueue3(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
+    function addQueue2(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
       const m = clone2(model);
       m.queues = m.queues || [];
       const q = {
-        id: id || uid2("q"),
+        id: id || uid("q"),
         name: name || `Queue ${m.queues.length + 1}`,
         type: type || "inbound_call",
         fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
@@ -2787,13 +2494,13 @@ var require_ops = __commonJS({
       m.queues.push(q);
       return m;
     }
-    function updateQueue3(model, queueId, patch) {
+    function updateQueue2(model, queueId, patch) {
       const m = clone2(model);
       const q = (m.queues || []).find((x) => x.id === queueId);
       if (q) applyPatch(q, patch);
       return m;
     }
-    function updateQueueStaffing3(model, queueId, patch) {
+    function updateQueueStaffing2(model, queueId, patch) {
       const m = clone2(model);
       const q = (m.queues || []).find((x) => x.id === queueId);
       if (q) {
@@ -2803,7 +2510,7 @@ var require_ops = __commonJS({
       }
       return m;
     }
-    function resetQueueStaffing3(model, queueId) {
+    function resetQueueStaffing2(model, queueId) {
       const m = clone2(model);
       const q = (m.queues || []).find((x) => x.id === queueId);
       if (q) {
@@ -2812,13 +2519,13 @@ var require_ops = __commonJS({
       }
       return m;
     }
-    var deleteQueue3 = deleteFromList("queues", canDeleteQueue3);
+    var deleteQueue2 = deleteFromList("queues", canDeleteQueue3);
     function addServiceTeam2(model, team = {}) {
       const m = clone2(model);
       m.engineConfig = m.engineConfig || {};
       m.engineConfig.serviceTeams = m.engineConfig.serviceTeams || [];
       m.engineConfig.serviceTeams.push({
-        id: team.id || uid2("st"),
+        id: team.id || uid("st"),
         name: team.name || "Shared team",
         size: 5,
         premiumPct: 0.1,
@@ -2847,7 +2554,7 @@ var require_ops = __commonJS({
       const m = clone2(model);
       m.requestTypes = m.requestTypes || [];
       const rt = {
-        id: id || uid2("rt"),
+        id: id || uid("rt"),
         name: name || "New request type",
         activity: activity || "service_request",
         productRequest: productRequest || "existing",
@@ -2935,7 +2642,7 @@ var require_ops = __commonJS({
     function setVolumeEntry2(model, scope, { daily, weekly } = {}) {
       const m = clone2(model);
       m.volumeEntries = (m.volumeEntries || []).filter((e2) => keyOf2(e2.scope || {}) !== keyOf2(scope || {}));
-      const e = { id: uid2("ve"), scope: { ...scope } };
+      const e = { id: uid("ve"), scope: { ...scope } };
       if (daily != null) e.daily = daily;
       if (weekly != null) e.weekly = [...weekly];
       if (e.daily != null || e.weekly != null) m.volumeEntries.push(e);
@@ -2946,7 +2653,7 @@ var require_ops = __commonJS({
       m.volumeEntries = (m.volumeEntries || []).filter((e) => keyOf2(e.scope || {}) !== keyOf2(scope || {}));
       return m;
     }
-    function blankDomainModel(engineConfig) {
+    function blankDomainModel2(engineConfig) {
       const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
       if (engineConfig) m.engineConfig = engineConfig;
       return m;
@@ -3001,7 +2708,7 @@ var require_ops = __commonJS({
         ]
       };
     }
-    function buildDomainImportReport(model) {
+    function buildDomainImportReport2(model) {
       const v = propagateDomain2(model).validation;
       return {
         ok: v.ok,
@@ -3021,28 +2728,28 @@ var require_ops = __commonJS({
     }
     module.exports = {
       DEFAULT_STAFFING,
-      uid: uid2,
+      uid,
       addBrand: addBrand2,
       renameBrand: renameBrand2,
       deleteBrand: deleteBrand2,
-      addBusinessUnit: addBusinessUnit3,
+      addBusinessUnit: addBusinessUnit2,
       renameBusinessUnit: renameBusinessUnit2,
       deleteBusinessUnit: deleteBusinessUnit2,
       addProcessGroup: addProcessGroup2,
       renameProcessGroup: renameProcessGroup2,
       deleteProcessGroup: deleteProcessGroup2,
-      addProduct: addProduct3,
+      addProduct: addProduct2,
       renameProduct: renameProduct2,
       deleteProduct: deleteProduct2,
       addChannel: addChannel2,
       renameChannel: renameChannel2,
       deleteChannel: deleteChannel2,
       setChannelDefaults: setChannelDefaults2,
-      addQueue: addQueue3,
-      updateQueue: updateQueue3,
-      updateQueueStaffing: updateQueueStaffing3,
-      resetQueueStaffing: resetQueueStaffing3,
-      deleteQueue: deleteQueue3,
+      addQueue: addQueue2,
+      updateQueue: updateQueue2,
+      updateQueueStaffing: updateQueueStaffing2,
+      resetQueueStaffing: resetQueueStaffing2,
+      deleteQueue: deleteQueue2,
       addServiceTeam: addServiceTeam2,
       updateServiceTeam: updateServiceTeam2,
       deleteServiceTeam: deleteServiceTeam2,
@@ -3058,9 +2765,302 @@ var require_ops = __commonJS({
       setOutcomes: setOutcomes2,
       setVolumeEntry: setVolumeEntry2,
       clearVolumeEntry: clearVolumeEntry2,
-      blankDomainModel,
+      blankDomainModel: blankDomainModel2,
       sampleDomainModel,
-      buildDomainImportReport
+      buildDomainImportReport: buildDomainImportReport2
+    };
+  }
+});
+
+// model/derive.js
+var require_derive = __commonJS({
+  "model/derive.js"(exports, module) {
+    var LEVEL_DEPTH = { bu: 1, product: 2, channel: 3 };
+    function indexStructure2(model) {
+      const nodes = /* @__PURE__ */ new Map();
+      const add = (id, level, name, parentId) => {
+        const parent = parentId != null ? nodes.get(parentId) : null;
+        const path = parent ? [...parent.path, id] : [id];
+        const label = parent ? `${parent.label} \u203A ${name}` : name;
+        nodes.set(id, { id, level, name, parentId: parentId ?? null, path, label });
+      };
+      for (const b of model.brands || []) {
+        add(b.id, "brand", b.name, null);
+        for (const bu of b.businessUnits || []) {
+          add(bu.id, "bu", bu.name, b.id);
+          for (const p of bu.products || []) {
+            add(p.id, "product", p.name, bu.id);
+            for (const ch of p.channels || []) {
+              add(ch.id, "channel", ch.channel, p.id);
+            }
+          }
+        }
+      }
+      const isAncestorOrSelf = (ancId, descId) => {
+        const d = nodes.get(descId);
+        return !!d && d.path.includes(ancId);
+      };
+      return { nodes, isAncestorOrSelf };
+    }
+    var profileNodeId = (profile) => profile.appliesAt && profile.appliesAt.nodeId;
+    function deriveServiceVolumes2(model, struct = indexStructure2(model)) {
+      const perService = /* @__PURE__ */ new Map();
+      for (const prof of model.profiles || []) {
+        const nodeId = profileNodeId(prof);
+        for (const m of prof.mix || []) {
+          if (!perService.has(m.serviceId)) perService.set(m.serviceId, []);
+          perService.get(m.serviceId).push({
+            profileId: prof.id,
+            nodeId,
+            pct: m.pct || 0,
+            total: prof.totalVolume || 0
+          });
+        }
+      }
+      const out = /* @__PURE__ */ new Map();
+      for (const [serviceId, contribs] of perService) {
+        const kept = contribs.map((c) => ({ ...c, superseded: false }));
+        for (const c of kept) {
+          for (const d of kept) {
+            if (c === d || c.nodeId == null || d.nodeId == null) continue;
+            if (c.nodeId !== d.nodeId && struct.isAncestorOrSelf(c.nodeId, d.nodeId)) {
+              c.superseded = true;
+            }
+          }
+        }
+        let volume = 0;
+        const sources = kept.map((c) => {
+          const v = c.superseded ? 0 : c.total * c.pct / 100;
+          volume += v;
+          return { profileId: c.profileId, nodeId: c.nodeId, pct: c.pct, total: c.total, volume: v, superseded: c.superseded };
+        });
+        out.set(serviceId, { volume, sources });
+      }
+      return out;
+    }
+    function deriveQueueWorkload2(model, opts = {}) {
+      const struct = opts.struct || indexStructure2(model);
+      const svcVol = opts.serviceVolumes || deriveServiceVolumes2(model, struct);
+      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
+      const serviceById = new Map((model.services || []).map((s) => [s.id, s]));
+      const agg = /* @__PURE__ */ new Map();
+      for (const svc of model.services || []) {
+        const sv = svcVol.get(svc.id);
+        const serviceVolume = sv ? sv.volume : 0;
+        for (const step of svc.journey || []) {
+          const q = queueById.get(step.queueId);
+          if (!q) continue;
+          const split = (step.splitPct != null ? step.splitPct : 100) / 100;
+          const sampling = (step.samplingPct != null ? step.samplingPct : 100) / 100;
+          const stepVolume = serviceVolume * split * sampling;
+          const svcAht = svc.ahtSec != null ? svc.ahtSec : q.fallbackAhtSec;
+          const ahtSource = svc.ahtSec != null ? "svc" : "fallback";
+          if (!agg.has(q.id)) agg.set(q.id, { volume: 0, minuteSum: 0, byService: [] });
+          const a = agg.get(q.id);
+          a.volume += stepVolume;
+          a.minuteSum += stepVolume * svcAht;
+          a.byService.push({
+            serviceId: svc.id,
+            serviceName: svc.name,
+            volume: stepVolume,
+            aht: svcAht,
+            ahtSource,
+            splitPct: step.splitPct != null ? step.splitPct : 100,
+            samplingPct: step.samplingPct != null ? step.samplingPct : 100
+          });
+        }
+      }
+      const out = /* @__PURE__ */ new Map();
+      for (const q of model.queues || []) {
+        const a = agg.get(q.id) || { volume: 0, minuteSum: 0, byService: [] };
+        const effectiveAht = a.volume > 0 ? a.minuteSum / a.volume : q.fallbackAhtSec;
+        const contributing = a.byService.filter((s) => s.volume > 0);
+        const marker = contributing.length <= 1 ? contributing[0] && contributing[0].ahtSource === "svc" ? "svc" : "queue" : "weighted";
+        out.set(q.id, {
+          queueId: q.id,
+          name: q.name,
+          type: q.type,
+          shared: q.attachment && q.attachment.kind === "shared",
+          volume: a.volume,
+          effectiveAht,
+          ahtMarker: marker,
+          byService: a.byService.sort((x, y) => y.volume - x.volume)
+        });
+      }
+      return out;
+    }
+    function crossStructureWarnings(model, struct = indexStructure2(model)) {
+      const warnings = [];
+      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
+      const svcVol = deriveServiceVolumes2(model, struct);
+      for (const svc of model.services || []) {
+        const sv = svcVol.get(svc.id);
+        const sources = sv ? sv.sources.filter((s) => !s.superseded && s.nodeId != null && s.volume > 0) : [];
+        if (!sources.length) continue;
+        for (const step of svc.journey || []) {
+          const q = queueById.get(step.queueId);
+          if (!q || !q.attachment || q.attachment.kind !== "structural") continue;
+          const chId = q.attachment.channelInstanceId;
+          const qn = struct.nodes.get(chId);
+          for (const src of sources) {
+            if (struct.isAncestorOrSelf(src.nodeId, chId)) continue;
+            const fn = struct.nodes.get(src.nodeId);
+            warnings.push({
+              kind: "cross_structure",
+              profileId: src.profileId,
+              serviceId: svc.id,
+              serviceName: svc.name,
+              queueId: q.id,
+              queueName: q.name,
+              queuePath: qn ? qn.label : chId,
+              feedNodePath: fn ? fn.label : src.nodeId,
+              message: `Service "${svc.name}" routes to structural queue "${q.name}" (${qn ? qn.label : chId}) but volume from ${fn ? fn.label : src.nodeId} enters outside that path.`
+            });
+          }
+        }
+      }
+      return warnings;
+    }
+    function mixWarnings(model) {
+      const warnings = [];
+      for (const prof of model.profiles || []) {
+        const sum = (prof.mix || []).reduce((a, m) => a + (m.pct || 0), 0);
+        if (sum < 100 - 1e-9) {
+          warnings.push({
+            kind: "unmodelled_remainder",
+            profileId: prof.id,
+            sumPct: sum,
+            remainderPct: 100 - sum,
+            message: `Profile mix sums to ${sum}% \u2014 ${(100 - sum).toFixed(1)}% of volume is unmodelled.`
+          });
+        }
+      }
+      return warnings;
+    }
+    function sharedQueueAllocation(model, opts = {}) {
+      const struct = opts.struct || indexStructure2(model);
+      const svcVol = opts.serviceVolumes || deriveServiceVolumes2(model, struct);
+      const queueById = new Map((model.queues || []).map((q) => [q.id, q]));
+      const out = /* @__PURE__ */ new Map();
+      for (const q of model.queues || []) {
+        if (!q.attachment || q.attachment.kind !== "shared") continue;
+        const byNode = /* @__PURE__ */ new Map();
+        for (const svc of model.services || []) {
+          const step = (svc.journey || []).find((s) => s.queueId === q.id);
+          if (!step) continue;
+          const sv = svcVol.get(svc.id);
+          if (!sv || sv.volume <= 0) continue;
+          const split = (step.splitPct != null ? step.splitPct : 100) / 100;
+          const sampling = (step.samplingPct != null ? step.samplingPct : 100) / 100;
+          const svcAht = svc.ahtSec != null ? svc.ahtSec : q.fallbackAhtSec;
+          const activeSources = sv.sources.filter((s) => !s.superseded && s.volume > 0);
+          const denom = activeSources.reduce((a, s) => a + s.volume, 0) || 1;
+          for (const src of activeSources) {
+            const nodeShare = src.volume / denom;
+            const minutes = sv.volume * split * sampling * svcAht * nodeShare;
+            byNode.set(src.nodeId, (byNode.get(src.nodeId) || 0) + minutes);
+          }
+        }
+        let total = 0;
+        for (const m of byNode.values()) total += m;
+        const rows = [...byNode.entries()].map(([nodeId, minutes]) => ({
+          nodeId,
+          label: (struct.nodes.get(nodeId) || {}).label || nodeId,
+          minutes,
+          sharePct: total > 0 ? minutes / total * 100 : 0
+        })).sort((a, b) => b.minutes - a.minutes);
+        out.set(q.id, { queueId: q.id, name: q.name, totalMinutes: total, byNode: rows });
+      }
+      return out;
+    }
+    function canDeleteQueue3(model, queueId) {
+      const blockedBy = (model.services || []).filter((s) => (s.journey || []).some((step) => step.queueId === queueId)).map((s) => ({ serviceId: s.id, serviceName: s.name }));
+      return { ok: blockedBy.length === 0, blockedBy };
+    }
+    function canDeleteService2(model, serviceId) {
+      const blockedBy = (model.profiles || []).filter((p) => (p.mix || []).some((m) => m.serviceId === serviceId)).map((p) => ({ profileId: p.id }));
+      return { ok: blockedBy.length === 0, blockedBy };
+    }
+    function validateModel(model, struct = indexStructure2(model)) {
+      const errors = [], warnings = [];
+      const queueIds = new Set((model.queues || []).map((q) => q.id));
+      const serviceIds = new Set((model.services || []).map((s) => s.id));
+      for (const svc of model.services || []) {
+        for (const step of svc.journey || []) {
+          if (!queueIds.has(step.queueId)) {
+            errors.push({
+              kind: "dangling_journey_queue",
+              serviceId: svc.id,
+              queueId: step.queueId,
+              message: `Service "${svc.name}" journey references missing queue ${step.queueId}.`
+            });
+          }
+        }
+      }
+      for (const prof of model.profiles || []) {
+        for (const m of prof.mix || []) {
+          if (!serviceIds.has(m.serviceId)) {
+            errors.push({
+              kind: "dangling_mix_service",
+              profileId: prof.id,
+              serviceId: m.serviceId,
+              message: `Profile ${prof.id} mix references missing service ${m.serviceId}.`
+            });
+          }
+        }
+        const nodeId = profileNodeId(prof);
+        if (nodeId != null && !struct.nodes.has(nodeId)) {
+          errors.push({
+            kind: "dangling_profile_node",
+            profileId: prof.id,
+            nodeId,
+            message: `Profile ${prof.id} applies at missing structure node ${nodeId}.`
+          });
+        }
+        const sum = (prof.mix || []).reduce((a, m) => a + (m.pct || 0), 0);
+        if (sum > 100 + 1e-9) {
+          errors.push({
+            kind: "mix_over_100",
+            profileId: prof.id,
+            sumPct: sum,
+            message: `Profile ${prof.id} mix sums to ${sum}% (>100%).`
+          });
+        }
+      }
+      warnings.push(...mixWarnings(model));
+      warnings.push(...crossStructureWarnings(model, struct));
+      return { ok: errors.length === 0, errors, warnings };
+    }
+    function derive2(model) {
+      const struct = indexStructure2(model);
+      const serviceVolumes = deriveServiceVolumes2(model, struct);
+      const queues = deriveQueueWorkload2(model, { struct, serviceVolumes });
+      const sharedAllocation = sharedQueueAllocation(model, { struct, serviceVolumes });
+      const validation = validateModel(model, struct);
+      return {
+        serviceVolumes: mapToObj(serviceVolumes),
+        queues: mapToObj(queues),
+        sharedAllocation: mapToObj(sharedAllocation),
+        validation
+      };
+    }
+    function mapToObj(m) {
+      const o = {};
+      for (const [k, v] of m) o[k] = v;
+      return o;
+    }
+    module.exports = {
+      LEVEL_DEPTH,
+      indexStructure: indexStructure2,
+      deriveServiceVolumes: deriveServiceVolumes2,
+      deriveQueueWorkload: deriveQueueWorkload2,
+      crossStructureWarnings,
+      mixWarnings,
+      sharedQueueAllocation,
+      canDeleteQueue: canDeleteQueue3,
+      canDeleteService: canDeleteService2,
+      validateModel,
+      derive: derive2
     };
   }
 });
@@ -3352,198 +3352,201 @@ var require_store_domain = __commonJS({
   }
 });
 
-// ui/v2/template.js
-function modelToSheets(model) {
-  const Structure = [];
-  for (const b of model.brands || []) {
-    if (!b.businessUnits || !b.businessUnits.length) {
-      Structure.push(row(b, null, null, null));
-      continue;
-    }
-    for (const bu of b.businessUnits) {
-      if (!bu.products || !bu.products.length) {
-        Structure.push(row(b, bu, null, null));
-        continue;
-      }
-      for (const p of bu.products) {
-        if (!p.channels || !p.channels.length) {
-          Structure.push(row(b, bu, p, null));
-          continue;
+// model/template-domain.js
+var require_template_domain = __commonJS({
+  "model/template-domain.js"(exports, module) {
+    var SHEET_NAMES2 = ["Registry", "Queues", "Request types", "Steps", "Volume entries"];
+    var WEEKS = 52;
+    var blank = (v) => v === void 0 || v === null ? "" : v;
+    var numOrU = (v) => v === "" || v == null ? void 0 : +v;
+    var strOrU = (v) => v === "" || v == null ? void 0 : String(v);
+    var joinIds = (a) => (a || []).join(";");
+    var splitIds = (s) => s === "" || s == null ? [] : String(s).split(";").filter(Boolean);
+    function modelToDomainSheets2(model) {
+      const Registry = [];
+      const reg = (kind, e) => Registry.push({
+        Kind: kind,
+        Id: e.id,
+        Name: blank(e.name),
+        Key: blank(e.key),
+        DefaultsJson: e.defaults ? JSON.stringify(e.defaults) : ""
+      });
+      for (const b of model.brands || []) reg("brand", b);
+      for (const b of model.businessUnits || []) reg("businessUnit", b);
+      for (const c of model.channels || []) reg("channel", c);
+      for (const g of model.processGroups || []) reg("processGroup", g);
+      for (const p of model.products || []) reg("product", p);
+      const Queues = (model.queues || []).map((q) => ({
+        QueueId: q.id,
+        Name: q.name,
+        Type: q.type,
+        HomeBrandId: blank(q.homeBrandId),
+        HomeBuId: blank(q.homeBuId),
+        FallbackAhtSec: q.fallbackAhtSec,
+        Modified: q._modified ? "yes" : "",
+        StaffingJson: q.staffing ? JSON.stringify(q.staffing) : ""
+      }));
+      const RT = (model.requestTypes || []).map((rt) => ({
+        RequestTypeId: rt.id,
+        Name: rt.name,
+        Activity: rt.activity,
+        ProductRequest: rt.productRequest,
+        GroupId: rt.groupId,
+        ProductId: blank(rt.productId),
+        AhtSec: blank(rt.ahtSec),
+        BrandIds: joinIds(rt.brandIds),
+        BuIds: joinIds(rt.buIds)
+      }));
+      const Steps = [];
+      for (const rt of model.requestTypes || [])
+        for (const p of rt.processes || []) {
+          const head = { RequestTypeId: rt.id, ChannelId: p.channelId, ProcessOutcomes: joinIds(p.outcomes) };
+          if (!(p.steps || []).length) {
+            Steps.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "", Terminal: "", Outcome: "" });
+            continue;
+          }
+          p.steps.forEach((s, i) => Steps.push({
+            ...head,
+            StepOrder: i + 1,
+            QueueId: s.queueId,
+            SplitPct: s.splitPct,
+            SamplingPct: blank(s.samplingPct),
+            Terminal: s.terminal ? "yes" : "",
+            Outcome: blank(s.outcome)
+          }));
         }
-        for (const ch of p.channels) Structure.push(row(b, bu, p, ch));
+      const Volume = (model.volumeEntries || []).map((e) => {
+        const row = {
+          EntryId: blank(e.id),
+          BrandId: blank((e.scope || {}).brandId),
+          BuId: blank((e.scope || {}).buId),
+          RequestTypeId: blank((e.scope || {}).requestTypeId),
+          ChannelId: blank((e.scope || {}).channelId),
+          Daily: blank(e.daily)
+        };
+        for (let w = 0; w < WEEKS; w++) row["W" + (w + 1)] = e.weekly ? blank(e.weekly[w]) : "";
+        return row;
+      });
+      return { Registry, Queues, "Request types": RT, Steps, "Volume entries": Volume };
+    }
+    function domainSheetsToModel2(sheets) {
+      const model = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+      const listOf = { brand: "brands", businessUnit: "businessUnits", channel: "channels", processGroup: "processGroups", product: "products" };
+      for (const r of sheets.Registry || []) {
+        const list = model[listOf[r.Kind]];
+        if (!list) continue;
+        const e = { id: r.Id, name: r.Name };
+        if (r.Key !== "" && r.Key != null) e.key = r.Key;
+        if (r.DefaultsJson) e.defaults = JSON.parse(r.DefaultsJson);
+        list.push(e);
       }
+      for (const r of sheets.Queues || []) {
+        const q = { id: r.QueueId, name: r.Name, type: r.Type, fallbackAhtSec: +r.FallbackAhtSec };
+        const hb = strOrU(r.HomeBrandId);
+        if (hb) q.homeBrandId = hb;
+        const hu = strOrU(r.HomeBuId);
+        if (hu) q.homeBuId = hu;
+        if (r.StaffingJson) q.staffing = JSON.parse(r.StaffingJson);
+        if (r.Modified === "yes") q._modified = true;
+        model.queues.push(q);
+      }
+      const rtById = /* @__PURE__ */ new Map();
+      for (const r of sheets["Request types"] || []) {
+        const rt = {
+          id: r.RequestTypeId,
+          name: r.Name,
+          activity: r.Activity,
+          productRequest: r.ProductRequest,
+          groupId: r.GroupId,
+          brandIds: splitIds(r.BrandIds),
+          buIds: splitIds(r.BuIds),
+          processes: []
+        };
+        const pid = strOrU(r.ProductId);
+        if (pid) rt.productId = pid;
+        const aht = numOrU(r.AhtSec);
+        if (aht !== void 0) rt.ahtSec = aht;
+        rtById.set(rt.id, rt);
+        model.requestTypes.push(rt);
+      }
+      const procKey = (a, b) => a + "|" + b;
+      const procs = /* @__PURE__ */ new Map();
+      for (const r of sheets.Steps || []) {
+        const rt = rtById.get(r.RequestTypeId);
+        if (!rt) continue;
+        let p = procs.get(procKey(r.RequestTypeId, r.ChannelId));
+        if (!p) {
+          p = { channelId: r.ChannelId, outcomes: splitIds(r.ProcessOutcomes), steps: [] };
+          procs.set(procKey(r.RequestTypeId, r.ChannelId), p);
+          rt.processes.push(p);
+        }
+        if (r.StepOrder !== "" && r.StepOrder != null && r.QueueId) {
+          const s = { queueId: r.QueueId, splitPct: +r.SplitPct };
+          const samp = numOrU(r.SamplingPct);
+          if (samp !== void 0) s.samplingPct = samp;
+          if (r.Terminal === "yes") {
+            s.terminal = true;
+            const o = strOrU(r.Outcome);
+            if (o) s.outcome = o;
+          }
+          p.steps.push(s);
+        }
+      }
+      for (const r of sheets["Volume entries"] || []) {
+        const e = { scope: {} };
+        const id = strOrU(r.EntryId);
+        if (id) e.id = id;
+        for (const [col, key] of [["BrandId", "brandId"], ["BuId", "buId"], ["RequestTypeId", "requestTypeId"], ["ChannelId", "channelId"]]) {
+          const v = strOrU(r[col]);
+          if (v) e.scope[key] = v;
+        }
+        const daily = numOrU(r.Daily);
+        if (daily !== void 0) e.daily = daily;
+        const weekly = [];
+        let any = false;
+        for (let w = 0; w < WEEKS; w++) {
+          const v = numOrU(r["W" + (w + 1)]);
+          weekly.push(v !== void 0 ? v : 0);
+          if (v !== void 0) any = true;
+        }
+        if (any) e.weekly = weekly;
+        if (e.daily !== void 0 || e.weekly) model.volumeEntries.push(e);
+      }
+      return { model };
     }
-  }
-  const Queues = (model.queues || []).map((q) => {
-    const st = q.staffing || {};
-    const base = {
-      QueueId: q.id,
-      Name: q.name,
-      Type: q.type,
-      Attachment: q.attachment && q.attachment.kind === "shared" ? "shared" : "structural",
-      ChannelId: q.attachment && q.attachment.kind === "structural" ? q.attachment.channelInstanceId : "",
-      FallbackAhtSec: q.fallbackAhtSec
-    };
-    for (const [k, col] of STAFFING_COLS) base[col] = blank(st[k]);
-    return base;
-  });
-  const Services = [];
-  for (const s of model.services || []) {
-    const head = { ServiceId: s.id, ServiceName: s.name, Activity: s.activity, ProductRequest: s.productRequest, ServiceAhtSec: blank(s.ahtSec) };
-    if (!s.journey || !s.journey.length) {
-      Services.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "" });
-      continue;
-    }
-    s.journey.forEach((step, i) => Services.push({ ...head, StepOrder: i + 1, QueueId: step.queueId, SplitPct: step.splitPct, SamplingPct: blank(step.samplingPct) }));
-  }
-  const Profiles = [];
-  for (const p of model.profiles || []) {
-    const head = { ProfileId: p.id, AppliesLevel: p.appliesAt.level, AppliesNodeId: p.appliesAt.nodeId, TotalVolume: p.totalVolume };
-    if (!p.mix || !p.mix.length) {
-      Profiles.push({ ...head, MixServiceId: "", MixPct: "" });
-      continue;
-    }
-    for (const m of p.mix) Profiles.push({ ...head, MixServiceId: m.serviceId, MixPct: m.pct });
-  }
-  return { Structure, Queues, Services, "Channel volume profiles": Profiles };
-}
-function row(b, bu, p, ch) {
-  return {
-    BrandId: b.id,
-    Brand: b.name,
-    BUId: bu ? bu.id : "",
-    BusinessUnit: bu ? bu.name : "",
-    ProductId: p ? p.id : "",
-    Product: p ? p.name : "",
-    ChannelId: ch ? ch.id : "",
-    Channel: ch ? ch.channel : ""
-  };
-}
-function sheetsToModel(sheets) {
-  const report = { warnings: [] };
-  const S = sheets.Structure || [];
-  const brands = [];
-  const bById = /* @__PURE__ */ new Map(), buById = /* @__PURE__ */ new Map(), pById = /* @__PURE__ */ new Map();
-  for (const r of S) {
-    let b = bById.get(r.BrandId);
-    if (!b) {
-      b = { id: r.BrandId, name: r.Brand, businessUnits: [] };
-      bById.set(b.id, b);
-      brands.push(b);
-    }
-    if (!r.BUId) continue;
-    let bu = buById.get(r.BUId);
-    if (!bu) {
-      bu = { id: r.BUId, name: r.BusinessUnit, products: [] };
-      buById.set(bu.id, bu);
-      b.businessUnits.push(bu);
-    }
-    if (!r.ProductId) continue;
-    let p = pById.get(r.ProductId);
-    if (!p) {
-      p = { id: r.ProductId, name: r.Product, channels: [] };
-      pById.set(p.id, p);
-      bu.products.push(p);
-    }
-    if (!r.ChannelId) continue;
-    if (!p.channels.some((c) => c.id === r.ChannelId)) p.channels.push({ id: r.ChannelId, channel: r.Channel });
-  }
-  const queues = (sheets.Queues || []).map((r) => {
-    const staffing = {};
-    for (const [k, col] of STAFFING_COLS) {
-      const v = r[col];
-      staffing[k] = k === "resourcing" ? v || "dedicated" : numOrUndef(v);
-    }
-    return {
-      id: r.QueueId,
-      name: r.Name,
-      type: r.Type,
-      attachment: r.Attachment === "shared" ? { kind: "shared" } : { kind: "structural", channelInstanceId: r.ChannelId },
-      fallbackAhtSec: +r.FallbackAhtSec,
-      staffing
-    };
-  });
-  const services = [];
-  const sById = /* @__PURE__ */ new Map();
-  for (const r of sheets.Services || []) {
-    let s = sById.get(r.ServiceId);
-    if (!s) {
-      s = { id: r.ServiceId, name: r.ServiceName, activity: r.Activity, productRequest: r.ProductRequest, journey: [] };
-      const aht = numOrUndef(r.ServiceAhtSec);
-      if (aht !== void 0) s.ahtSec = aht;
-      sById.set(s.id, s);
-      services.push(s);
-    }
-    if (r.QueueId !== "" && r.QueueId != null && r.StepOrder !== "") {
-      const step = { queueId: r.QueueId, splitPct: +r.SplitPct };
-      const samp = numOrUndef(r.SamplingPct);
-      if (samp !== void 0) step.samplingPct = samp;
-      s.journey.push(step);
-    }
-  }
-  const profiles = [];
-  const pfById = /* @__PURE__ */ new Map();
-  for (const r of sheets["Channel volume profiles"] || []) {
-    let pf = pfById.get(r.ProfileId);
-    if (!pf) {
-      pf = { id: r.ProfileId, appliesAt: { level: r.AppliesLevel, nodeId: r.AppliesNodeId }, totalVolume: +r.TotalVolume, mix: [] };
-      pfById.set(pf.id, pf);
-      profiles.push(pf);
-    }
-    if (r.MixServiceId !== "" && r.MixServiceId != null) pf.mix.push({ serviceId: r.MixServiceId, pct: +r.MixPct });
-  }
-  return { model: { brands, queues, services, profiles }, report };
-}
-var STAFFING_COLS, blank, numOrUndef, SHEET_NAMES;
-var init_template = __esm({
-  "ui/v2/template.js"() {
-    STAFFING_COLS = [
-      ["asaTarget", "AsaTargetSec"],
-      ["maxAbandon", "MaxAbandon"],
-      ["patience", "PatienceSec"],
-      ["shrinkage", "Shrinkage"],
-      ["occupancyCeiling", "OccupancyCeiling"],
-      ["resourcing", "Resourcing"],
-      ["attritionPct", "AttritionPct"],
-      ["churnCost", "ChurnCost"],
-      ["failedToChurnPct", "FailedToChurnPct"],
-      ["agentCost", "AgentCost"]
-    ];
-    blank = (v) => v === void 0 || v === null ? "" : v;
-    numOrUndef = (v) => v === "" || v === void 0 || v === null ? void 0 : +v;
-    SHEET_NAMES = ["Structure", "Queues", "Services", "Channel volume profiles"];
+    module.exports = { SHEET_NAMES: SHEET_NAMES2, modelToDomainSheets: modelToDomainSheets2, domainSheetsToModel: domainSheetsToModel2 };
   }
 });
 
-// ui/v2/template-xlsx.js
-var template_xlsx_exports = {};
-__export(template_xlsx_exports, {
-  downloadTemplate: () => downloadTemplate,
-  exportWorkbook: () => exportWorkbook,
-  importWorkbook: () => importWorkbook
+// ui/v2/template-domain-xlsx.js
+var template_domain_xlsx_exports = {};
+__export(template_domain_xlsx_exports, {
+  downloadDomainTemplate: () => downloadDomainTemplate,
+  exportDomainWorkbook: () => exportDomainWorkbook,
+  importDomainWorkbook: () => importDomainWorkbook
 });
-async function exportWorkbook(model) {
+async function exportDomainWorkbook(model) {
   const XLSX = await import("xlsx");
-  const sheets = modelToSheets(model);
+  const sheets = (0, import_template_domain.modelToDomainSheets)(model);
   const wb = XLSX.utils.book_new();
-  for (const name of SHEET_NAMES) {
+  for (const name of import_template_domain.SHEET_NAMES) {
     const ws = XLSX.utils.json_to_sheet(sheets[name] || [], { skipHeader: false });
     XLSX.utils.book_append_sheet(wb, ws, sheetKey(name));
   }
   return XLSX.write(wb, { type: "array", bookType: "xlsx" });
 }
-async function importWorkbook(data) {
+async function importDomainWorkbook(data) {
   const XLSX = await import("xlsx");
   const wb = XLSX.read(data, { type: "array" });
   const sheets = {};
-  for (const name of SHEET_NAMES) {
+  for (const name of import_template_domain.SHEET_NAMES) {
     const ws = wb.Sheets[sheetKey(name)] || wb.Sheets[name];
     sheets[name] = ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : [];
   }
-  return sheetsToModel(sheets);
+  return (0, import_template_domain.domainSheetsToModel)(sheets);
 }
-async function downloadTemplate(model, filename = "capacity-template.xlsx") {
-  const bytes = await exportWorkbook(model);
+async function downloadDomainTemplate(model, filename = "capacity-model.xlsx") {
+  const bytes = await exportDomainWorkbook(model);
   const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -3554,10 +3557,10 @@ async function downloadTemplate(model, filename = "capacity-template.xlsx") {
   a.remove();
   URL.revokeObjectURL(url);
 }
-var sheetKey;
-var init_template_xlsx = __esm({
-  "ui/v2/template-xlsx.js"() {
-    init_template();
+var import_template_domain, sheetKey;
+var init_template_domain_xlsx = __esm({
+  "ui/v2/template-domain-xlsx.js"() {
+    import_template_domain = __toESM(require_template_domain());
     sheetKey = (name) => name.slice(0, 31);
   }
 });
@@ -3566,11 +3569,66 @@ var init_template_xlsx = __esm({
 import { createRoot } from "react-dom/client";
 
 // ui/v2/App.jsx
-import { useState as useState8, useEffect as useEffect5, useMemo as useMemo7, useRef as useRef4, useCallback as useCallback3 } from "react";
+import { useState as useState7, useEffect as useEffect5, useMemo as useMemo6, useRef as useRef4, useCallback as useCallback2 } from "react";
 
-// ui/v2/SetupPage.jsx
+// ui/v2/SetupV3Page.jsx
+var import_propagate = __toESM(require_propagate());
+var import_domain = __toESM(require_domain());
+var import_engine = __toESM(require_engine());
 var import_taxonomy2 = __toESM(require_taxonomy());
-import { useState, useMemo, useCallback } from "react";
+var import_bridge = __toESM(require_bridge());
+var Ops = __toESM(require_ops());
+import { useState, useMemo } from "react";
+
+// ui/v2/model.js
+var import_derive = __toESM(require_derive());
+var import_taxonomy = __toESM(require_taxonomy());
+var ACTIVITIES = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
+var QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance"];
+var ACTIVITY_LABELS = {
+  service_request: "Service request",
+  lead: "Lead",
+  decision: "Decision",
+  collections: "Collections",
+  upsell_xsell: "Up-sell / x-sell",
+  maintenance: "Maintenance"
+};
+var CHANNEL_LABELS = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
+var QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance" };
+var clone = (m) => JSON.parse(JSON.stringify(m));
+function setHiringBuffer(model, pct3) {
+  const m = clone(model);
+  ensureEngine(m).hiring.buffer = (+pct3 || 0) / 100;
+  return m;
+}
+function setForwardMonths(model, strategyId, months) {
+  const m = clone(model);
+  const s = (ensureEngine(m).strategies || []).find((x) => x.id === strategyId);
+  if (s) s.forwardMonths = Math.max(1, Math.min(6, +months || 1));
+  return m;
+}
+function setTotalCap(model, cap) {
+  const m = clone(model);
+  const h = ensureEngine(m).hiring;
+  h.caps = h.caps || { total: null, segments: {} };
+  h.caps.total = cap === "" || cap == null ? null : +cap;
+  h.cap = h.caps.total != null ? h.caps.total : h.cap;
+  return m;
+}
+function setSegmentCap(model, brandId, channel, cap) {
+  const m = clone(model);
+  const h = ensureEngine(m).hiring;
+  h.caps = h.caps || { total: null, segments: {} };
+  h.caps.segments = h.caps.segments || {};
+  const key = (brandId || "") + "|" + channel;
+  if (cap === "" || cap == null) delete h.caps.segments[key];
+  else h.caps.segments[key] = +cap;
+  return m;
+}
+function ensureEngine(m) {
+  if (!m.engineConfig) throw new Error("lever op needs a model carrying engineConfig (migrate first)");
+  return m.engineConfig;
+}
 
 // ui/v2/tokens.js
 var FAMILY_COLORS = {
@@ -4028,875 +4086,10 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .errmsg{font-size:12.5px; color:var(--red-ink)}
 `;
 
-// ui/v2/model.js
-var import_derive = __toESM(require_derive());
-var import_taxonomy = __toESM(require_taxonomy());
-var _seq = 0;
-function uid(prefix = "id") {
-  _seq += 1;
-  return `${prefix}_${_seq}_${Math.random().toString(36).slice(2, 7)}`;
-}
-var ACTIVITIES = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
-var QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance"];
-var ACTIVITY_LABELS = {
-  service_request: "Service request",
-  lead: "Lead",
-  decision: "Decision",
-  collections: "Collections",
-  upsell_xsell: "Up-sell / x-sell",
-  maintenance: "Maintenance"
-};
-var CHANNEL_LABELS = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
-var QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance" };
-function deriveModel(model) {
-  return (0, import_derive.derive)(model);
-}
-function buildImportReport(model) {
-  const v = (0, import_derive.derive)(model).validation;
-  return {
-    ok: v.ok,
-    counts: {
-      businessUnits: (model.brands || []).reduce((a, b) => a + (b.businessUnits || []).length, 0),
-      queues: (model.queues || []).length,
-      services: (model.services || []).length,
-      profiles: (model.profiles || []).length
-    },
-    errors: v.errors || [],
-    warnings: v.warnings || []
-  };
-}
-var clone = (m) => JSON.parse(JSON.stringify(m));
-function addBusinessUnit(model, brandId) {
-  const m = clone(model);
-  const b = m.brands.find((x) => x.id === brandId) || m.brands[0];
-  b.businessUnits.push({ id: uid("bu"), name: `Business unit ${b.businessUnits.length + 1}`, products: [] });
-  return m;
-}
-function addProduct(model, buId) {
-  const m = clone(model);
-  for (const b of m.brands) {
-    const bu = b.businessUnits.find((x) => x.id === buId);
-    if (bu) {
-      bu.products.push({ id: uid("prod"), name: `Product ${bu.products.length + 1}`, channels: [] });
-      break;
-    }
-  }
-  return m;
-}
-function toggleChannel(model, productId, channelKey) {
-  const m = clone(model);
-  for (const b of m.brands) for (const bu of b.businessUnits) {
-    const p = bu.products.find((x) => x.id === productId);
-    if (!p) continue;
-    const i = p.channels.findIndex((c) => c.channel === channelKey);
-    if (i >= 0) p.channels.splice(i, 1);
-    else p.channels.push({ id: uid("ci"), channel: channelKey });
-    return m;
-  }
-  return m;
-}
-function addQueue(model, { attachment, name, type }) {
-  const m = clone(model);
-  m.queues.push({
-    id: uid("q"),
-    name: name || `Queue ${m.queues.length + 1}`,
-    type: type || "inbound_call",
-    attachment: attachment || { kind: "shared" },
-    fallbackAhtSec: 300,
-    staffing: { asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, agentCost: 32e3, resourcing: "dedicated", occupancyCeiling: 0.85, churnCost: 500, failedToChurnPct: 6, attritionPct: 26 }
-  });
-  return m;
-}
-function updateQueue(model, queueId, patch) {
-  const m = clone(model);
-  const q = m.queues.find((x) => x.id === queueId);
-  if (q) Object.assign(q, patch);
-  return m;
-}
-function updateQueueStaffing(model, queueId, patch) {
-  const m = clone(model);
-  const q = m.queues.find((x) => x.id === queueId);
-  if (q) {
-    q.staffing = { ...q.staffing || {}, ...patch };
-    q._modified = true;
-  }
-  return m;
-}
-function deleteQueue(model, queueId) {
-  const m = clone(model);
-  m.queues = m.queues.filter((x) => x.id !== queueId);
-  return m;
-}
-function resetQueueStaffing(model, queueId) {
-  const m = clone(model);
-  const q = m.queues.find((x) => x.id === queueId);
-  if (q) {
-    q.staffing = defaultStaffing();
-    delete q._modified;
-  }
-  return m;
-}
-function defaultStaffing() {
-  return { asaTarget: 30, maxAbandon: 0.05, patience: 90, shrinkage: 0.3, agentCost: 32e3, resourcing: "dedicated", occupancyCeiling: 0.85, churnCost: 500, failedToChurnPct: 6, attritionPct: 26 };
-}
-function addService(model) {
-  const m = clone(model);
-  m.services.push({ id: uid("svc"), name: `Service ${m.services.length + 1}`, activity: "service_request", productRequest: "existing", journey: [] });
-  return m;
-}
-function updateService(model, serviceId, patch) {
-  const m = clone(model);
-  const s = m.services.find((x) => x.id === serviceId);
-  if (s) Object.assign(s, patch);
-  return m;
-}
-function deleteService(model, serviceId) {
-  const m = clone(model);
-  m.services = m.services.filter((x) => x.id !== serviceId);
-  return m;
-}
-function addJourneyStep(model, serviceId, queueId) {
-  const m = clone(model);
-  const s = m.services.find((x) => x.id === serviceId);
-  if (s) s.journey.push({ queueId: queueId || m.queues[0] && m.queues[0].id, splitPct: s.journey.length === 0 ? 100 : 50 });
-  return m;
-}
-function updateJourneyStep(model, serviceId, stepIndex, patch) {
-  const m = clone(model);
-  const s = m.services.find((x) => x.id === serviceId);
-  if (s && s.journey[stepIndex]) Object.assign(s.journey[stepIndex], patch);
-  return m;
-}
-function removeJourneyStep(model, serviceId, stepIndex) {
-  const m = clone(model);
-  const s = m.services.find((x) => x.id === serviceId);
-  if (s) s.journey.splice(stepIndex, 1);
-  return m;
-}
-function addProfile(model, nodeId, level) {
-  const m = clone(model);
-  const node = nodeId || firstChannelNode(m);
-  m.profiles.push({ id: uid("pf"), appliesAt: { level: level || "channel", nodeId: node }, totalVolume: 1e3, mix: [] });
-  return m;
-}
-function updateProfile(model, profileId, patch) {
-  const m = clone(model);
-  const p = m.profiles.find((x) => x.id === profileId);
-  if (p) Object.assign(p, patch);
-  return m;
-}
-function updateProfileNode(model, profileId, level, nodeId) {
-  const m = clone(model);
-  const p = m.profiles.find((x) => x.id === profileId);
-  if (p) p.appliesAt = { level, nodeId };
-  return m;
-}
-function addMixRow(model, profileId, serviceId) {
-  const m = clone(model);
-  const p = m.profiles.find((x) => x.id === profileId);
-  if (p) p.mix.push({ serviceId: serviceId || m.services[0] && m.services[0].id, pct: 0 });
-  return m;
-}
-function updateMixRow(model, profileId, rowIndex, patch) {
-  const m = clone(model);
-  const p = m.profiles.find((x) => x.id === profileId);
-  if (p && p.mix[rowIndex]) Object.assign(p.mix[rowIndex], patch);
-  return m;
-}
-function removeMixRow(model, profileId, rowIndex) {
-  const m = clone(model);
-  const p = m.profiles.find((x) => x.id === profileId);
-  if (p) p.mix.splice(rowIndex, 1);
-  return m;
-}
-function setHiringBuffer(model, pct3) {
-  const m = clone(model);
-  ensureEngine(m).hiring.buffer = (+pct3 || 0) / 100;
-  return m;
-}
-function setForwardMonths(model, strategyId, months) {
-  const m = clone(model);
-  const s = (ensureEngine(m).strategies || []).find((x) => x.id === strategyId);
-  if (s) s.forwardMonths = Math.max(1, Math.min(6, +months || 1));
-  return m;
-}
-function setTotalCap(model, cap) {
-  const m = clone(model);
-  const h = ensureEngine(m).hiring;
-  h.caps = h.caps || { total: null, segments: {} };
-  h.caps.total = cap === "" || cap == null ? null : +cap;
-  h.cap = h.caps.total != null ? h.caps.total : h.cap;
-  return m;
-}
-function setSegmentCap(model, brandId, channel, cap) {
-  const m = clone(model);
-  const h = ensureEngine(m).hiring;
-  h.caps = h.caps || { total: null, segments: {} };
-  h.caps.segments = h.caps.segments || {};
-  const key = (brandId || "") + "|" + channel;
-  if (cap === "" || cap == null) delete h.caps.segments[key];
-  else h.caps.segments[key] = +cap;
-  return m;
-}
-function ensureEngine(m) {
-  if (!m.engineConfig) throw new Error("lever op needs a model carrying engineConfig (migrate first)");
-  return m.engineConfig;
-}
-function firstChannelNode(m) {
-  for (const b of m.brands) for (const bu of b.businessUnits) for (const p of bu.products) if (p.channels[0]) return p.channels[0].id;
-  return null;
-}
-function structureNodes(model) {
-  const out = [];
-  for (const b of model.brands) for (const bu of b.businessUnits) {
-    out.push({ id: bu.id, level: "bu", label: `${bu.name} (all products)` });
-    for (const p of bu.products) {
-      out.push({ id: p.id, level: "product", label: `${bu.name} \u203A ${p.name} (all channels)` });
-      for (const ch of p.channels) out.push({ id: ch.id, level: "channel", label: `${bu.name} \u203A ${p.name} \u203A ${CHANNEL_LABELS[ch.channel]}` });
-    }
-  }
-  return out;
-}
-var nodeLabel = (model, nodeId) => (structureNodes(model).find((n) => n.id === nodeId) || {}).label || "\u2014";
-function emptyModel(engineConfig, name = "New simulation") {
-  return {
-    brands: [{ id: uid("b"), name, businessUnits: [] }],
-    queues: [],
-    services: [],
-    profiles: [],
-    engineConfig
-  };
-}
-
-// ui/v2/SetupPage.jsx
+// ui/v2/SetupV3Page.jsx
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var fmt = (n) => n == null || isNaN(n) ? "\u2014" : Math.round(n).toLocaleString("en-GB");
-var fmt1 = (n) => n == null || isNaN(n) ? "\u2014" : (Math.round(n * 10) / 10).toLocaleString("en-GB");
-function useOpenSet(initial = []) {
-  const [open, setOpen] = useState(() => new Set(initial));
-  const toggle = useCallback((id) => setOpen((s) => {
-    const n = new Set(s);
-    n.has(id) ? n.delete(id) : n.add(id);
-    return n;
-  }), []);
-  return [open, toggle];
-}
 var NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
-function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate, onNav = () => {
-}, importReport, onDismissImport, onOpenV3 }) {
-  const derived = useMemo(() => deriveModel(model), [model]);
-  const [openSec, toggleSec] = useOpenSet(["s1"]);
-  const [openBu, toggleBu] = useOpenSet(["bu_retail", "qg_ci_cards_voice", "qg_ci_cards_digital", "qg_shared"]);
-  const [openCard, toggleCard] = useOpenSet(["pf_cards_voice"]);
-  const [drawerQ, setDrawerQ] = useState(null);
-  const set = onModelChange;
-  const struct = useMemo(() => {
-    let bus = 0, prods = 0, chans = 0;
-    for (const b of model.brands) for (const bu of b.businessUnits) {
-      bus++;
-      for (const p of bu.products) {
-        prods++;
-        chans += p.channels.length;
-      }
-    }
-    return { bus, prods, chans };
-  }, [model]);
-  const sharedCount = model.queues.filter((q) => q.attachment && q.attachment.kind === "shared").length;
-  const mixSums = useMemo(() => model.profiles.map((p) => (p.mix || []).reduce((a, m) => a + (+m.pct || 0), 0)), [model]);
-  const allMix100 = mixSums.every((s) => Math.abs(s - 100) < 1e-6);
-  const crossByProfile = useMemo(() => {
-    const map = {};
-    for (const w of derived.validation.warnings) if (w.kind === "cross_structure") (map[w.profileId] = map[w.profileId] || []).push(w);
-    return map;
-  }, [derived]);
-  return /* @__PURE__ */ jsxs("div", { className: "shell", children: [
-    /* @__PURE__ */ jsxs("header", { className: "top", children: [
-      /* @__PURE__ */ jsxs("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx("div", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsxs("div", { children: [
-          /* @__PURE__ */ jsx("h1", { children: model.brands[0] ? model.brands[0].name : "Simulation" }),
-          /* @__PURE__ */ jsx("small", { children: "Capacity Simulator" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsx("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV.map(([k, label]) => /* @__PURE__ */ jsx("button", { role: "tab", className: k === "setup" ? "on" : "", "aria-selected": k === "setup", onClick: () => onNav(k), children: label }, k)) })
-    ] }),
-    /* @__PURE__ */ jsx("h2", { children: "Setup" }),
-    /* @__PURE__ */ jsx("p", { className: "lede", children: "Four sections, in order \u2014 each unlocks the next. A new simulation is this page, empty, with Structure open." }),
-    onOpenV3 ? /* @__PURE__ */ jsxs("div", { className: "v3banner", "data-testid": "v3-banner", children: [
-      /* @__PURE__ */ jsxs("div", { children: [
-        /* @__PURE__ */ jsx("b", { children: "The redesigned Setup is ready to preview." }),
-        /* @__PURE__ */ jsx("p", { children: "Six tabs over the new domain model \u2014 Structure \xB7 Queues \xB7 Request types \xB7 Volume \xB7 Map \xB7 Defaults. Structure and Request types are fully editable; the rest are live read-only views while their editors are built." })
-      ] }),
-      /* @__PURE__ */ jsx("button", { className: "btn primary", onClick: onOpenV3, children: "Open the new Setup \u2192" })
-    ] }) : null,
-    importReport ? /* @__PURE__ */ jsx(ImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
-    /* @__PURE__ */ jsxs(
-      Section,
-      {
-        id: "s1",
-        n: "1",
-        title: "Structure",
-        sub: "Brand \u203A business unit \u203A product \u203A channel",
-        badge: `${struct.bus} BUs \xB7 ${struct.prods} products \xB7 ${struct.chans} channels`,
-        openSet: openSec,
-        toggle: toggleSec,
-        children: [
-          model.brands.map((b) => b.businessUnits.map((bu) => /* @__PURE__ */ jsxs("div", { className: "bu" + (openBu.has(bu.id) ? " open" : ""), children: [
-            /* @__PURE__ */ jsxs("button", { className: "buhead", onClick: () => toggleBu(bu.id), children: [
-              /* @__PURE__ */ jsx("b", { children: bu.name }),
-              /* @__PURE__ */ jsxs("span", { className: "sum", children: [
-                bu.products.length,
-                " products \xB7 ",
-                bu.products.reduce((a, p) => a + p.channels.length, 0),
-                " channels"
-              ] }),
-              /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "bubody", children: [
-              bu.products.map((p) => /* @__PURE__ */ jsxs("div", { className: "prod", children: [
-                /* @__PURE__ */ jsx("b", { children: p.name }),
-                import_taxonomy2.CHANNELS.map((ch) => {
-                  const on = p.channels.some((c) => c.channel === ch);
-                  return /* @__PURE__ */ jsx(
-                    "button",
-                    {
-                      className: "chip" + (on ? " on-toggle" : " off"),
-                      onClick: () => set(toggleChannel(model, p.id, ch)),
-                      "aria-pressed": on,
-                      "aria-label": (on ? "Remove " : "Add ") + CHANNEL_LABELS[ch],
-                      children: on ? CHANNEL_LABELS[ch] : "+ " + CHANNEL_LABELS[ch]
-                    },
-                    ch
-                  );
-                })
-              ] }, p.id)),
-              /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addProduct(model, bu.id)), children: "+ Product" })
-            ] })
-          ] }, bu.id))),
-          /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addBusinessUnit(model, model.brands[0].id)), children: "+ Business unit" }),
-          /* @__PURE__ */ jsx("p", { className: "hint", style: { marginTop: 8 }, children: "Tap a dashed chip to switch a channel on for that product. Channels come from the taxonomy: Voice, Third party, Digital, Customer management." })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxs(
-      Section,
-      {
-        id: "s2",
-        n: "2",
-        title: "Queues",
-        sub: "Stations \u2014 attached to a structure path, or shared",
-        badge: `${model.queues.length - sharedCount} stations \xB7 ${sharedCount} shared`,
-        openSet: openSec,
-        toggle: toggleSec,
-        children: [
-          groupQueues(model).map((grp) => /* @__PURE__ */ jsxs("div", { className: "bu" + (openBu.has(grp.key) ? " open" : ""), children: [
-            /* @__PURE__ */ jsxs("button", { className: "buhead", onClick: () => toggleBu(grp.key), children: [
-              grp.shared ? /* @__PURE__ */ jsxs(Fragment, { children: [
-                /* @__PURE__ */ jsx("span", { className: "chip shared", children: "shared" }),
-                " ",
-                /* @__PURE__ */ jsx("b", { style: { fontSize: "12.5px" }, children: "Serves any structure" })
-              ] }) : /* @__PURE__ */ jsx("span", { className: "path", children: grp.label }),
-              /* @__PURE__ */ jsxs("span", { className: "sum", children: [
-                grp.queues.length,
-                " queue",
-                grp.queues.length === 1 ? "" : "s"
-              ] }),
-              /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-            ] }),
-            /* @__PURE__ */ jsxs("div", { className: "bubody", children: [
-              grp.queues.map((q) => {
-                const d = derived.queues[q.id] || { volume: 0, effectiveAht: q.fallbackAhtSec, ahtMarker: "queue" };
-                return /* @__PURE__ */ jsxs("button", { className: "qline", onClick: () => setDrawerQ(q.id), "aria-label": "Edit " + q.name, children: [
-                  /* @__PURE__ */ jsx("b", { children: q.name }),
-                  /* @__PURE__ */ jsx("span", { className: "tax", style: { fontSize: "9.5px" }, children: QTYPE_LABELS[q.type] }),
-                  q._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", "aria-label": "modified" }) : null,
-                  grp.shared ? /* @__PURE__ */ jsx("span", { className: "chip shared", children: "shared" }) : null,
-                  /* @__PURE__ */ jsxs("span", { className: "qstats", children: [
-                    /* @__PURE__ */ jsxs("span", { className: "num", children: [
-                      /* @__PURE__ */ jsx("span", { className: "lab", children: "vol/day" }),
-                      fmt(d.volume)
-                    ] }),
-                    /* @__PURE__ */ jsxs("span", { className: "num", children: [
-                      /* @__PURE__ */ jsx("span", { className: "lab", children: "eff. AHT" }),
-                      fmt(d.effectiveAht),
-                      " s",
-                      d.ahtMarker === "weighted" ? " \xB7 weighted" : d.ahtMarker === "svc" ? " \xB7 svc" : ""
-                    ] })
-                  ] })
-                ] }, q.id);
-              }),
-              grp.shared ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginTop: 6 }, children: "Shared queues can appear in any service's journey; their cost is allocated back to feeding structures by handling minutes." }) : null
-            ] })
-          ] }, grp.key)),
-          /* @__PURE__ */ jsx(AddQueue, { model, onAdd: (spec) => {
-            set(addQueue(model, spec));
-          } })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxs(
-      Section,
-      {
-        id: "s3",
-        n: "3",
-        title: "Service catalog",
-        sub: "Define once, use in any profile",
-        badge: `${model.services.length} services \xB7 ${model.services.filter((s) => s.journey.length).length} journeys`,
-        openSet: openSec,
-        toggle: toggleSec,
-        children: [
-          model.services.map((s) => {
-            const usedIn = model.profiles.filter((p) => (p.mix || []).some((m) => m.serviceId === s.id)).length;
-            return /* @__PURE__ */ jsxs("div", { className: "card" + (openCard.has(s.id) ? " open" : ""), children: [
-              /* @__PURE__ */ jsxs("button", { className: "cardhead", onClick: () => toggleCard(s.id), children: [
-                /* @__PURE__ */ jsx("b", { children: s.name }),
-                /* @__PURE__ */ jsx("span", { className: "tax", children: ACTIVITY_LABELS[s.activity] }),
-                /* @__PURE__ */ jsx("span", { className: "tax", children: s.productRequest === "new" ? "New product" : "Existing product" }),
-                /* @__PURE__ */ jsxs("span", { className: "hint", style: { marginLeft: "auto" }, children: [
-                  "used in ",
-                  usedIn,
-                  " profile",
-                  usedIn === 1 ? "" : "s"
-                ] }),
-                /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-              ] }),
-              /* @__PURE__ */ jsxs("div", { className: "cardbody", children: [
-                /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Name" }),
-                    /* @__PURE__ */ jsx("input", { value: s.name, onChange: (e) => set(updateService(model, s.id, { name: e.target.value })) })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Activity" }),
-                    /* @__PURE__ */ jsx("select", { value: s.activity, onChange: (e) => set(updateService(model, s.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Product request" }),
-                    /* @__PURE__ */ jsxs("select", { value: s.productRequest, onChange: (e) => set(updateService(model, s.id, { productRequest: e.target.value })), children: [
-                      /* @__PURE__ */ jsx("option", { value: "existing", children: "Existing product" }),
-                      /* @__PURE__ */ jsx("option", { value: "new", children: "New product" })
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Service AHT (s) \u2014 optional" }),
-                    /* @__PURE__ */ jsx(
-                      "input",
-                      {
-                        className: "num",
-                        placeholder: "\u2014 uses queue AHT",
-                        value: s.ahtSec != null ? s.ahtSec : "",
-                        onChange: (e) => set(updateService(model, s.id, { ahtSec: e.target.value === "" ? void 0 : +e.target.value }))
-                      }
-                    )
-                  ] })
-                ] }),
-                /* @__PURE__ */ jsxs("div", { style: { marginTop: 10 }, children: [
-                  /* @__PURE__ */ jsx("span", { className: "hint", children: "Journey \u2014 each step routes a % of this service's volume to a queue:" }),
-                  s.journey.length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginTop: 4 }, children: "No steps yet. Add the first queue this service is handled at." }) : null,
-                  s.journey.map((step, i) => {
-                    const q = model.queues.find((x) => x.id === step.queueId);
-                    const gov = q && q.type === "governance";
-                    return /* @__PURE__ */ jsxs("div", { className: "mixrow", children: [
-                      /* @__PURE__ */ jsxs("span", { className: "jarr", style: { minWidth: 14 }, children: [
-                        i + 1,
-                        "."
-                      ] }),
-                      /* @__PURE__ */ jsx("select", { value: step.queueId, onChange: (e) => set(updateJourneyStep(model, s.id, i, { queueId: e.target.value })), "aria-label": `step ${i + 1} queue`, children: model.queues.map((q2) => /* @__PURE__ */ jsx("option", { value: q2.id, children: q2.name }, q2.id)) }),
-                      /* @__PURE__ */ jsx("span", { className: "hint", children: "split" }),
-                      /* @__PURE__ */ jsx("input", { className: "num", value: step.splitPct, onChange: (e) => set(updateJourneyStep(model, s.id, i, { splitPct: +e.target.value || 0 })), "aria-label": `step ${i + 1} split percent` }),
-                      /* @__PURE__ */ jsx("span", { className: "hint", children: "%" }),
-                      gov ? /* @__PURE__ */ jsxs(Fragment, { children: [
-                        /* @__PURE__ */ jsx("span", { className: "hint", children: "sample" }),
-                        /* @__PURE__ */ jsx("input", { className: "num", value: step.samplingPct != null ? step.samplingPct : "", placeholder: "\u2014", onChange: (e) => set(updateJourneyStep(model, s.id, i, { samplingPct: e.target.value === "" ? void 0 : +e.target.value })), "aria-label": `step ${i + 1} sampling percent` }),
-                        /* @__PURE__ */ jsx("span", { className: "hint", children: "%" })
-                      ] }) : null,
-                      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(removeJourneyStep(model, s.id, i)), "aria-label": `remove step ${i + 1}`, children: "\u2715" })
-                    ] }, i);
-                  }),
-                  /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }, children: [
-                    /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addJourneyStep(model, s.id)), children: "+ Step" }),
-                    /* @__PURE__ */ jsx(
-                      DeleteControl,
-                      {
-                        kind: "service",
-                        guard: import_derive.canDeleteService(model, s.id),
-                        label: "Delete service",
-                        blockedNoun: "profile mix",
-                        onDelete: () => set(deleteService(model, s.id))
-                      }
-                    )
-                  ] })
-                ] })
-              ] })
-            ] }, s.id);
-          }),
-          /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addService(model)), children: "+ Add service" })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxs(
-      Section,
-      {
-        id: "s4",
-        n: "4",
-        title: "Channel volume profiles",
-        sub: "Total volume at a channel (or higher node), split by service mix %",
-        badge: /* @__PURE__ */ jsxs(Fragment, { children: [
-          model.profiles.length,
-          " profiles \xB7 ",
-          allMix100 ? "100% mix" : "mix incomplete"
-        ] }),
-        badgeTodo: !allMix100,
-        openSet: openSec,
-        toggle: toggleSec,
-        children: [
-          model.profiles.map((p, pi) => {
-            const sum = mixSums[pi];
-            const ok100 = Math.abs(sum - 100) < 1e-6;
-            const perDay = p.totalVolume;
-            const crossWarn = crossByProfile[p.id] || [];
-            return /* @__PURE__ */ jsxs("div", { className: "card" + (openCard.has(p.id) ? " open" : ""), children: [
-              /* @__PURE__ */ jsxs("button", { className: "cardhead", onClick: () => toggleCard(p.id), children: [
-                /* @__PURE__ */ jsx("span", { className: "path", children: nodeLabel(model, p.appliesAt.nodeId) }),
-                /* @__PURE__ */ jsxs("b", { className: "num", children: [
-                  fmt(perDay),
-                  " / day"
-                ] }),
-                /* @__PURE__ */ jsx("span", { className: "badge" + (ok100 ? "" : " todo"), style: { marginLeft: "auto" }, children: ok100 ? "\u25CF 100%" : "\u25B2 " + fmt1(sum) + "%" }),
-                /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-              ] }),
-              /* @__PURE__ */ jsxs("div", { className: "cardbody", children: [
-                /* @__PURE__ */ jsxs("div", { className: "fields", style: { marginBottom: 8 }, children: [
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Applies at" }),
-                    /* @__PURE__ */ jsx("select", { value: p.appliesAt.nodeId, onChange: (e) => {
-                      const node = structureNodes(model).find((n) => n.id === e.target.value);
-                      set(updateProfileNode(model, p.id, node.level, node.id));
-                    }, children: structureNodes(model).map((n) => /* @__PURE__ */ jsx("option", { value: n.id, children: n.label }, n.id)) })
-                  ] }),
-                  /* @__PURE__ */ jsxs("div", { className: "field", children: [
-                    /* @__PURE__ */ jsx("label", { children: "Total volume / day" }),
-                    /* @__PURE__ */ jsx("input", { className: "num", value: p.totalVolume, onChange: (e) => set(updateProfile(model, p.id, { totalVolume: +e.target.value || 0 })) })
-                  ] })
-                ] }),
-                (p.mix || []).map((m, mi) => /* @__PURE__ */ jsxs("div", { className: "mixrow", children: [
-                  /* @__PURE__ */ jsx("select", { value: m.serviceId, onChange: (e) => set(updateMixRow(model, p.id, mi, { serviceId: e.target.value })), children: model.services.map((s) => /* @__PURE__ */ jsx("option", { value: s.id, children: s.name }, s.id)) }),
-                  /* @__PURE__ */ jsx("input", { className: "num", value: m.pct, onChange: (e) => set(updateMixRow(model, p.id, mi, { pct: +e.target.value || 0 })) }),
-                  /* @__PURE__ */ jsx("span", { className: "hint", children: "%" }),
-                  /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(removeMixRow(model, p.id, mi)), "aria-label": "Remove mix row", children: "\u2715" })
-                ] }, mi)),
-                /* @__PURE__ */ jsxs("div", { className: "mixsum" + (ok100 ? "" : " warn"), children: [
-                  /* @__PURE__ */ jsx("span", { children: "Mix total" }),
-                  /* @__PURE__ */ jsx("span", { className: "num", children: ok100 ? "\u25CF 100%" : "\u25B2 " + fmt1(sum) + "%" })
-                ] }),
-                /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addMixRow(model, p.id)), children: "+ Add service to mix" }) }),
-                crossWarn.map((w, wi) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
-                  "\u25B2 ",
-                  w.message,
-                  " Fine for shared queues; structural targets outside this path are flagged."
-                ] }, wi)),
-                !ok100 && sum < 100 ? /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
-                  "\u25B2 Mix sums to ",
-                  fmt1(sum),
-                  "% \u2014 ",
-                  fmt1(100 - sum),
-                  "% of volume is unmodelled."
-                ] }) : null
-              ] })
-            ] }, p.id);
-          }),
-          /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(addProfile(model)), children: "+ Add profile" }),
-          /* @__PURE__ */ jsx("p", { className: "hint", style: { marginTop: 8 }, children: "Precedence: the deepest node wins \u2014 channel over product over BU. Under 100% flags the remainder as unmodelled." })
-        ]
-      }
-    ),
-    /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
-      /* @__PURE__ */ jsxs("p", { children: [
-        /* @__PURE__ */ jsx("b", { children: "Load from the template." }),
-        " Sheets mirror these sections \u2014 Structure, Queues, Services, Volume profiles. Download comes pre-filled; re-upload validates before anything changes."
-      ] }),
-      /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8 }, children: [
-        /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => onDownloadTemplate && onDownloadTemplate(model), children: "Download template" }),
-        /* @__PURE__ */ jsx("button", { className: "btn sm primary", onClick: () => onUploadTemplate && onUploadTemplate(), children: "Upload data" })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsx(StaffingDrawer, { model, derived, queueId: drawerQ, onClose: () => setDrawerQ(null), set })
-  ] });
-}
-function Section({ id, n, title, sub, badge, badgeTodo, openSet, toggle, children }) {
-  const open = openSet.has(id);
-  return /* @__PURE__ */ jsxs("div", { className: "sec" + (open ? " open" : ""), children: [
-    /* @__PURE__ */ jsxs("button", { className: "sechead", onClick: () => toggle(id), "aria-expanded": open, children: [
-      /* @__PURE__ */ jsx("span", { className: "secnum", children: n }),
-      /* @__PURE__ */ jsxs("span", { children: [
-        /* @__PURE__ */ jsx("b", { children: title }),
-        /* @__PURE__ */ jsx("small", { children: sub })
-      ] }),
-      /* @__PURE__ */ jsx("span", { className: "badge" + (badgeTodo ? " todo" : ""), children: badge }),
-      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-    ] }),
-    /* @__PURE__ */ jsx("div", { className: "secbody", children })
-  ] });
-}
-function groupQueues(model) {
-  const nodes = /* @__PURE__ */ new Map();
-  for (const b of model.brands) for (const bu of b.businessUnits) for (const p of bu.products) for (const ch of p.channels)
-    nodes.set(ch.id, `${bu.name} \u203A ${p.name} \u203A ${CHANNEL_LABELS[ch.channel]}`);
-  const groups = /* @__PURE__ */ new Map();
-  for (const q of model.queues) {
-    if (q.attachment && q.attachment.kind === "structural") {
-      const key = "qg_" + q.attachment.channelInstanceId;
-      if (!groups.has(key)) groups.set(key, { key, label: nodes.get(q.attachment.channelInstanceId) || "\u2014", queues: [] });
-      groups.get(key).queues.push(q);
-    }
-  }
-  const out = [...groups.values()];
-  const shared = model.queues.filter((q) => q.attachment && q.attachment.kind === "shared");
-  if (shared.length) out.push({ key: "qg_shared", shared: true, queues: shared });
-  return out;
-}
-function StaffingDrawer({ model, derived, queueId, onClose, set }) {
-  const [open, toggle] = useOpenSet(["a_inputs"]);
-  const q = model.queues.find((x) => x.id === queueId);
-  const d = q ? derived.queues[q.id] : null;
-  const stf = q && q.staffing || {};
-  const grpLabel = q ? drawerPath(model, q) : "";
-  const upd = (patch) => set(updateQueueStaffing(model, q.id, patch));
-  const fams = [
-    { id: "a_inputs", key: "inputs", name: "Inputs", sum: q ? `${fmt(d.volume)}/day derived \xB7 fallback AHT ${q.fallbackAhtSec} s` : "", fields: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Derived volume/day" }),
-        /* @__PURE__ */ jsx("input", { value: q ? fmt(d.volume) + " (from profiles)" : "", disabled: true, style: { background: "var(--canvas)", color: "var(--ink-3)" } })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Fallback AHT (s)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: q ? q.fallbackAhtSec : "", onChange: (e) => set(updateQueue(model, q.id, { fallbackAhtSec: +e.target.value || 0 })) })
-      ] })
-    ] }) },
-    { id: "a_perf", key: "performance", name: "Performance", sum: `ASA ${stf.asaTarget || 30} s \xB7 abandon < ${Math.round((stf.maxAbandon || 0.05) * 100)}%`, fields: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "ASA target (s)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: stf.asaTarget ?? 30, onChange: (e) => upd({ asaTarget: +e.target.value || 0 }) })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Max abandon (%)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: Math.round((stf.maxAbandon ?? 0.05) * 100), onChange: (e) => upd({ maxAbandon: (+e.target.value || 0) / 100 }) })
-      ] })
-    ] }) },
-    { id: "a_eff", key: "efficiency", name: "Efficiency", sum: `Occupancy \u2264 ${Math.round((stf.occupancyCeiling || 0.85) * 100)}%`, fields: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsxs("div", { className: "field", children: [
-      /* @__PURE__ */ jsx("label", { children: "Occupancy ceiling (%)" }),
-      /* @__PURE__ */ jsx("input", { className: "num", value: Math.round((stf.occupancyCeiling ?? 0.85) * 100), onChange: (e) => upd({ occupancyCeiling: (+e.target.value || 0) / 100 }) })
-    ] }) }) },
-    { id: "a_wf", key: "workforce", name: "Workforce", sum: `${stf.resourcing || "dedicated"} \xB7 attrition ${stf.attritionPct || 26}%/yr`, fields: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
-        /* @__PURE__ */ jsx("label", { children: "Resourcing model" }),
-        /* @__PURE__ */ jsxs("select", { value: stf.resourcing || "dedicated", onChange: (e) => upd({ resourcing: e.target.value }), children: [
-          /* @__PURE__ */ jsx("option", { value: "dedicated", children: "Dedicated \u2014 own headcount" }),
-          /* @__PURE__ */ jsx("option", { value: "leveraged", children: "Leveraged \u2014 shared pool" }),
-          /* @__PURE__ */ jsx("option", { value: "overflow_only", children: "Overflow only \u2014 spill-served" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Attrition (%/yr)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: stf.attritionPct ?? 26, onChange: (e) => upd({ attritionPct: +e.target.value || 0 }) })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Shrinkage (%)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: Math.round((stf.shrinkage ?? 0.3) * 100), onChange: (e) => upd({ shrinkage: (+e.target.value || 0) / 100 }) })
-      ] })
-    ] }) },
-    { id: "a_cust", key: "customer", name: "Customer", sum: `Churn \xA3${stf.churnCost || 500} \xB7 failed\u2192churn ${stf.failedToChurnPct || 6}%`, fields: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Churn cost (\xA3)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: stf.churnCost ?? 500, onChange: (e) => upd({ churnCost: +e.target.value || 0 }) })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Failed \u2192 churn (%)" }),
-        /* @__PURE__ */ jsx("input", { className: "num", value: stf.failedToChurnPct ?? 6, onChange: (e) => upd({ failedToChurnPct: +e.target.value || 0 }) })
-      ] })
-    ] }) },
-    { id: "a_out", key: "outputs", name: "Outputs", sum: `Agent \xA3${fmt(stf.agentCost || 32e3)}/yr`, fields: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsxs("div", { className: "field", children: [
-      /* @__PURE__ */ jsx("label", { children: "Agent cost (\xA3/yr)" }),
-      /* @__PURE__ */ jsx("input", { className: "num", value: stf.agentCost ?? 32e3, onChange: (e) => upd({ agentCost: +e.target.value || 0 }) })
-    ] }) }) }
-  ];
-  return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("div", { className: "scrim" + (q ? " on" : ""), onClick: onClose }),
-    /* @__PURE__ */ jsx("aside", { className: "drawer" + (q ? " on" : ""), "aria-label": "Edit queue", "aria-hidden": !q, children: q ? /* @__PURE__ */ jsxs(Fragment, { children: [
-      /* @__PURE__ */ jsxs("div", { className: "dhead", children: [
-        /* @__PURE__ */ jsxs("div", { children: [
-          /* @__PURE__ */ jsx("h3", { children: q.name }),
-          /* @__PURE__ */ jsxs("p", { children: [
-            grpLabel,
-            " \xB7 ",
-            QTYPE_LABELS[q.type]
-          ] })
-        ] }),
-        /* @__PURE__ */ jsx("button", { className: "close", onClick: onClose, "aria-label": "Close", children: "\u2715" })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "dbody", children: [
-        fams.map((f) => /* @__PURE__ */ jsxs("div", { className: "acc" + (open.has(f.id) ? " open" : ""), children: [
-          /* @__PURE__ */ jsxs("button", { className: "acchead", onClick: () => toggle(f.id), children: [
-            /* @__PURE__ */ jsx("span", { className: "fam", style: { background: FAMILY_COLORS[f.key] } }),
-            /* @__PURE__ */ jsxs("span", { children: [
-              /* @__PURE__ */ jsx("b", { children: f.name }),
-              /* @__PURE__ */ jsx("small", { children: f.sum })
-            ] }),
-            /* @__PURE__ */ jsx("span", { className: "chev", style: { marginLeft: "auto" }, children: "\u25BC" })
-          ] }),
-          /* @__PURE__ */ jsx("div", { className: "accbody", children: f.fields })
-        ] }, f.id)),
-        /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, marginTop: 16, alignItems: "center", flexWrap: "wrap", borderTop: "0.5px solid var(--line)", paddingTop: 12 }, children: [
-          /* @__PURE__ */ jsx(
-            DeleteControl,
-            {
-              kind: "queue",
-              guard: import_derive.canDeleteQueue(model, q.id),
-              label: "Delete queue",
-              blockedNoun: "service journey",
-              onDelete: () => {
-                set(deleteQueue(model, q.id));
-                onClose();
-              }
-            }
-          ),
-          /* @__PURE__ */ jsxs("div", { style: { marginLeft: "auto", display: "flex", gap: 8 }, children: [
-            /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
-            /* @__PURE__ */ jsx("button", { className: "btn sm primary", onClick: onClose, children: "Done" })
-          ] })
-        ] })
-      ] })
-    ] }) : null })
-  ] });
-}
-function ImportReport({ report, onDismiss }) {
-  const err = report.error;
-  const errors = report.errors || [], warnings = report.warnings || [];
-  const tone = err || errors.length ? "err" : warnings.length ? "warn" : "ok";
-  const bg = tone === "err" ? "var(--red-bg)" : tone === "warn" ? "var(--amber-bg)" : "var(--green-bg)";
-  const ink = tone === "err" ? "var(--red-ink)" : tone === "warn" ? "var(--amber-ink)" : "var(--green-ink)";
-  const glyph = tone === "err" ? "\u2715" : tone === "warn" ? "\u25B2" : "\u25CF";
-  return /* @__PURE__ */ jsxs("div", { "data-testid": "import-report", role: "status", style: { border: "0.5px solid " + ink, background: bg, color: ink, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }, children: [
-    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs("b", { style: { fontSize: 13 }, children: [
-        glyph,
-        " ",
-        err ? "Import failed" : "Template imported" + (report.filename ? ` \u2014 ${report.filename}` : "")
-      ] }),
-      /* @__PURE__ */ jsx("button", { className: "close", onClick: onDismiss, "aria-label": "Dismiss import report", style: { marginLeft: "auto", color: ink }, children: "\u2715" })
-    ] }),
-    err ? /* @__PURE__ */ jsx("p", { style: { fontSize: 12.5, marginTop: 4 }, children: err }) : /* @__PURE__ */ jsxs(Fragment, { children: [
-      /* @__PURE__ */ jsxs("p", { style: { fontSize: 12.5, marginTop: 4 }, children: [
-        "Loaded ",
-        report.counts.businessUnits,
-        " BU",
-        report.counts.businessUnits === 1 ? "" : "s",
-        " \xB7 ",
-        report.counts.queues,
-        " queue",
-        report.counts.queues === 1 ? "" : "s",
-        " \xB7 ",
-        report.counts.services,
-        " service",
-        report.counts.services === 1 ? "" : "s",
-        " \xB7 ",
-        report.counts.profiles,
-        " profile",
-        report.counts.profiles === 1 ? "" : "s",
-        ".",
-        errors.length ? ` ${errors.length} error${errors.length === 1 ? "" : "s"} must be fixed.` : warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"} to review.` : " No issues."
-      ] }),
-      errors.slice(0, 5).map((e, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
-        "\u2715 ",
-        e.message
-      ] }, "e" + i)),
-      warnings.slice(0, 5).map((w, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
-        "\u25B2 ",
-        w.message
-      ] }, "w" + i))
-    ] })
-  ] });
-}
-function AddQueue({ model, onAdd }) {
-  const channels = structureNodes(model).filter((n) => n.level === "channel");
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [type, setType] = useState("inbound_call");
-  const [attach, setAttach] = useState("shared");
-  const submit = () => {
-    const attachment = attach === "shared" ? { kind: "shared" } : { kind: "structural", channelInstanceId: attach };
-    onAdd({ attachment, type, name: name.trim() || void 0 });
-    setName("");
-    setType("inbound_call");
-    setAttach("shared");
-    setOpen(false);
-  };
-  if (!open) return /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }, children: [
-    /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setOpen(true), children: "+ Add queue" }),
-    /* @__PURE__ */ jsxs("span", { className: "hint", children: [
-      "Attach to a structure path, or mark ",
-      /* @__PURE__ */ jsx("b", { children: "shared" }),
-      ". Volume & Eff. AHT are derived; tap a row for staffing physics."
-    ] })
-  ] });
-  return /* @__PURE__ */ jsxs("div", { style: { marginTop: 10, border: "0.5px solid var(--blue-line)", borderRadius: 10, padding: 12, background: "var(--blue-tint)" }, children: [
-    /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Name" }),
-        /* @__PURE__ */ jsx("input", { value: name, placeholder: "New queue", onChange: (e) => setName(e.target.value) })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Type" }),
-        /* @__PURE__ */ jsx("select", { value: type, onChange: (e) => setType(e.target.value), children: QUEUE_TYPES.map((t) => /* @__PURE__ */ jsx("option", { value: t, children: QTYPE_LABELS[t] }, t)) })
-      ] }),
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Attaches to" }),
-        /* @__PURE__ */ jsxs("select", { value: attach, onChange: (e) => setAttach(e.target.value), children: [
-          /* @__PURE__ */ jsx("option", { value: "shared", children: "Shared \u2014 serves any structure" }),
-          channels.map((c) => /* @__PURE__ */ jsx("option", { value: c.id, children: c.label }, c.id))
-        ] })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }, children: [
-      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setOpen(false), children: "Cancel" }),
-      /* @__PURE__ */ jsx("button", { className: "btn sm primary", onClick: submit, children: "Add queue" })
-    ] })
-  ] });
-}
-function DeleteControl({ guard, label, blockedNoun, onDelete }) {
-  if (guard.ok) return /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: onDelete, children: label });
-  const n = guard.blockedBy.length;
-  return /* @__PURE__ */ jsxs("span", { className: "hint", style: { color: "var(--amber-ink)" }, children: [
-    "\u25B2 ",
-    label,
-    " blocked \u2014 referenced by ",
-    n,
-    " ",
-    blockedNoun,
-    n === 1 ? "" : "s",
-    ". Remove ",
-    n === 1 ? "it" : "them",
-    " first."
-  ] });
-}
-function drawerPath(model, q) {
-  if (!q.attachment || q.attachment.kind === "shared") return "Shared \xB7 serves any structure";
-  for (const b of model.brands) for (const bu of b.businessUnits) for (const p of bu.products) for (const ch of p.channels)
-    if (ch.id === q.attachment.channelInstanceId) return `${bu.name} \u203A ${p.name} \u203A ${CHANNEL_LABELS[ch.channel]}`;
-  return "\u2014";
-}
-
-// ui/v2/SetupV3Page.jsx
-var import_propagate = __toESM(require_propagate());
-var import_domain = __toESM(require_domain());
-var import_engine = __toESM(require_engine());
-var import_taxonomy3 = __toESM(require_taxonomy());
-var import_bridge = __toESM(require_bridge());
-var Ops = __toESM(require_ops());
-import { useState as useState2, useMemo as useMemo2 } from "react";
-import { Fragment as Fragment2, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
-var fmt2 = (n) => n == null || isNaN(n) ? "\u2014" : Math.round(n).toLocaleString("en-GB");
-var NAV2 = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 var SETUP_TABS = [
   ["structure", "Structure"],
   ["queues", "Queues"],
@@ -4950,52 +4143,107 @@ function computeStatus(model, p) {
     }
   ];
 }
+function DomainImportReport({ report, onDismiss }) {
+  const err = report.error;
+  const errors = report.errors || [], warnings = report.warnings || [];
+  const tone = err || errors.length ? "err" : warnings.length ? "warn" : "ok";
+  const bg = tone === "err" ? "var(--red-bg)" : tone === "warn" ? "var(--amber-bg)" : "var(--green-bg)";
+  const ink = tone === "err" ? "var(--red-ink)" : tone === "warn" ? "var(--amber-ink)" : "var(--green-ink)";
+  const c = report.counts || {};
+  return /* @__PURE__ */ jsxs("div", { "data-testid": "import-report", role: "status", style: { border: "0.5px solid " + ink, background: bg, color: ink, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+      /* @__PURE__ */ jsx("b", { style: { fontSize: 13 }, children: tone === "err" ? "\u2715 Import failed" : "Template imported" + (report.filename ? ` \u2014 ${report.filename}` : "") }),
+      /* @__PURE__ */ jsx("button", { className: "close", onClick: onDismiss, "aria-label": "Dismiss import report", style: { marginLeft: "auto", color: ink, background: "none", border: "none", cursor: "pointer" }, children: "\u2715" })
+    ] }),
+    err ? /* @__PURE__ */ jsx("p", { style: { fontSize: 12.5, marginTop: 4 }, children: err }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsxs("p", { style: { fontSize: 12.5, marginTop: 4 }, children: [
+        "Loaded ",
+        c.brands || 0,
+        " brand",
+        c.brands === 1 ? "" : "s",
+        " \xB7 ",
+        c.queues || 0,
+        " queue",
+        c.queues === 1 ? "" : "s",
+        " \xB7 ",
+        c.requestTypes || 0,
+        " request type",
+        c.requestTypes === 1 ? "" : "s",
+        " \xB7 ",
+        c.volumeEntries || 0,
+        " volume entr",
+        c.volumeEntries === 1 ? "y" : "ies",
+        ".",
+        errors.length ? ` ${errors.length} error${errors.length === 1 ? "" : "s"} must be fixed.` : warnings.length ? ` ${warnings.length} warning${warnings.length === 1 ? "" : "s"} to review.` : " No issues."
+      ] }),
+      errors.slice(0, 5).map((e, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
+        "\u2715 ",
+        e.message
+      ] }, "e" + i)),
+      warnings.slice(0, 5).map((w, i) => /* @__PURE__ */ jsxs("p", { style: { fontSize: 12, marginTop: 2 }, children: [
+        "\u25B2 ",
+        w.message
+      ] }, "w" + i))
+    ] })
+  ] });
+}
 function SetupV3Page({ model, onModelChange, onNav = () => {
-}, onOpenClassic }) {
-  const p = useMemo2(() => (0, import_propagate.propagateDomain)(model), [model]);
-  const status = useMemo2(() => computeStatus(model, p), [model, p]);
-  const [tab, setTab] = useState2("structure");
+}, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
+  const p = useMemo(() => (0, import_propagate.propagateDomain)(model), [model]);
+  const status = useMemo(() => computeStatus(model, p), [model, p]);
+  const [tab, setTab] = useState("structure");
   const firstTodo = status.find((s) => !s.ok);
-  return /* @__PURE__ */ jsxs2("div", { className: "shell", children: [
-    /* @__PURE__ */ jsxs2("header", { className: "top", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx2("div", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsxs2("div", { children: [
-          /* @__PURE__ */ jsx2("h1", { children: model.brands && model.brands[0] && model.brands[0].name || "Simulation" }),
-          /* @__PURE__ */ jsx2("small", { children: "Capacity Simulator" })
+  return /* @__PURE__ */ jsxs("div", { className: "shell", children: [
+    /* @__PURE__ */ jsxs("header", { className: "top", children: [
+      /* @__PURE__ */ jsxs("div", { className: "brand", children: [
+        /* @__PURE__ */ jsx("div", { className: "mark", children: "C" }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h1", { children: model.brands && model.brands[0] && model.brands[0].name || "Simulation" }),
+          /* @__PURE__ */ jsx("small", { children: "Capacity Simulator" })
         ] })
       ] }),
-      /* @__PURE__ */ jsx2("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV2.map(([k, label]) => /* @__PURE__ */ jsx2("button", { role: "tab", className: k === "setup" ? "on" : "", "aria-selected": k === "setup", onClick: () => onNav(k), children: label }, k)) })
+      /* @__PURE__ */ jsx("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV.map(([k, label]) => /* @__PURE__ */ jsx("button", { role: "tab", className: k === "setup" ? "on" : "", "aria-selected": k === "setup", onClick: () => onNav(k), children: label }, k)) })
     ] }),
-    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "baseline", gap: 10 }, children: [
-      /* @__PURE__ */ jsx2("h2", { children: "Setup" }),
-      onOpenClassic ? /* @__PURE__ */ jsx2("button", { className: "linkbtn", onClick: onOpenClassic, children: "\u2190 classic Setup" }) : null
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "baseline", gap: 10 }, children: [
+      /* @__PURE__ */ jsx("h2", { children: "Setup" }),
+      onOpenClassic ? /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: onOpenClassic, children: "\u2190 classic Setup" }) : null
     ] }),
-    /* @__PURE__ */ jsx2("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined. Request types is the only place anything is wired together." }),
-    firstTodo ? /* @__PURE__ */ jsxs2("div", { className: "pstrip", role: "status", children: [
-      /* @__PURE__ */ jsx2("span", { className: "glyph todo", children: "\u25B2" }),
-      /* @__PURE__ */ jsxs2("span", { children: [
-        /* @__PURE__ */ jsx2("b", { children: "Next:" }),
+    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined. Request types is the only place anything is wired together." }),
+    importReport ? /* @__PURE__ */ jsx(DomainImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
+    firstTodo ? /* @__PURE__ */ jsxs("div", { className: "pstrip", role: "status", children: [
+      /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }),
+      /* @__PURE__ */ jsxs("span", { children: [
+        /* @__PURE__ */ jsx("b", { children: "Next:" }),
         " ",
         firstTodo.next
       ] }),
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => setTab(firstTodo.key), children: "Go" })
+      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setTab(firstTodo.key), children: "Go" })
     ] }) : null,
-    /* @__PURE__ */ jsx2("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
+    /* @__PURE__ */ jsx("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
       const s = status.find((x) => x.key === k);
-      return /* @__PURE__ */ jsxs2("button", { role: "tab", "aria-selected": tab === k, className: tab === k ? "on" : "", onClick: () => setTab(k), children: [
+      return /* @__PURE__ */ jsxs("button", { role: "tab", "aria-selected": tab === k, className: tab === k ? "on" : "", onClick: () => setTab(k), children: [
         label,
-        !s.ok ? /* @__PURE__ */ jsx2("span", { className: "glyph todo", children: "\u25B2" }) : null
+        !s.ok ? /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }) : null
       ] }, k);
     }) }),
-    /* @__PURE__ */ jsxs2("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
-      tab === "structure" && /* @__PURE__ */ jsx2(StructurePanel, { model, set: onModelChange }),
-      tab === "queues" && /* @__PURE__ */ jsx2(QueuesPanel, { model, set: onModelChange, p }),
-      tab === "requestTypes" && /* @__PURE__ */ jsx2(RequestTypesPanel, { model, set: onModelChange, p }),
-      tab === "volume" && /* @__PURE__ */ jsx2(VolumePanel, { model, set: onModelChange, p }),
-      tab === "map" && /* @__PURE__ */ jsx2(MapPanel, { model, p, onJump: setTab }),
-      tab === "defaults" && /* @__PURE__ */ jsx2(DefaultsPanel, { model, set: onModelChange })
-    ] })
+    /* @__PURE__ */ jsxs("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
+      tab === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
+      tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
+      tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
+      tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
+      tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
+      tab === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
+    ] }),
+    onDownloadTemplate || onUploadTemplate ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
+      /* @__PURE__ */ jsxs("p", { children: [
+        /* @__PURE__ */ jsx("b", { children: "Load from the template." }),
+        " Five sheets mirror the model \u2014 Registry, Queues, Request types, Steps, Volume entries. Download comes pre-filled; re-upload validates before anything changes."
+      ] }),
+      /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8 }, children: [
+        onDownloadTemplate ? /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => onDownloadTemplate(model), children: "Download template" }) : null,
+        onUploadTemplate ? /* @__PURE__ */ jsx("button", { className: "btn sm primary", onClick: () => onUploadTemplate(), children: "Upload data" }) : null
+      ] })
+    ] }) : null
   ] });
 }
 var nameOf = (list, id) => {
@@ -5012,11 +4260,11 @@ function guardSummary(guard) {
   }).join(" \xB7 ");
 }
 function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
-  return /* @__PURE__ */ jsxs2("div", { className: "regrow", children: [
-    /* @__PURE__ */ jsxs2("div", { className: "regmain", children: [
-      /* @__PURE__ */ jsx2("input", { value: entity.name, onChange: (e) => onRename(e.target.value), "aria-label": "Rename " + entity.name }),
+  return /* @__PURE__ */ jsxs("div", { className: "regrow", children: [
+    /* @__PURE__ */ jsxs("div", { className: "regmain", children: [
+      /* @__PURE__ */ jsx("input", { value: entity.name, onChange: (e) => onRename(e.target.value), "aria-label": "Rename " + entity.name }),
       extra,
-      guard.ok ? /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: onDelete, "aria-label": "Delete " + entity.name, children: "\u2715" }) : /* @__PURE__ */ jsxs2("span", { className: "hint blocked", title: "Referenced by " + guardSummary(guard), children: [
+      guard.ok ? /* @__PURE__ */ jsx("button", { className: "regdel", onClick: onDelete, "aria-label": "Delete " + entity.name, children: "\u2715" }) : /* @__PURE__ */ jsxs("span", { className: "hint blocked", title: "Referenced by " + guardSummary(guard), children: [
         "\u25B2 in use \u2014 ",
         guardSummary(guard)
       ] })
@@ -5024,15 +4272,15 @@ function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
     children
   ] });
 }
-function RegistryList({ title, list, hint, onAdd, addLabel, row: row2 }) {
-  return /* @__PURE__ */ jsxs2("div", { className: "reglist", children: [
-    /* @__PURE__ */ jsxs2("div", { className: "reghead", children: [
-      /* @__PURE__ */ jsx2("b", { children: title }),
-      /* @__PURE__ */ jsx2("span", { className: "count", children: (list || []).length }),
-      onAdd ? /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginLeft: "auto" }, onClick: onAdd, children: addLabel || "+ Add" }) : null
+function RegistryList({ title, list, hint, onAdd, addLabel, row }) {
+  return /* @__PURE__ */ jsxs("div", { className: "reglist", children: [
+    /* @__PURE__ */ jsxs("div", { className: "reghead", children: [
+      /* @__PURE__ */ jsx("b", { children: title }),
+      /* @__PURE__ */ jsx("span", { className: "count", children: (list || []).length }),
+      onAdd ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginLeft: "auto" }, onClick: onAdd, children: addLabel || "+ Add" }) : null
     ] }),
-    hint ? /* @__PURE__ */ jsx2("p", { className: "hint", style: { marginBottom: 6 }, children: hint }) : null,
-    (list || []).length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: "none yet" }) : list.map(row2)
+    hint ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginBottom: 6 }, children: hint }) : null,
+    (list || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : list.map(row)
   ] });
 }
 var CH_DEFAULT_FIELDS = [
@@ -5044,26 +4292,26 @@ var CH_DEFAULT_FIELDS = [
   ["digitalSlaPct", "SLA target (%)", 100]
 ];
 function ChannelRow({ model, c, set }) {
-  const [open, setOpen] = useState2(false);
+  const [open, setOpen] = useState(false);
   const d = c.defaults || {};
-  return /* @__PURE__ */ jsx2(
+  return /* @__PURE__ */ jsx(
     RegRow,
     {
       entity: c,
       onRename: (name) => set(Ops.renameChannel(model, c.id, name)),
       guard: (0, import_domain.canDeleteChannel)(model, c.id),
       onDelete: () => set(Ops.deleteChannel(model, c.id)),
-      extra: /* @__PURE__ */ jsxs2(Fragment2, { children: [
-        /* @__PURE__ */ jsx2("span", { className: "tax", children: CHANNEL_LABELS[c.key] || c.key }),
-        /* @__PURE__ */ jsxs2("button", { className: "linkbtn", onClick: () => setOpen(!open), "aria-expanded": open, children: [
+      extra: /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("span", { className: "tax", children: CHANNEL_LABELS[c.key] || c.key }),
+        /* @__PURE__ */ jsxs("button", { className: "linkbtn", onClick: () => setOpen(!open), "aria-expanded": open, children: [
           "defaults",
           Object.keys(d).length ? " \u25CF" : ""
         ] })
       ] }),
-      children: open ? /* @__PURE__ */ jsxs2("div", { className: "fields chdefaults", "data-testid": "channel-defaults-" + c.key, children: [
-        CH_DEFAULT_FIELDS.map(([k, label, scale]) => /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-          /* @__PURE__ */ jsx2("label", { children: label }),
-          /* @__PURE__ */ jsx2(
+      children: open ? /* @__PURE__ */ jsxs("div", { className: "fields chdefaults", "data-testid": "channel-defaults-" + c.key, children: [
+        CH_DEFAULT_FIELDS.map(([k, label, scale]) => /* @__PURE__ */ jsxs("div", { className: "field", children: [
+          /* @__PURE__ */ jsx("label", { children: label }),
+          /* @__PURE__ */ jsx(
             "input",
             {
               className: "num",
@@ -5073,7 +4321,7 @@ function ChannelRow({ model, c, set }) {
             }
           )
         ] }, k)),
-        /* @__PURE__ */ jsx2("p", { className: "hint", style: { gridColumn: "1/-1" }, children: "New processes on this channel inherit these; a queue can still override them." })
+        /* @__PURE__ */ jsx("p", { className: "hint", style: { gridColumn: "1/-1" }, children: "New processes on this channel inherit these; a queue can still override them." })
       ] }) : null
     }
   );
@@ -5086,15 +4334,15 @@ function StructurePanel({ model, set }) {
     ["Products", "products", Ops.addProduct, Ops.renameProduct, Ops.deleteProduct, import_domain.canDeleteProduct, "New product", "+ Product"]
   ];
   const enabledKeys = new Set((model.channels || []).map((c) => c.key));
-  const offKeys = import_taxonomy3.CHANNELS.filter((k) => !enabledKeys.has(k));
-  const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => /* @__PURE__ */ jsx2(
+  const offKeys = import_taxonomy2.CHANNELS.filter((k) => !enabledKeys.has(k));
+  const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => /* @__PURE__ */ jsx(
     RegistryList,
     {
       title,
       list: model[key],
       onAdd: () => set(add(model, { name: seed })),
       addLabel,
-      row: (e) => /* @__PURE__ */ jsx2(
+      row: (e) => /* @__PURE__ */ jsx(
         RegRow,
         {
           entity: e,
@@ -5107,20 +4355,20 @@ function StructurePanel({ model, set }) {
     },
     key
   ));
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Structure" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Brands, business units, channels, groups and products \u2014 set up here, wired together in Request types. Renames propagate; deletes are guarded while in use." }),
-    /* @__PURE__ */ jsxs2("div", { className: "structgrid", children: [
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Structure" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Brands, business units, channels, groups and products \u2014 set up here, wired together in Request types. Renames propagate; deletes are guarded while in use." }),
+    /* @__PURE__ */ jsxs("div", { className: "structgrid", children: [
       brandsL,
       busL,
-      /* @__PURE__ */ jsxs2("div", { className: "reglist", children: [
-        /* @__PURE__ */ jsxs2("div", { className: "reghead", children: [
-          /* @__PURE__ */ jsx2("b", { children: "Channels" }),
-          /* @__PURE__ */ jsx2("span", { className: "count", children: (model.channels || []).length })
+      /* @__PURE__ */ jsxs("div", { className: "reglist", children: [
+        /* @__PURE__ */ jsxs("div", { className: "reghead", children: [
+          /* @__PURE__ */ jsx("b", { children: "Channels" }),
+          /* @__PURE__ */ jsx("span", { className: "count", children: (model.channels || []).length })
         ] }),
-        (model.channels || []).length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: "none yet" }) : null,
-        (model.channels || []).map((c) => /* @__PURE__ */ jsx2(ChannelRow, { model, c, set }, c.id)),
-        offKeys.length ? /* @__PURE__ */ jsx2("div", { className: "regoff", children: offKeys.map((k) => /* @__PURE__ */ jsxs2("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
+        (model.channels || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : null,
+        (model.channels || []).map((c) => /* @__PURE__ */ jsx(ChannelRow, { model, c, set }, c.id)),
+        offKeys.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offKeys.map((k) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
           "+ ",
           CHANNEL_LABELS[k]
         ] }, k)) }) : null
@@ -5131,9 +4379,9 @@ function StructurePanel({ model, set }) {
   ] });
 }
 function NumF({ label, value, onChange, placeholder }) {
-  return /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-    /* @__PURE__ */ jsx2("label", { children: label }),
-    /* @__PURE__ */ jsx2(
+  return /* @__PURE__ */ jsxs("div", { className: "field", children: [
+    /* @__PURE__ */ jsx("label", { children: label }),
+    /* @__PURE__ */ jsx(
       "input",
       {
         className: "num",
@@ -5147,24 +4395,24 @@ function NumF({ label, value, onChange, placeholder }) {
 }
 var n0 = (v) => +v || 0;
 function Fam({ fam, name, sum, children, advanced }) {
-  const [adv, setAdv] = useState2(false);
-  return /* @__PURE__ */ jsxs2("section", { className: "fam-sec", children: [
-    /* @__PURE__ */ jsxs2("div", { className: "famhead", children: [
-      /* @__PURE__ */ jsx2("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
-      /* @__PURE__ */ jsx2("b", { children: name }),
-      /* @__PURE__ */ jsx2("span", { className: "hint", children: sum }),
-      advanced ? /* @__PURE__ */ jsx2("button", { className: "linkbtn", style: { marginLeft: "auto" }, onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null
+  const [adv, setAdv] = useState(false);
+  return /* @__PURE__ */ jsxs("section", { className: "fam-sec", children: [
+    /* @__PURE__ */ jsxs("div", { className: "famhead", children: [
+      /* @__PURE__ */ jsx("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
+      /* @__PURE__ */ jsx("b", { children: name }),
+      /* @__PURE__ */ jsx("span", { className: "hint", children: sum }),
+      advanced ? /* @__PURE__ */ jsx("button", { className: "linkbtn", style: { marginLeft: "auto" }, onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null
     ] }),
     children,
-    adv && advanced ? /* @__PURE__ */ jsx2("div", { style: { marginTop: 8 }, children: advanced.body }) : null
+    adv && advanced ? /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: advanced.body }) : null
   ] });
 }
 function QueueChips({ model, selfId, list, onToggle, label }) {
-  return /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
-    /* @__PURE__ */ jsx2("label", { children: label }),
-    /* @__PURE__ */ jsx2("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).filter((x) => x.id !== selfId).map((x) => {
+  return /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
+    /* @__PURE__ */ jsx("label", { children: label }),
+    /* @__PURE__ */ jsx("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).filter((x) => x.id !== selfId).map((x) => {
       const on = (list || []).includes(x.id);
-      return /* @__PURE__ */ jsx2("button", { className: "chip" + (on ? " on-toggle" : " off"), "aria-pressed": on, onClick: () => onToggle(x.id), children: x.name }, x.id);
+      return /* @__PURE__ */ jsx("button", { className: "chip" + (on ? " on-toggle" : " off"), "aria-pressed": on, onClick: () => onToggle(x.id), children: x.name }, x.id);
     }) })
   ] });
 }
@@ -5184,122 +4432,122 @@ function QueueDetail({ model, set, q, d }) {
   const voice = et.type === "voice";
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
-  return /* @__PURE__ */ jsxs2("div", { className: "mddetail", "data-testid": "queue-detail", children: [
-    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ jsxs2("h4", { style: { marginRight: "auto" }, children: [
+  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "queue-detail", children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs("h4", { style: { marginRight: "auto" }, children: [
         q.name,
-        q._modified ? /* @__PURE__ */ jsx2("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" }) : null
+        q._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" }) : null
       ] }),
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => set(Ops.resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
-      guard.ok ? /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx2("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
+      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(Ops.resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
+      guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
     ] }),
-    /* @__PURE__ */ jsxs2("p", { className: "hint derived-strip", children: [
+    /* @__PURE__ */ jsxs("p", { className: "hint derived-strip", children: [
       "Derived: ",
-      /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-        fmt2(d ? d.volume : 0),
+      /* @__PURE__ */ jsxs("b", { className: "num", children: [
+        fmt(d ? d.volume : 0),
         "/day"
       ] }),
       " \xB7 eff. AHT ",
-      /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-        fmt2(d ? d.effectiveAht : q.fallbackAhtSec),
+      /* @__PURE__ */ jsxs("b", { className: "num", children: [
+        fmt(d ? d.effectiveAht : q.fallbackAhtSec),
         " s"
       ] }),
       d && d.ahtMarker !== "queue" ? ` (${d.ahtMarker})` : "",
       " \xB7 ",
       usage.processes ? `used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}` : "not used by any process yet"
     ] }),
-    /* @__PURE__ */ jsx2(
+    /* @__PURE__ */ jsx(
       Fam,
       {
         fam: "inputs",
         name: "Inputs",
         sum: `${QTYPE_LABELS[q.type] || q.type} \xB7 fallback AHT ${q.fallbackAhtSec} s`,
-        advanced: { count: voice ? 2 : 5, body: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-          /* @__PURE__ */ jsx2(NumF, { label: "Priority", value: eff.priority, onChange: (v) => upd({ priority: n0(v) }) }),
-          !voice ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
-            /* @__PURE__ */ jsx2(NumF, { label: "Concurrency", value: eff.concurrency, onChange: (v) => upd({ concurrency: n0(v) }) }),
-            /* @__PURE__ */ jsx2(NumF, { label: "Backlog limit", value: eff.backlogLimit, onChange: (v) => upd({ backlogLimit: n0(v) }) }),
-            /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-              /* @__PURE__ */ jsx2("label", { children: "Subtype" }),
-              /* @__PURE__ */ jsxs2("select", { value: st.subtype || "", "aria-label": "Subtype", onChange: (e) => upd({ subtype: e.target.value || void 0 }), children: [
-                /* @__PURE__ */ jsx2("option", { value: "", children: "Workflow (backlog)" }),
-                /* @__PURE__ */ jsx2("option", { value: "customer", children: "Customer (live SLA)" })
+        advanced: { count: voice ? 2 : 5, body: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+          /* @__PURE__ */ jsx(NumF, { label: "Priority", value: eff.priority, onChange: (v) => upd({ priority: n0(v) }) }),
+          !voice ? /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(NumF, { label: "Concurrency", value: eff.concurrency, onChange: (v) => upd({ concurrency: n0(v) }) }),
+            /* @__PURE__ */ jsx(NumF, { label: "Backlog limit", value: eff.backlogLimit, onChange: (v) => upd({ backlogLimit: n0(v) }) }),
+            /* @__PURE__ */ jsxs("div", { className: "field", children: [
+              /* @__PURE__ */ jsx("label", { children: "Subtype" }),
+              /* @__PURE__ */ jsxs("select", { value: st.subtype || "", "aria-label": "Subtype", onChange: (e) => upd({ subtype: e.target.value || void 0 }), children: [
+                /* @__PURE__ */ jsx("option", { value: "", children: "Workflow (backlog)" }),
+                /* @__PURE__ */ jsx("option", { value: "customer", children: "Customer (live SLA)" })
               ] })
             ] })
           ] }) : null,
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Deflects to" }),
-            /* @__PURE__ */ jsxs2("select", { value: eff.deflectsTo || "", "aria-label": "Deflects to", onChange: (e) => upd({ deflectsTo: e.target.value || null }), children: [
-              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
-              (model.queues || []).filter((x) => x.id !== q.id).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id))
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Deflects to" }),
+            /* @__PURE__ */ jsxs("select", { value: eff.deflectsTo || "", "aria-label": "Deflects to", onChange: (e) => upd({ deflectsTo: e.target.value || null }), children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+              (model.queues || []).filter((x) => x.id !== q.id).map((x) => /* @__PURE__ */ jsx("option", { value: x.id, children: x.name }, x.id))
             ] })
           ] })
         ] }) },
-        children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Name" }),
-            /* @__PURE__ */ jsx2("input", { value: q.name, "aria-label": "Queue name", onChange: (e) => updQ({ name: e.target.value }) })
+        children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Name" }),
+            /* @__PURE__ */ jsx("input", { value: q.name, "aria-label": "Queue name", onChange: (e) => updQ({ name: e.target.value }) })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Type" }),
-            /* @__PURE__ */ jsx2("select", { value: q.type, "aria-label": "Queue type", onChange: (e) => updQ({ type: e.target.value }), children: QUEUE_TYPES.map((t) => /* @__PURE__ */ jsx2("option", { value: t, children: QTYPE_LABELS[t] }, t)) })
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Type" }),
+            /* @__PURE__ */ jsx("select", { value: q.type, "aria-label": "Queue type", onChange: (e) => updQ({ type: e.target.value }), children: QUEUE_TYPES.map((t) => /* @__PURE__ */ jsx("option", { value: t, children: QTYPE_LABELS[t] }, t)) })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Home brand" }),
-            /* @__PURE__ */ jsxs2("select", { value: q.homeBrandId || "", "aria-label": "Home brand", onChange: (e) => updQ({ homeBrandId: e.target.value || void 0 }), children: [
-              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 global" }),
-              (model.brands || []).map((b) => /* @__PURE__ */ jsx2("option", { value: b.id, children: b.name }, b.id))
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Home brand" }),
+            /* @__PURE__ */ jsxs("select", { value: q.homeBrandId || "", "aria-label": "Home brand", onChange: (e) => updQ({ homeBrandId: e.target.value || void 0 }), children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 global" }),
+              (model.brands || []).map((b) => /* @__PURE__ */ jsx("option", { value: b.id, children: b.name }, b.id))
             ] })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Home BU" }),
-            /* @__PURE__ */ jsxs2("select", { value: q.homeBuId || "", "aria-label": "Home BU", onChange: (e) => updQ({ homeBuId: e.target.value || void 0 }), children: [
-              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 global" }),
-              (model.businessUnits || []).map((b) => /* @__PURE__ */ jsx2("option", { value: b.id, children: b.name }, b.id))
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Home BU" }),
+            /* @__PURE__ */ jsxs("select", { value: q.homeBuId || "", "aria-label": "Home BU", onChange: (e) => updQ({ homeBuId: e.target.value || void 0 }), children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 global" }),
+              (model.businessUnits || []).map((b) => /* @__PURE__ */ jsx("option", { value: b.id, children: b.name }, b.id))
             ] })
           ] }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Fallback AHT (s)", value: q.fallbackAhtSec, onChange: (v) => updQ({ fallbackAhtSec: n0(v) }) })
+          /* @__PURE__ */ jsx(NumF, { label: "Fallback AHT (s)", value: q.fallbackAhtSec, onChange: (v) => updQ({ fallbackAhtSec: n0(v) }) })
         ] })
       }
     ),
-    /* @__PURE__ */ jsx2(Fam, { fam: "performance", name: "Performance", sum: voice ? `ASA ${eff.asaTarget} s \xB7 abandon \u2264 ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`, children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-      voice ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
-        /* @__PURE__ */ jsx2(NumF, { label: "ASA target (s)", value: eff.asaTarget, onChange: (v) => upd({ asaTarget: n0(v) }) }),
-        /* @__PURE__ */ jsx2(NumF, { label: "Max abandon (%)", value: Math.round(eff.maxAbandon * 100), onChange: (v) => upd({ maxAbandon: n0(v) / 100 }) })
-      ] }) : /* @__PURE__ */ jsxs2(Fragment2, { children: [
-        /* @__PURE__ */ jsx2(NumF, { label: "SLA within (min)", value: eff.digitalSlaMinutes, onChange: (v) => upd({ digitalSlaMinutes: n0(v) }) }),
-        /* @__PURE__ */ jsx2(NumF, { label: "SLA target (%)", value: Math.round(eff.digitalSlaPct * 100), onChange: (v) => upd({ digitalSlaPct: n0(v) / 100 }) })
+    /* @__PURE__ */ jsx(Fam, { fam: "performance", name: "Performance", sum: voice ? `ASA ${eff.asaTarget} s \xB7 abandon \u2264 ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`, children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+      voice ? /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(NumF, { label: "ASA target (s)", value: eff.asaTarget, onChange: (v) => upd({ asaTarget: n0(v) }) }),
+        /* @__PURE__ */ jsx(NumF, { label: "Max abandon (%)", value: Math.round(eff.maxAbandon * 100), onChange: (v) => upd({ maxAbandon: n0(v) / 100 }) })
+      ] }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(NumF, { label: "SLA within (min)", value: eff.digitalSlaMinutes, onChange: (v) => upd({ digitalSlaMinutes: n0(v) }) }),
+        /* @__PURE__ */ jsx(NumF, { label: "SLA target (%)", value: Math.round(eff.digitalSlaPct * 100), onChange: (v) => upd({ digitalSlaPct: n0(v) / 100 }) })
       ] }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Patience (s)", value: eff.patience, onChange: (v) => upd({ patience: n0(v) }) })
+      /* @__PURE__ */ jsx(NumF, { label: "Patience (s)", value: eff.patience, onChange: (v) => upd({ patience: n0(v) }) })
     ] }) }),
-    /* @__PURE__ */ jsx2(
+    /* @__PURE__ */ jsx(
       Fam,
       {
         fam: "efficiency",
         name: "Efficiency",
         sum: `occupancy \u2264 ${Math.round((eff.occupancyCeiling ?? 0.85) * 100)}%`,
-        advanced: { count: 5, body: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-          /* @__PURE__ */ jsx2(NumF, { label: "Burnout threshold (%)", value: Math.round(burn.occThreshold * 100), onChange: (v) => updBurn({ occThreshold: n0(v) / 100 }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Burnout sensitivity", value: burn.sensitivity, onChange: (v) => updBurn({ sensitivity: n0(v) }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Recovery (weeks)", value: burn.recovery, onChange: (v) => updBurn({ recovery: n0(v) }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Max attrition \xD7", value: burn.maxAttritionMult, onChange: (v) => updBurn({ maxAttritionMult: n0(v) }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Absence uplift (%)", value: Math.round(burn.absenceUplift * 100), onChange: (v) => updBurn({ absenceUplift: n0(v) / 100 }) })
+        advanced: { count: 5, body: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+          /* @__PURE__ */ jsx(NumF, { label: "Burnout threshold (%)", value: Math.round(burn.occThreshold * 100), onChange: (v) => updBurn({ occThreshold: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Burnout sensitivity", value: burn.sensitivity, onChange: (v) => updBurn({ sensitivity: n0(v) }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Recovery (weeks)", value: burn.recovery, onChange: (v) => updBurn({ recovery: n0(v) }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Max attrition \xD7", value: burn.maxAttritionMult, onChange: (v) => updBurn({ maxAttritionMult: n0(v) }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Absence uplift (%)", value: Math.round(burn.absenceUplift * 100), onChange: (v) => updBurn({ absenceUplift: n0(v) / 100 }) })
         ] }) },
-        children: /* @__PURE__ */ jsx2("div", { className: "fields", children: /* @__PURE__ */ jsx2(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eff.occupancyCeiling ?? 0.85) * 100), onChange: (v) => upd({ occupancyCeiling: n0(v) / 100 }) }) })
+        children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eff.occupancyCeiling ?? 0.85) * 100), onChange: (v) => upd({ occupancyCeiling: n0(v) / 100 }) }) })
       }
     ),
-    /* @__PURE__ */ jsx2(
+    /* @__PURE__ */ jsx(
       Fam,
       {
         fam: "workforce",
         name: "Workforce",
         sum: `${eff.resourcing || "resourced"} \xB7 shrinkage ${Math.round(eff.shrinkage * 100)}%`,
-        advanced: { count: 4 + 1, body: /* @__PURE__ */ jsxs2(Fragment2, { children: [
-          /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-            /* @__PURE__ */ jsx2(NumF, { label: "Attrition growth (/mo)", value: wf.attritionGrowth, onChange: (v) => updWf({ attritionGrowth: n0(v) }) }),
-            /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-              /* @__PURE__ */ jsx2("label", { children: "Learning curve (\xD7 by week)" }),
-              /* @__PURE__ */ jsx2(
+        advanced: { count: 4 + 1, body: /* @__PURE__ */ jsxs(Fragment, { children: [
+          /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+            /* @__PURE__ */ jsx(NumF, { label: "Attrition growth (/mo)", value: wf.attritionGrowth, onChange: (v) => updWf({ attritionGrowth: n0(v) }) }),
+            /* @__PURE__ */ jsxs("div", { className: "field", children: [
+              /* @__PURE__ */ jsx("label", { children: "Learning curve (\xD7 by week)" }),
+              /* @__PURE__ */ jsx(
                 "input",
                 {
                   value: (wf.learningCurve || []).join(", "),
@@ -5309,7 +4557,7 @@ function QueueDetail({ model, set, q, d }) {
               )
             ] })
           ] }),
-          /* @__PURE__ */ jsx2(
+          /* @__PURE__ */ jsx(
             QueueChips,
             {
               model,
@@ -5319,7 +4567,7 @@ function QueueDetail({ model, set, q, d }) {
               onToggle: (id) => upd({ crossSkill: (eff.crossSkill || []).includes(id) ? eff.crossSkill.filter((x) => x !== id) : [...eff.crossSkill || [], id] })
             }
           ),
-          /* @__PURE__ */ jsx2(
+          /* @__PURE__ */ jsx(
             QueueChips,
             {
               model,
@@ -5329,68 +4577,68 @@ function QueueDetail({ model, set, q, d }) {
               onToggle: (id) => upd({ supports: (eff.supports || []).includes(id) ? eff.supports.filter((x) => x !== id) : [...eff.supports || [], id] })
             }
           ),
-          /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1", marginTop: 6 }, children: [
-            /* @__PURE__ */ jsx2("label", { children: "Manual hires (S4 \u2014 week \xD7 heads)" }),
-            hires.map((h, i) => /* @__PURE__ */ jsxs2("div", { className: "mixrow", children: [
-              /* @__PURE__ */ jsx2("span", { className: "hint", children: "week" }),
-              /* @__PURE__ */ jsx2("input", { className: "num", value: h.week, "aria-label": `hire ${i + 1} week`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, week: n0(e.target.value) } : x)) }),
-              /* @__PURE__ */ jsx2("span", { className: "hint", children: "heads" }),
-              /* @__PURE__ */ jsx2("input", { className: "num", value: h.heads, "aria-label": `hire ${i + 1} heads`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, heads: n0(e.target.value) } : x)) }),
-              /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => setHires(hires.filter((_, j) => j !== i)), "aria-label": `remove hire ${i + 1}`, children: "\u2715" })
+          /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1", marginTop: 6 }, children: [
+            /* @__PURE__ */ jsx("label", { children: "Manual hires (S4 \u2014 week \xD7 heads)" }),
+            hires.map((h, i) => /* @__PURE__ */ jsxs("div", { className: "mixrow", children: [
+              /* @__PURE__ */ jsx("span", { className: "hint", children: "week" }),
+              /* @__PURE__ */ jsx("input", { className: "num", value: h.week, "aria-label": `hire ${i + 1} week`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, week: n0(e.target.value) } : x)) }),
+              /* @__PURE__ */ jsx("span", { className: "hint", children: "heads" }),
+              /* @__PURE__ */ jsx("input", { className: "num", value: h.heads, "aria-label": `hire ${i + 1} heads`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, heads: n0(e.target.value) } : x)) }),
+              /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => setHires(hires.filter((_, j) => j !== i)), "aria-label": `remove hire ${i + 1}`, children: "\u2715" })
             ] }, i)),
-            /* @__PURE__ */ jsx2("div", { children: /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => setHires([...hires, { week: 1, heads: 1 }]), children: "+ Hire" }) })
+            /* @__PURE__ */ jsx("div", { children: /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setHires([...hires, { week: 1, heads: 1 }]), children: "+ Hire" }) })
           ] })
         ] }) },
-        children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Resourcing" }),
-            /* @__PURE__ */ jsxs2("select", { value: eff.resourcing || "resourced", "aria-label": "Resourcing", onChange: (e) => upd({ resourcing: e.target.value }), children: [
-              /* @__PURE__ */ jsx2("option", { value: "resourced", children: "Resourced \u2014 own headcount" }),
-              /* @__PURE__ */ jsx2("option", { value: "dedicated", children: "Dedicated" }),
-              /* @__PURE__ */ jsx2("option", { value: "leveraged", children: "Leveraged \u2014 shared pool" }),
-              /* @__PURE__ */ jsx2("option", { value: "overflow_only", children: "Overflow only" })
+        children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Resourcing" }),
+            /* @__PURE__ */ jsxs("select", { value: eff.resourcing || "resourced", "aria-label": "Resourcing", onChange: (e) => upd({ resourcing: e.target.value }), children: [
+              /* @__PURE__ */ jsx("option", { value: "resourced", children: "Resourced \u2014 own headcount" }),
+              /* @__PURE__ */ jsx("option", { value: "dedicated", children: "Dedicated" }),
+              /* @__PURE__ */ jsx("option", { value: "leveraged", children: "Leveraged \u2014 shared pool" }),
+              /* @__PURE__ */ jsx("option", { value: "overflow_only", children: "Overflow only" })
             ] })
           ] }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Starting FTE", value: eff.fte != null ? eff.fte : "", placeholder: "\u2014 sized by strategy", onChange: (v) => upd({ fte: v === "" ? void 0 : n0(v) }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Shrinkage (%)", value: Math.round(eff.shrinkage * 100), onChange: (v) => upd({ shrinkage: n0(v) / 100 }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Attrition (%/mo)", value: Math.round(wf.attrition * 1e3) / 10, onChange: (v) => updWf({ attrition: n0(v) / 100 }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Req \u2192 start (weeks)", value: wf.reqToStart, onChange: (v) => updWf({ reqToStart: n0(v) }) }),
-          /* @__PURE__ */ jsx2(NumF, { label: "Training (weeks)", value: wf.trainingWeeks, onChange: (v) => updWf({ trainingWeeks: n0(v) }) })
+          /* @__PURE__ */ jsx(NumF, { label: "Starting FTE", value: eff.fte != null ? eff.fte : "", placeholder: "\u2014 sized by strategy", onChange: (v) => upd({ fte: v === "" ? void 0 : n0(v) }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Shrinkage (%)", value: Math.round(eff.shrinkage * 100), onChange: (v) => upd({ shrinkage: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Attrition (%/mo)", value: Math.round(wf.attrition * 1e3) / 10, onChange: (v) => updWf({ attrition: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Req \u2192 start (weeks)", value: wf.reqToStart, onChange: (v) => updWf({ reqToStart: n0(v) }) }),
+          /* @__PURE__ */ jsx(NumF, { label: "Training (weeks)", value: wf.trainingWeeks, onChange: (v) => updWf({ trainingWeeks: n0(v) }) })
         ] })
       }
     ),
-    /* @__PURE__ */ jsx2(Fam, { fam: "customer", name: "Customer", sum: `churn \xA3${eff.churnCost ?? 500}`, children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Churn cost (\xA3)", value: eff.churnCost ?? 500, onChange: (v) => upd({ churnCost: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Failed \u2192 churn (%)", value: eff.failedToChurnPct ?? 6, onChange: (v) => upd({ failedToChurnPct: n0(v) }) })
+    /* @__PURE__ */ jsx(Fam, { fam: "customer", name: "Customer", sum: `churn \xA3${eff.churnCost ?? 500}`, children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Churn cost (\xA3)", value: eff.churnCost ?? 500, onChange: (v) => upd({ churnCost: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Failed \u2192 churn (%)", value: eff.failedToChurnPct ?? 6, onChange: (v) => upd({ failedToChurnPct: n0(v) }) })
     ] }) }),
-    /* @__PURE__ */ jsx2(Fam, { fam: "outputs", name: "Outputs", sum: `agent \xA3${fmt2(eff.agentCost)}/yr`, children: /* @__PURE__ */ jsx2("div", { className: "fields", children: /* @__PURE__ */ jsx2(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
+    /* @__PURE__ */ jsx(Fam, { fam: "outputs", name: "Outputs", sum: `agent \xA3${fmt(eff.agentCost)}/yr`, children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
   ] });
 }
 function TeamDetail({ model, set, team }) {
   const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
-  return /* @__PURE__ */ jsxs2("div", { className: "mddetail", "data-testid": "team-detail", children: [
-    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ jsx2("h4", { style: { marginRight: "auto" }, children: team.name }),
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
+  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "team-detail", children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: team.name }),
+      /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
     ] }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
-    /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-        /* @__PURE__ */ jsx2("label", { children: "Name" }),
-        /* @__PURE__ */ jsx2("input", { value: team.name, "aria-label": "Team name", onChange: (e) => upd({ name: e.target.value }) })
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
+    /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+      /* @__PURE__ */ jsxs("div", { className: "field", children: [
+        /* @__PURE__ */ jsx("label", { children: "Name" }),
+        /* @__PURE__ */ jsx("input", { value: team.name, "aria-label": "Team name", onChange: (e) => upd({ name: e.target.value }) })
       ] }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Size (FTE)", value: team.size, onChange: (v) => upd({ size: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Premium (%)", value: Math.round((team.premiumPct || 0) * 100), onChange: (v) => upd({ premiumPct: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Proficiency (%)", value: Math.round((team.proficiency || 0) * 100), onChange: (v) => upd({ proficiency: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Trigger occupancy (%)", value: Math.round((team.triggerOccupancy || 0) * 100), onChange: (v) => upd({ triggerOccupancy: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Max hours (/wk)", value: team.maxHoursPerWeek, onChange: (v) => upd({ maxHoursPerWeek: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Agent cost (\xA3/yr)", value: team.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) })
+      /* @__PURE__ */ jsx(NumF, { label: "Size (FTE)", value: team.size, onChange: (v) => upd({ size: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Premium (%)", value: Math.round((team.premiumPct || 0) * 100), onChange: (v) => upd({ premiumPct: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Proficiency (%)", value: Math.round((team.proficiency || 0) * 100), onChange: (v) => upd({ proficiency: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Trigger occupancy (%)", value: Math.round((team.triggerOccupancy || 0) * 100), onChange: (v) => upd({ triggerOccupancy: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Max hours (/wk)", value: team.maxHoursPerWeek, onChange: (v) => upd({ maxHoursPerWeek: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: team.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) })
     ] }),
-    /* @__PURE__ */ jsxs2("div", { className: "field", style: { marginTop: 8 }, children: [
-      /* @__PURE__ */ jsx2("label", { children: "Covers" }),
-      /* @__PURE__ */ jsx2("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).map((x) => {
+    /* @__PURE__ */ jsxs("div", { className: "field", style: { marginTop: 8 }, children: [
+      /* @__PURE__ */ jsx("label", { children: "Covers" }),
+      /* @__PURE__ */ jsx("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).map((x) => {
         const on = (team.coversQueues || []).includes(x.id);
-        return /* @__PURE__ */ jsx2(
+        return /* @__PURE__ */ jsx(
           "button",
           {
             className: "chip" + (on ? " on-toggle" : " off"),
@@ -5407,7 +4655,7 @@ function TeamDetail({ model, set, team }) {
 function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
   const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
-  const [sel, setSel] = useState2(queues[0] ? { kind: "queue", id: queues[0].id } : null);
+  const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
   const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
   const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
   const groups = [];
@@ -5421,76 +4669,76 @@ function QueuesPanel({ model, set, p }) {
     byKey.get(label).push(x);
   }
   groups.sort((a, b) => a === "Global \u2014 no home" ? 1 : b === "Global \u2014 no home" ? -1 : 0);
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Queues" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Volume and effective AHT are derived \u2014 never entered here." }),
-    /* @__PURE__ */ jsxs2("div", { className: "md", children: [
-      /* @__PURE__ */ jsxs2("div", { children: [
-        groups.map((label) => /* @__PURE__ */ jsxs2("div", { className: "mdgroup", children: [
-          /* @__PURE__ */ jsx2("p", { className: "mdgrouplab", children: label }),
-          /* @__PURE__ */ jsx2("div", { className: "mdlist", role: "listbox", "aria-label": label, children: byKey.get(label).map((x) => {
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Queues" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Volume and effective AHT are derived \u2014 never entered here." }),
+    /* @__PURE__ */ jsxs("div", { className: "md", children: [
+      /* @__PURE__ */ jsxs("div", { children: [
+        groups.map((label) => /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
+          /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: label }),
+          /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": label, children: byKey.get(label).map((x) => {
             const dx = p.queues.get(x.id);
             const u = (0, import_domain.queueUsage)(model, x.id);
             const on = sel && sel.kind === "queue" && sel.id === x.id;
-            return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
-              /* @__PURE__ */ jsxs2("b", { children: [
+            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
+              /* @__PURE__ */ jsxs("b", { children: [
                 x.name,
-                x._modified ? /* @__PURE__ */ jsx2("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
+                x._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
               ] }),
-              /* @__PURE__ */ jsxs2("small", { children: [
+              /* @__PURE__ */ jsxs("small", { children: [
                 QTYPE_LABELS[x.type] || x.type,
                 u.processes ? ` \xB7 ${u.processes} process${u.processes === 1 ? "" : "es"} \xB7 ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " \xB7 unused"
               ] }),
-              /* @__PURE__ */ jsxs2("span", { className: "qstats num", children: [
-                fmt2(dx ? dx.volume : 0),
+              /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
+                fmt(dx ? dx.volume : 0),
                 "/day \xB7 ",
-                fmt2(dx ? dx.effectiveAht : x.fallbackAhtSec),
+                fmt(dx ? dx.effectiveAht : x.fallbackAhtSec),
                 " s",
                 dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
               ] })
             ] }, x.id);
           }) })
         ] }, label)),
-        /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => {
+        /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => {
           const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
           set(m2);
           setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
         }, children: "+ Queue" }),
-        /* @__PURE__ */ jsxs2("div", { className: "mdgroup", children: [
-          /* @__PURE__ */ jsx2("p", { className: "mdgrouplab", children: "Shared capacity" }),
-          /* @__PURE__ */ jsx2("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
+        /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
+          /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: "Shared capacity" }),
+          /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
             const on = sel && sel.kind === "team" && sel.id === x.id;
-            return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
-              /* @__PURE__ */ jsx2("b", { children: x.name }),
-              /* @__PURE__ */ jsxs2("small", { children: [
+            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
+              /* @__PURE__ */ jsx("b", { children: x.name }),
+              /* @__PURE__ */ jsxs("small", { children: [
                 "service team \xB7 covers ",
                 (x.coversQueues || []).length,
                 " queue",
                 (x.coversQueues || []).length === 1 ? "" : "s"
               ] }),
-              /* @__PURE__ */ jsxs2("span", { className: "qstats num", children: [
+              /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
                 x.size,
                 " FTE"
               ] })
             ] }, x.id);
           }) }),
-          /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginTop: 4 }, disabled: !model.engineConfig, onClick: () => {
+          /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginTop: 4 }, disabled: !model.engineConfig, onClick: () => {
             const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
             set(m2);
             setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
           }, children: "+ Shared team" })
         ] })
       ] }),
-      q ? /* @__PURE__ */ jsx2(QueueDetail, { model, set, q, d: p.queues.get(q.id) }) : team ? /* @__PURE__ */ jsx2(TeamDetail, { model, set, team }) : /* @__PURE__ */ jsx2("div", { className: "mddetail", "data-testid": "queue-detail", children: /* @__PURE__ */ jsx2("p", { className: "hint", children: "Select a queue or shared team." }) })
+      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id) }) : team ? /* @__PURE__ */ jsx(TeamDetail, { model, set, team }) : /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "queue-detail", children: /* @__PURE__ */ jsx("p", { className: "hint", children: "Select a queue or shared team." }) })
     ] })
   ] });
 }
 var fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
 function ToggleChips({ options, selected, onToggle, allLabel }) {
-  return /* @__PURE__ */ jsxs2("div", { className: "regoff", style: { marginTop: 4 }, children: [
+  return /* @__PURE__ */ jsxs("div", { className: "regoff", style: { marginTop: 4 }, children: [
     options.map((o) => {
       const on = selected.includes(o.id);
-      return /* @__PURE__ */ jsx2(
+      return /* @__PURE__ */ jsx(
         "button",
         {
           className: "chip" + (on ? " on-toggle" : " off"),
@@ -5501,11 +4749,11 @@ function ToggleChips({ options, selected, onToggle, allLabel }) {
         o.id
       );
     }),
-    options.length === 0 ? /* @__PURE__ */ jsx2("span", { className: "hint", children: allLabel }) : null
+    options.length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: allLabel }) : null
   ] });
 }
 function ProcessEditor({ model, set, rt, proc }) {
-  const [newOutcome, setNewOutcome] = useState2("");
+  const [newOutcome, setNewOutcome] = useState("");
   const chName = nameOf(model.channels, proc.channelId);
   const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
@@ -5513,31 +4761,31 @@ function ProcessEditor({ model, set, rt, proc }) {
     const q = (model.queues || []).find((x) => x.id === s.queueId);
     return q && q.type === "governance";
   });
-  return /* @__PURE__ */ jsxs2("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
-    /* @__PURE__ */ jsxs2("div", { className: "prochead", children: [
-      /* @__PURE__ */ jsx2("span", { className: "chip on-toggle", children: chName }),
-      /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.deleteProcess(model, rt.id, proc.channelId)), "aria-label": "Remove " + chName + " process", children: "\u2715" })
+  return /* @__PURE__ */ jsxs("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
+    /* @__PURE__ */ jsxs("div", { className: "prochead", children: [
+      /* @__PURE__ */ jsx("span", { className: "chip on-toggle", children: chName }),
+      /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => set(Ops.deleteProcess(model, rt.id, proc.channelId)), "aria-label": "Remove " + chName + " process", children: "\u2715" })
     ] }),
-    (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : /* @__PURE__ */ jsxs2("div", { className: "steps" + (hasGov ? " with-sample" : ""), children: [
-      /* @__PURE__ */ jsxs2("div", { className: "steprow head", children: [
-        /* @__PURE__ */ jsx2("span", {}),
-        /* @__PURE__ */ jsx2("span", { children: "Queue" }),
-        /* @__PURE__ */ jsx2("span", { children: "Split %" }),
-        hasGov ? /* @__PURE__ */ jsx2("span", { children: "Sample %" }) : null,
-        /* @__PURE__ */ jsx2("span", { children: "Ends" }),
-        /* @__PURE__ */ jsx2("span", { children: "Outcome" }),
-        /* @__PURE__ */ jsx2("span", {})
+    (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : /* @__PURE__ */ jsxs("div", { className: "steps" + (hasGov ? " with-sample" : ""), children: [
+      /* @__PURE__ */ jsxs("div", { className: "steprow head", children: [
+        /* @__PURE__ */ jsx("span", {}),
+        /* @__PURE__ */ jsx("span", { children: "Queue" }),
+        /* @__PURE__ */ jsx("span", { children: "Split %" }),
+        hasGov ? /* @__PURE__ */ jsx("span", { children: "Sample %" }) : null,
+        /* @__PURE__ */ jsx("span", { children: "Ends" }),
+        /* @__PURE__ */ jsx("span", { children: "Outcome" }),
+        /* @__PURE__ */ jsx("span", {})
       ] }),
       (proc.steps || []).map((s, i) => {
         const q = (model.queues || []).find((x) => x.id === s.queueId);
         const gov = q && q.type === "governance";
         const p01 = (+s.splitPct || 0) / 100;
         const reworkTitle = p01 > 0 && p01 < 1 ? `Routes ${s.splitPct}% of what reaches it. If this branch is rework, repeated rounds compound to an effective ${fmtPct(p01 / (1 - p01) * 100)}%.` : void 0;
-        return /* @__PURE__ */ jsxs2("div", { className: "steprow", children: [
-          /* @__PURE__ */ jsx2("span", { className: "stepno", children: i === 0 ? "entry" : i + 1 }),
-          /* @__PURE__ */ jsx2("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id)) }),
-          /* @__PURE__ */ jsx2("input", { className: "num", value: s.splitPct, title: reworkTitle, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
-          hasGov ? gov ? /* @__PURE__ */ jsx2(
+        return /* @__PURE__ */ jsxs("div", { className: "steprow", children: [
+          /* @__PURE__ */ jsx("span", { className: "stepno", children: i === 0 ? "entry" : i + 1 }),
+          /* @__PURE__ */ jsx("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx("option", { value: x.id, children: x.name }, x.id)) }),
+          /* @__PURE__ */ jsx("input", { className: "num", value: s.splitPct, title: reworkTitle, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
+          hasGov ? gov ? /* @__PURE__ */ jsx(
             "input",
             {
               className: "num",
@@ -5546,19 +4794,19 @@ function ProcessEditor({ model, set, rt, proc }) {
               onChange: (e) => upd(i, { samplingPct: e.target.value === "" ? void 0 : +e.target.value }),
               "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} sampling percent`
             }
-          ) : /* @__PURE__ */ jsx2("span", { className: "stepdash", children: "\u2014" }) : null,
-          /* @__PURE__ */ jsx2("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} terminal` }),
-          s.terminal ? /* @__PURE__ */ jsxs2("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
-            /* @__PURE__ */ jsx2("option", { value: "", children: "outcome\u2026" }),
-            (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx2("option", { value: o, children: o }, o))
-          ] }) : /* @__PURE__ */ jsx2("span", { className: "stepdash", children: "\u2014" }),
-          /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
+          ) : /* @__PURE__ */ jsx("span", { className: "stepdash", children: "\u2014" }) : null,
+          /* @__PURE__ */ jsx("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} terminal` }),
+          s.terminal ? /* @__PURE__ */ jsxs("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
+            /* @__PURE__ */ jsx("option", { value: "", children: "outcome\u2026" }),
+            (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx("option", { value: o, children: o }, o))
+          ] }) : /* @__PURE__ */ jsx("span", { className: "stepdash", children: "\u2014" }),
+          /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
         ] }, i);
       })
     ] }),
-    noTerminal ? /* @__PURE__ */ jsx2("p", { className: "errmsg", children: '\u2715 No terminal step \u2014 the process leads nowhere. Mark the final step "ends" and pick its outcome.' }) : null,
-    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }, children: [
-      /* @__PURE__ */ jsx2(
+    noTerminal ? /* @__PURE__ */ jsx("p", { className: "errmsg", children: '\u2715 No terminal step \u2014 the process leads nowhere. Mark the final step "ends" and pick its outcome.' }) : null,
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }, children: [
+      /* @__PURE__ */ jsx(
         "button",
         {
           className: "btn sm",
@@ -5567,16 +4815,16 @@ function ProcessEditor({ model, set, rt, proc }) {
           children: "+ Step"
         }
       ),
-      /* @__PURE__ */ jsx2("span", { className: "hint", style: { marginLeft: 8 }, children: "outcomes:" }),
+      /* @__PURE__ */ jsx("span", { className: "hint", style: { marginLeft: 8 }, children: "outcomes:" }),
       (proc.outcomes || []).map((o) => {
         const used = (proc.steps || []).some((s) => s.outcome === o);
-        return /* @__PURE__ */ jsxs2("span", { className: "chip", children: [
+        return /* @__PURE__ */ jsxs("span", { className: "chip", children: [
           o,
-          used ? /* @__PURE__ */ jsx2("small", { title: "Referenced by a terminal step", children: " \xB7in use" }) : /* @__PURE__ */ jsx2("button", { className: "chipx", onClick: () => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o))), "aria-label": "Remove outcome " + o, children: "\u2715" })
+          used ? /* @__PURE__ */ jsx("small", { title: "Referenced by a terminal step", children: " \xB7in use" }) : /* @__PURE__ */ jsx("button", { className: "chipx", onClick: () => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o))), "aria-label": "Remove outcome " + o, children: "\u2715" })
         ] }, o);
       }),
-      /* @__PURE__ */ jsx2("input", { className: "outin", placeholder: "add outcome\u2026", value: newOutcome, onChange: (e) => setNewOutcome(e.target.value), "aria-label": `${rt.id} ${proc.channelId} new outcome` }),
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", disabled: !newOutcome.trim(), onClick: () => {
+      /* @__PURE__ */ jsx("input", { className: "outin", placeholder: "add outcome\u2026", value: newOutcome, onChange: (e) => setNewOutcome(e.target.value), "aria-label": `${rt.id} ${proc.channelId} new outcome` }),
+      /* @__PURE__ */ jsx("button", { className: "btn sm", disabled: !newOutcome.trim(), onClick: () => {
         const o = newOutcome.trim();
         if (o && !(proc.outcomes || []).includes(o)) set(Ops.setOutcomes(model, rt.id, proc.channelId, [...proc.outcomes || [], o]));
         setNewOutcome("");
@@ -5586,7 +4834,7 @@ function ProcessEditor({ model, set, rt, proc }) {
 }
 function RequestTypesPanel({ model, set, p }) {
   const rts = model.requestTypes || [];
-  const [sel, setSel] = useState2(rts[0] ? rts[0].id : null);
+  const [sel, setSel] = useState(rts[0] ? rts[0].id : null);
   const rt = rts.find((x) => x.id === sel) || rts[0] || null;
   const rtErr = (x) => p.validation.errors.filter((e) => e.requestTypeId === x.id);
   const rtWarn = (x) => p.validation.warnings.filter((w) => (w.requestTypeIds || []).includes(x.id));
@@ -5597,70 +4845,70 @@ function RequestTypesPanel({ model, set, p }) {
   };
   const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
   const guard = rt ? (0, import_domain.canDeleteRequestType)(model, rt.id) : { ok: true, blockedBy: [] };
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Request types" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together." }),
-    rts.length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No request types yet." }) : null,
-    /* @__PURE__ */ jsxs2("div", { className: "md", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "mdlist", role: "listbox", "aria-label": "Request types", children: [
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Request types" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together." }),
+    rts.length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "No request types yet." }) : null,
+    /* @__PURE__ */ jsxs("div", { className: "md", children: [
+      /* @__PURE__ */ jsxs("div", { className: "mdlist", role: "listbox", "aria-label": "Request types", children: [
         rts.map((x) => {
           const errs = rtErr(x), warns = rtWarn(x);
-          return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": rt && rt.id === x.id, className: "rtrow" + (rt && rt.id === x.id ? " on" : ""), onClick: () => setSel(x.id), children: [
-            /* @__PURE__ */ jsxs2("b", { children: [
+          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": rt && rt.id === x.id, className: "rtrow" + (rt && rt.id === x.id ? " on" : ""), onClick: () => setSel(x.id), children: [
+            /* @__PURE__ */ jsxs("b", { children: [
               x.name,
               " ",
-              /* @__PURE__ */ jsx2("span", { className: "glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok"), children: errs.length ? "\u2715" : warns.length ? "\u25B2" : "\u25CF" })
+              /* @__PURE__ */ jsx("span", { className: "glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok"), children: errs.length ? "\u2715" : warns.length ? "\u25B2" : "\u25CF" })
             ] }),
-            /* @__PURE__ */ jsxs2("small", { children: [
+            /* @__PURE__ */ jsxs("small", { children: [
               nameOf(model.processGroups, x.groupId) || "no group",
               x.productId ? " \xB7 " + nameOf(model.products, x.productId) : "",
               " \xB7 ",
               assignLine(x)
             ] }),
-            /* @__PURE__ */ jsx2("small", { children: (x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
+            /* @__PURE__ */ jsx("small", { children: (x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
           ] }, x.id);
         }),
-        /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginTop: 4 }, onClick: () => {
+        /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginTop: 4 }, onClick: () => {
           const m2 = Ops.addRequestType(model, { name: "New request type", groupId: (model.processGroups[0] || {}).id });
           set(m2);
           setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
         }, children: "+ Request type" })
       ] }),
-      /* @__PURE__ */ jsx2("div", { className: "mddetail", "data-testid": "rt-detail", children: rt ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
-        /* @__PURE__ */ jsx2("h4", { children: "Identity" }),
-        /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Name" }),
-            /* @__PURE__ */ jsx2("input", { value: rt.name, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value })), "aria-label": "Request type name" })
+      /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "rt-detail", children: rt ? /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx("h4", { children: "Identity" }),
+        /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Name" }),
+            /* @__PURE__ */ jsx("input", { value: rt.name, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value })), "aria-label": "Request type name" })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Activity" }),
-            /* @__PURE__ */ jsx2("select", { value: rt.activity, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx2("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Activity" }),
+            /* @__PURE__ */ jsx("select", { value: rt.activity, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Product request" }),
-            /* @__PURE__ */ jsxs2("select", { value: rt.productRequest, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
-              /* @__PURE__ */ jsx2("option", { value: "existing", children: "Existing product" }),
-              /* @__PURE__ */ jsx2("option", { value: "new", children: "New product" })
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Product request" }),
+            /* @__PURE__ */ jsxs("select", { value: rt.productRequest, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
+              /* @__PURE__ */ jsx("option", { value: "existing", children: "Existing product" }),
+              /* @__PURE__ */ jsx("option", { value: "new", children: "New product" })
             ] })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Process group" }),
-            /* @__PURE__ */ jsxs2("select", { value: rt.groupId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || void 0 })), "aria-label": "Process group", children: [
-              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
-              (model.processGroups || []).map((g) => /* @__PURE__ */ jsx2("option", { value: g.id, children: g.name }, g.id))
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Process group" }),
+            /* @__PURE__ */ jsxs("select", { value: rt.groupId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || void 0 })), "aria-label": "Process group", children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+              (model.processGroups || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
             ] })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "Product (optional)" }),
-            /* @__PURE__ */ jsxs2("select", { value: rt.productId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || void 0 })), "aria-label": "Product", children: [
-              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
-              (model.products || []).map((g) => /* @__PURE__ */ jsx2("option", { value: g.id, children: g.name }, g.id))
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "Product (optional)" }),
+            /* @__PURE__ */ jsxs("select", { value: rt.productId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || void 0 })), "aria-label": "Product", children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+              (model.products || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
             ] })
           ] }),
-          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-            /* @__PURE__ */ jsx2("label", { children: "AHT override (s) \u2014 optional" }),
-            /* @__PURE__ */ jsx2(
+          /* @__PURE__ */ jsxs("div", { className: "field", children: [
+            /* @__PURE__ */ jsx("label", { children: "AHT override (s) \u2014 optional" }),
+            /* @__PURE__ */ jsx(
               "input",
               {
                 className: "num",
@@ -5672,9 +4920,9 @@ function RequestTypesPanel({ model, set, p }) {
             )
           ] })
         ] }),
-        /* @__PURE__ */ jsx2("h4", { style: { marginTop: 14 }, children: "Assignment" }),
-        /* @__PURE__ */ jsx2("p", { className: "hint", children: "None selected = applies to all." }),
-        /* @__PURE__ */ jsx2(
+        /* @__PURE__ */ jsx("h4", { style: { marginTop: 14 }, children: "Assignment" }),
+        /* @__PURE__ */ jsx("p", { className: "hint", children: "None selected = applies to all." }),
+        /* @__PURE__ */ jsx(
           ToggleChips,
           {
             options: model.brands || [],
@@ -5683,7 +4931,7 @@ function RequestTypesPanel({ model, set, p }) {
             onToggle: (id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...rt.brandIds || [], id] }))
           }
         ),
-        /* @__PURE__ */ jsx2(
+        /* @__PURE__ */ jsx(
           ToggleChips,
           {
             options: model.businessUnits || [],
@@ -5692,25 +4940,25 @@ function RequestTypesPanel({ model, set, p }) {
             onToggle: (id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...rt.buIds || [], id] }))
           }
         ),
-        /* @__PURE__ */ jsxs2("p", { className: "hint applies", "data-testid": "applies-line", children: [
-          /* @__PURE__ */ jsx2("b", { children: "Applies to:" }),
+        /* @__PURE__ */ jsxs("p", { className: "hint applies", "data-testid": "applies-line", children: [
+          /* @__PURE__ */ jsx("b", { children: "Applies to:" }),
           " ",
           assignLine(rt)
         ] }),
-        rtWarn(rt).map((w, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+        rtWarn(rt).map((w, i) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
           "\u25B2 ",
           w.message
         ] }, i)),
-        /* @__PURE__ */ jsx2("h4", { style: { marginTop: 14 }, children: "Processes \u2014 one per channel" }),
-        (rt.processes || []).map((pr) => /* @__PURE__ */ jsx2(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
-        offChannels.length ? /* @__PURE__ */ jsx2("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs2("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
+        /* @__PURE__ */ jsx("h4", { style: { marginTop: 14 }, children: "Processes \u2014 one per channel" }),
+        (rt.processes || []).map((pr) => /* @__PURE__ */ jsx(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
+        offChannels.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
           "+ ",
           c.name
         ] }, c.id)) }) : null,
-        /* @__PURE__ */ jsx2("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => {
+        /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => {
           set(Ops.deleteRequestType(model, rt.id));
           setSel(null);
-        }, children: "Delete request type" }) : /* @__PURE__ */ jsxs2("span", { className: "hint blocked", style: { marginLeft: 0 }, children: [
+        }, children: "Delete request type" }) : /* @__PURE__ */ jsxs("span", { className: "hint blocked", style: { marginLeft: 0 }, children: [
           "\u25B2 Delete blocked \u2014 referenced by ",
           guardSummary(guard),
           ". Remove them first."
@@ -5725,14 +4973,14 @@ function entryAt(model, scope) {
   return (model.volumeEntries || []).find((e) => (0, import_domain.keyOf)(e.scope || {}) === k);
 }
 function ShapeEditor({ model, set, scope, entry, daily }) {
-  const [text, setText] = useState2(entry && entry.weekly ? entry.weekly.map((v) => Math.round(v)).join(", ") : "");
-  const [err, setErr] = useState2(null);
+  const [text, setText] = useState(entry && entry.weekly ? entry.weekly.map((v) => Math.round(v)).join(", ") : "");
+  const [err, setErr] = useState(null);
   const apply = (weekly) => {
     const d = entry && entry.daily != null ? entry.daily : daily;
     set(Ops.setVolumeEntry(model, scope, { daily: d, weekly }));
   };
-  return /* @__PURE__ */ jsxs2("div", { className: "shapebox", "data-testid": "shape-editor", children: [
-    /* @__PURE__ */ jsx2("div", { className: "regoff", children: Object.keys(import_engine.SEASONAL_PRESETS).map((name) => /* @__PURE__ */ jsx2("button", { className: "chip off", onClick: () => {
+  return /* @__PURE__ */ jsxs("div", { className: "shapebox", "data-testid": "shape-editor", children: [
+    /* @__PURE__ */ jsx("div", { className: "regoff", children: Object.keys(import_engine.SEASONAL_PRESETS).map((name) => /* @__PURE__ */ jsx("button", { className: "chip off", onClick: () => {
       const d = (entry && entry.daily != null ? entry.daily : daily) || 0;
       if (name === "Flat") {
         set(Ops.setVolumeEntry(model, scope, { daily: d }));
@@ -5746,7 +4994,7 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
       setText(weekly.join(", "));
       setErr(null);
     }, children: name }, name)) }),
-    /* @__PURE__ */ jsx2(
+    /* @__PURE__ */ jsx(
       "textarea",
       {
         rows: 2,
@@ -5756,8 +5004,8 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
         onChange: (e) => setText(e.target.value)
       }
     ),
-    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => {
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+      /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => {
         const vals = text.split(/[\s,;]+/).filter(Boolean).map(Number);
         if (vals.length !== 52 || vals.some(isNaN)) {
           setErr(`need 52 numbers, got ${vals.filter((v) => !isNaN(v)).length}`);
@@ -5766,7 +5014,7 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
         apply(vals);
         setErr(null);
       }, children: "Apply series" }),
-      err ? /* @__PURE__ */ jsxs2("span", { className: "hint", style: { color: "var(--red-ink)" }, children: [
+      err ? /* @__PURE__ */ jsxs("span", { className: "hint", style: { color: "var(--red-ink)" }, children: [
         "\u2715 ",
         err
       ] }) : null
@@ -5774,15 +5022,15 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
   ] });
 }
 function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsShape }) {
-  const [shapeOpen, setShapeOpen] = useState2(false);
+  const [shapeOpen, setShapeOpen] = useState(false);
   const entry = entryAt(model, scope);
   const total = node ? node.total : 0;
   const prov = node ? node.prov : "none";
   const shown = total ? Math.round(total * 10) / 10 : prov === "entered" ? 0 : "";
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsxs2("div", { className: "volrow lvl" + level, "data-key": (0, import_domain.keyOf)(scope), children: [
-      /* @__PURE__ */ jsx2("span", { className: "volname", style: { paddingLeft: level * 18 }, children: name }),
-      /* @__PURE__ */ jsx2(
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsxs("div", { className: "volrow lvl" + level, "data-key": (0, import_domain.keyOf)(scope), children: [
+      /* @__PURE__ */ jsx("span", { className: "volname", style: { paddingLeft: level * 18 }, children: name }),
+      /* @__PURE__ */ jsx(
         "input",
         {
           className: "num",
@@ -5796,11 +5044,11 @@ function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsSha
           }
         }
       ),
-      /* @__PURE__ */ jsxs2("span", { className: "prov " + prov, children: [
+      /* @__PURE__ */ jsxs("span", { className: "prov " + prov, children: [
         PROV_LABELS[prov] || prov,
         prov === "scaled" ? " \u25B2" : ""
       ] }),
-      /* @__PURE__ */ jsx2(
+      /* @__PURE__ */ jsx(
         "button",
         {
           className: "linkbtn shapecell" + (hasOwnShape ? " set" : ""),
@@ -5811,7 +5059,7 @@ function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsSha
         }
       )
     ] }),
-    shapeOpen ? /* @__PURE__ */ jsx2(ShapeEditor, { model, set, scope, entry, daily: total }) : null
+    shapeOpen ? /* @__PURE__ */ jsx(ShapeEditor, { model, set, scope, entry, daily: total }) : null
   ] });
 }
 function VolumePanel({ model, set, p }) {
@@ -5841,15 +5089,15 @@ function VolumePanel({ model, set, p }) {
     rows.push({ level: 4, name: nameOf(model.channels, leaf.channelId), scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId } });
   }
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Volume" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Type at any row \u2014 the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently." }),
-    rows.length <= 1 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "Assign request types first \u2014 the spine builds itself from them." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("div", { className: "volgrid", "data-testid": "cascade-grid", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "volrow head", children: [
-        /* @__PURE__ */ jsx2("span", { className: "volname", children: "Spine" }),
-        /* @__PURE__ */ jsx2("span", { children: "Daily" }),
-        /* @__PURE__ */ jsx2("span", { children: "Provenance" }),
-        /* @__PURE__ */ jsx2("span", { children: "Shape" })
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Volume" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Type at any row \u2014 the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently." }),
+    rows.length <= 1 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "Assign request types first \u2014 the spine builds itself from them." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("div", { className: "volgrid", "data-testid": "cascade-grid", children: [
+      /* @__PURE__ */ jsxs("div", { className: "volrow head", children: [
+        /* @__PURE__ */ jsx("span", { className: "volname", children: "Spine" }),
+        /* @__PURE__ */ jsx("span", { children: "Daily" }),
+        /* @__PURE__ */ jsx("span", { children: "Provenance" }),
+        /* @__PURE__ */ jsx("span", { children: "Shape" })
       ] }),
       rows.map((r) => {
         const anc = [];
@@ -5860,7 +5108,7 @@ function VolumePanel({ model, set, p }) {
           if (r.scope.requestTypeId) anc.push({ brandId: r.scope.brandId, buId: r.scope.buId, requestTypeId: r.scope.requestTypeId });
           anc.pop();
         }
-        return /* @__PURE__ */ jsx2(
+        return /* @__PURE__ */ jsx(
           VolRow,
           {
             model,
@@ -5876,12 +5124,12 @@ function VolumePanel({ model, set, p }) {
         );
       })
     ] }) }),
-    (p.notes || []).length || uncovered.length ? /* @__PURE__ */ jsxs2("div", { className: "valpanel", "data-testid": "volume-notes", children: [
-      (p.notes || []).map((n, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+    (p.notes || []).length || uncovered.length ? /* @__PURE__ */ jsxs("div", { className: "valpanel", "data-testid": "volume-notes", children: [
+      (p.notes || []).map((n, i) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
         "\u25B2 ",
         n.message || String(n)
       ] }, "n" + i)),
-      uncovered.map((w, i) => /* @__PURE__ */ jsxs2("p", { className: "warnmsg", children: [
+      uncovered.map((w, i) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
         "\u25B2 ",
         w.message
       ] }, "u" + i))
@@ -5949,7 +5197,7 @@ function buildMap(model, p) {
 }
 function MapPanel({ model, p, onJump }) {
   const { ok, errors, warnings } = p.validation;
-  const [selQ, setSelQ] = useState2(null);
+  const [selQ, setSelQ] = useState(null);
   const m = buildMap(model, p);
   const center = (id) => {
     const c = m.pos.get(id);
@@ -5959,9 +5207,9 @@ function MapPanel({ model, p, onJump }) {
     const a = center(e.from), b = center(e.to);
     if (!a || !b) return null;
     const midX = (a.cx + b.cx) / 2, midY = (a.cy + b.cy) / 2;
-    return /* @__PURE__ */ jsxs2("g", { className: dashed ? "medge cap" : "medge flow", children: [
-      /* @__PURE__ */ jsx2("line", { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, strokeDasharray: dashed ? "5 4" : void 0, markerEnd: dashed ? void 0 : "url(#arr)" }),
-      /* @__PURE__ */ jsx2("text", { x: midX, y: midY - 4, children: e.label })
+    return /* @__PURE__ */ jsxs("g", { className: dashed ? "medge cap" : "medge flow", children: [
+      /* @__PURE__ */ jsx("line", { x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, strokeDasharray: dashed ? "5 4" : void 0, markerEnd: dashed ? void 0 : "url(#arr)" }),
+      /* @__PURE__ */ jsx("text", { x: midX, y: midY - 4, children: e.label })
     ] }, (dashed ? "c" : "f") + i);
   };
   const issues = [
@@ -5975,21 +5223,21 @@ function MapPanel({ model, p, onJump }) {
     ...(p.notes || []).map((n) => ({ tone: "warn", message: n.message, tab: "volume", tabName: "Volume" }))
   ];
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Map" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Generated from the model on every view \u2014 flow from process steps, capacity links dashed. Nothing is authored here." }),
-    (model.queues || []).length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx2("div", { className: "scrollx", children: /* @__PURE__ */ jsxs2("svg", { className: "mapsvg", "data-testid": "map-svg", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
-      /* @__PURE__ */ jsx2("defs", { children: /* @__PURE__ */ jsx2("marker", { id: "arr", markerWidth: "8", markerHeight: "8", refX: "7", refY: "3", orient: "auto", children: /* @__PURE__ */ jsx2("path", { d: "M0,0 L7,3 L0,6 z", fill: "var(--ink-3)" }) }) }),
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Map" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Generated from the model on every view \u2014 flow from process steps, capacity links dashed. Nothing is authored here." }),
+    (model.queues || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("svg", { className: "mapsvg", "data-testid": "map-svg", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
+      /* @__PURE__ */ jsx("defs", { children: /* @__PURE__ */ jsx("marker", { id: "arr", markerWidth: "8", markerHeight: "8", refX: "7", refY: "3", orient: "auto", children: /* @__PURE__ */ jsx("path", { d: "M0,0 L7,3 L0,6 z", fill: "var(--ink-3)" }) }) }),
       m.flow.map((e, i) => edge(e, i, false)),
       m.cap.map((e, i) => edge(e, i, true)),
       (model.queues || []).map((q) => {
         const c = m.pos.get(q.id);
         const d = p.queues.get(q.id);
-        return /* @__PURE__ */ jsxs2("g", { className: "mnode" + (selQ === q.id ? " on" : ""), onClick: () => setSelQ(selQ === q.id ? null : q.id), "data-node": q.id, children: [
-          /* @__PURE__ */ jsx2("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
-          /* @__PURE__ */ jsx2("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: q.name.length > 22 ? q.name.slice(0, 21) + "\u2026" : q.name }),
-          /* @__PURE__ */ jsxs2("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
-            fmt2(d ? d.volume : 0),
+        return /* @__PURE__ */ jsxs("g", { className: "mnode" + (selQ === q.id ? " on" : ""), onClick: () => setSelQ(selQ === q.id ? null : q.id), "data-node": q.id, children: [
+          /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
+          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: q.name.length > 22 ? q.name.slice(0, 21) + "\u2026" : q.name }),
+          /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+            fmt(d ? d.volume : 0),
             "/day \xB7 ",
             QTYPE_LABELS[q.type] || q.type
           ] })
@@ -5997,34 +5245,34 @@ function MapPanel({ model, p, onJump }) {
       }),
       m.teams.map((tm) => {
         const c = m.pos.get("team:" + tm.id);
-        return /* @__PURE__ */ jsxs2("g", { className: "mnode team", "data-node": "team:" + tm.id, children: [
-          /* @__PURE__ */ jsx2("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9", strokeDasharray: "5 4" }),
-          /* @__PURE__ */ jsx2("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: tm.name }),
-          /* @__PURE__ */ jsxs2("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+        return /* @__PURE__ */ jsxs("g", { className: "mnode team", "data-node": "team:" + tm.id, children: [
+          /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9", strokeDasharray: "5 4" }),
+          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: tm.name }),
+          /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
             tm.size,
             " FTE shared"
           ] })
         ] }, tm.id);
       })
     ] }) }),
-    selected ? /* @__PURE__ */ jsx2("div", { className: "valpanel", "data-testid": "map-node-detail", children: /* @__PURE__ */ jsxs2("p", { style: { fontSize: 12.5 }, children: [
-      /* @__PURE__ */ jsx2("b", { children: selected.name }),
+    selected ? /* @__PURE__ */ jsx("div", { className: "valpanel", "data-testid": "map-node-detail", children: /* @__PURE__ */ jsxs("p", { style: { fontSize: 12.5 }, children: [
+      /* @__PURE__ */ jsx("b", { children: selected.name }),
       " \xB7 ",
       QTYPE_LABELS[selected.type] || selected.type,
       " \xB7 ",
-      fmt2((p.queues.get(selected.id) || {}).volume || 0),
+      fmt((p.queues.get(selected.id) || {}).volume || 0),
       "/day",
-      /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginLeft: 10 }, onClick: () => onJump && onJump("queues"), children: "Edit in Queues" })
+      /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginLeft: 10 }, onClick: () => onJump && onJump("queues"), children: "Edit in Queues" })
     ] }) }) : null,
-    /* @__PURE__ */ jsxs2("div", { className: "valpanel", "data-testid": "validation-panel", children: [
-      ok && !warnings.length && !(p.notes || []).length ? /* @__PURE__ */ jsx2("p", { className: "okmsg", children: "\u25CF No issues \u2014 every process reaches an end point and every reference resolves." }) : null,
-      issues.map((it, i) => /* @__PURE__ */ jsxs2("p", { className: it.tone === "err" ? "errmsg" : "warnmsg", style: { display: "flex", gap: 8, alignItems: "baseline" }, children: [
-        /* @__PURE__ */ jsxs2("span", { style: { flex: 1 }, children: [
+    /* @__PURE__ */ jsxs("div", { className: "valpanel", "data-testid": "validation-panel", children: [
+      ok && !warnings.length && !(p.notes || []).length ? /* @__PURE__ */ jsx("p", { className: "okmsg", children: "\u25CF No issues \u2014 every process reaches an end point and every reference resolves." }) : null,
+      issues.map((it, i) => /* @__PURE__ */ jsxs("p", { className: it.tone === "err" ? "errmsg" : "warnmsg", style: { display: "flex", gap: 8, alignItems: "baseline" }, children: [
+        /* @__PURE__ */ jsxs("span", { style: { flex: 1 }, children: [
           it.tone === "err" ? "\u2715" : "\u25B2",
           " ",
           it.message
         ] }),
-        /* @__PURE__ */ jsxs2("button", { className: "linkbtn", onClick: () => onJump && onJump(it.tab), children: [
+        /* @__PURE__ */ jsxs("button", { className: "linkbtn", onClick: () => onJump && onJump(it.tab), children: [
           "Fix in ",
           it.tabName,
           " \u2192"
@@ -6034,16 +5282,16 @@ function MapPanel({ model, p, onJump }) {
   ] });
 }
 function G({ name, children }) {
-  return /* @__PURE__ */ jsxs2("section", { className: "fam-sec", children: [
-    /* @__PURE__ */ jsx2("div", { className: "famhead", children: /* @__PURE__ */ jsx2("b", { children: name }) }),
-    /* @__PURE__ */ jsx2("div", { className: "fields", children })
+  return /* @__PURE__ */ jsxs("section", { className: "fam-sec", children: [
+    /* @__PURE__ */ jsx("div", { className: "famhead", children: /* @__PURE__ */ jsx("b", { children: name }) }),
+    /* @__PURE__ */ jsx("div", { className: "fields", children })
   ] });
 }
 function DefaultsPanel({ model, set }) {
   const ec = model.engineConfig;
-  if (!ec) return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Defaults" }),
-    /* @__PURE__ */ jsx2("p", { className: "warnmsg", children: "\u25B2 No engine defaults attached \u2014 import a model or start from the sample." })
+  if (!ec) return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Defaults" }),
+    /* @__PURE__ */ jsx("p", { className: "warnmsg", children: "\u25B2 No engine defaults attached \u2014 import a model or start from the sample." })
   ] });
   const eng = ec.engine || {}, hiring = ec.hiring || {}, costs = ec.costs || {}, cx = ec.cx || {};
   const ot = (ec.settings || {}).ot || { maxDailyHours: 2, weeklyCeiling: 10, premium: 1.5, burnoutLoad: 10 };
@@ -6060,76 +5308,77 @@ function DefaultsPanel({ model, set }) {
     set(m);
   };
   const presetName = Object.keys(import_engine.SEASONAL_PRESETS).find((k) => JSON.stringify(import_engine.SEASONAL_PRESETS[k]) === JSON.stringify(season.system)) || "";
-  return /* @__PURE__ */ jsxs2(Fragment2, { children: [
-    /* @__PURE__ */ jsx2("h3", { children: "Defaults" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues." }),
-    /* @__PURE__ */ jsxs2(G, { name: "Simulation frame", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Horizon (weeks)", value: eng.horizonWeeks, onChange: (v) => updEC("engine", { horizonWeeks: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Day start (h)", value: eng.dayStart, onChange: (v) => updEC("engine", { dayStart: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Day end (h)", value: eng.dayEnd, onChange: (v) => updEC("engine", { dayEnd: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Interval (min)", value: eng.intervalMin, onChange: (v) => updEC("engine", { intervalMin: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Days per week", value: eng.daysPerWeek, onChange: (v) => updEC("engine", { daysPerWeek: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Hours per FTE day", value: eng.hoursPerFteDay, onChange: (v) => updEC("engine", { hoursPerFteDay: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Days worked per FTE", value: eng.daysWorkedPerFte, onChange: (v) => updEC("engine", { daysWorkedPerFte: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eng.occupancyCeiling || 0.85) * 100), onChange: (v) => updEC("engine", { occupancyCeiling: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Cross-skill proficiency (%)", value: Math.round((eng.crossSkillProficiency || 0.9) * 100), onChange: (v) => updEC("engine", { crossSkillProficiency: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-        /* @__PURE__ */ jsx2("label", { children: "Currency" }),
-        /* @__PURE__ */ jsx2("input", { value: eng.currency || "\xA3", "aria-label": "Currency", onChange: (e) => updEC("engine", { currency: e.target.value }) })
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("h3", { children: "Defaults" }),
+    /* @__PURE__ */ jsx("p", { className: "hint", children: "Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues." }),
+    /* @__PURE__ */ jsxs(G, { name: "Simulation frame", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Horizon (weeks)", value: eng.horizonWeeks, onChange: (v) => updEC("engine", { horizonWeeks: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Day start (h)", value: eng.dayStart, onChange: (v) => updEC("engine", { dayStart: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Day end (h)", value: eng.dayEnd, onChange: (v) => updEC("engine", { dayEnd: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Interval (min)", value: eng.intervalMin, onChange: (v) => updEC("engine", { intervalMin: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Days per week", value: eng.daysPerWeek, onChange: (v) => updEC("engine", { daysPerWeek: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Hours per FTE day", value: eng.hoursPerFteDay, onChange: (v) => updEC("engine", { hoursPerFteDay: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Days worked per FTE", value: eng.daysWorkedPerFte, onChange: (v) => updEC("engine", { daysWorkedPerFte: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eng.occupancyCeiling || 0.85) * 100), onChange: (v) => updEC("engine", { occupancyCeiling: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Cross-skill proficiency (%)", value: Math.round((eng.crossSkillProficiency || 0.9) * 100), onChange: (v) => updEC("engine", { crossSkillProficiency: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsxs("div", { className: "field", children: [
+        /* @__PURE__ */ jsx("label", { children: "Currency" }),
+        /* @__PURE__ */ jsx("input", { value: eng.currency || "\xA3", "aria-label": "Currency", onChange: (e) => updEC("engine", { currency: e.target.value }) })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs2(G, { name: "Workforce policy", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Hiring cap (/wk)", value: hiring.cap, onChange: (v) => updEC("hiring", { cap: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Hiring buffer (%)", value: Math.round((hiring.buffer || 0) * 100), onChange: (v) => updEC("hiring", { buffer: n0(v) / 100 }) })
+    /* @__PURE__ */ jsxs(G, { name: "Workforce policy", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Hiring cap (/wk)", value: hiring.cap, onChange: (v) => updEC("hiring", { cap: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Hiring buffer (%)", value: Math.round((hiring.buffer || 0) * 100), onChange: (v) => updEC("hiring", { buffer: n0(v) / 100 }) })
     ] }),
-    /* @__PURE__ */ jsxs2(G, { name: "Overtime", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Max OT (h/day)", value: ot.maxDailyHours, onChange: (v) => updOt({ maxDailyHours: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "OT ceiling (h/wk)", value: ot.weeklyCeiling, onChange: (v) => updOt({ weeklyCeiling: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "OT premium (\xD7)", value: ot.premium, onChange: (v) => updOt({ premium: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "OT burnout load", value: ot.burnoutLoad, onChange: (v) => updOt({ burnoutLoad: n0(v) }) })
+    /* @__PURE__ */ jsxs(G, { name: "Overtime", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Max OT (h/day)", value: ot.maxDailyHours, onChange: (v) => updOt({ maxDailyHours: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "OT ceiling (h/wk)", value: ot.weeklyCeiling, onChange: (v) => updOt({ weeklyCeiling: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "OT premium (\xD7)", value: ot.premium, onChange: (v) => updOt({ premium: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "OT burnout load", value: ot.burnoutLoad, onChange: (v) => updOt({ burnoutLoad: n0(v) }) })
     ] }),
-    /* @__PURE__ */ jsxs2(G, { name: "Cost model", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Manager cost (\xA3/yr)", value: costs.managerCost, onChange: (v) => updEC("costs", { managerCost: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Manager ratio (1:n)", value: costs.managerRatio, onChange: (v) => updEC("costs", { managerRatio: n0(v) }) })
+    /* @__PURE__ */ jsxs(G, { name: "Cost model", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Manager cost (\xA3/yr)", value: costs.managerCost, onChange: (v) => updEC("costs", { managerCost: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Manager ratio (1:n)", value: costs.managerRatio, onChange: (v) => updEC("costs", { managerRatio: n0(v) }) })
     ] }),
-    /* @__PURE__ */ jsxs2(G, { name: "Customer behaviour", children: [
-      /* @__PURE__ */ jsx2(NumF, { label: "Customer base", value: cx.customerBase, onChange: (v) => updEC("cx", { customerBase: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Cost per lost customer (\xA3)", value: cx.costPerLostCustomer, onChange: (v) => updEC("cx", { costPerLostCustomer: n0(v) }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Churn on abandon (%)", value: Math.round((cx.churnAbandon || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnAbandon: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Churn on long wait (%)", value: Math.round((cx.churnWait || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnWait: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Churn on digital miss (%)", value: Math.round((cx.churnDigital || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnDigital: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Repeat uplift (\xD7)", value: cx.repeatUplift, onChange: (v) => updEC("cx", { repeatUplift: n0(v) }) })
+    /* @__PURE__ */ jsxs(G, { name: "Customer behaviour", children: [
+      /* @__PURE__ */ jsx(NumF, { label: "Customer base", value: cx.customerBase, onChange: (v) => updEC("cx", { customerBase: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Cost per lost customer (\xA3)", value: cx.costPerLostCustomer, onChange: (v) => updEC("cx", { costPerLostCustomer: n0(v) }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Churn on abandon (%)", value: Math.round((cx.churnAbandon || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnAbandon: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Churn on long wait (%)", value: Math.round((cx.churnWait || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnWait: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Churn on digital miss (%)", value: Math.round((cx.churnDigital || 0) * 1e3) / 10, onChange: (v) => updEC("cx", { churnDigital: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx(NumF, { label: "Repeat uplift (\xD7)", value: cx.repeatUplift, onChange: (v) => updEC("cx", { repeatUplift: n0(v) }) })
     ] }),
-    /* @__PURE__ */ jsxs2(G, { name: "Pattern libraries", children: [
-      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
-        /* @__PURE__ */ jsx2("label", { children: "System seasonality" }),
-        /* @__PURE__ */ jsxs2("select", { value: presetName, "aria-label": "System seasonality", onChange: (e) => {
+    /* @__PURE__ */ jsxs(G, { name: "Pattern libraries", children: [
+      /* @__PURE__ */ jsxs("div", { className: "field", children: [
+        /* @__PURE__ */ jsx("label", { children: "System seasonality" }),
+        /* @__PURE__ */ jsxs("select", { value: presetName, "aria-label": "System seasonality", onChange: (e) => {
           const nm = e.target.value;
           if (nm) updEC("seasonality", { system: [...import_engine.SEASONAL_PRESETS[nm]] });
         }, children: [
-          presetName === "" ? /* @__PURE__ */ jsx2("option", { value: "", children: "custom" }) : null,
-          Object.keys(import_engine.SEASONAL_PRESETS).map((k) => /* @__PURE__ */ jsx2("option", { value: k, children: k }, k))
+          presetName === "" ? /* @__PURE__ */ jsx("option", { value: "", children: "custom" }) : null,
+          Object.keys(import_engine.SEASONAL_PRESETS).map((k) => /* @__PURE__ */ jsx("option", { value: k, children: k }, k))
         ] })
       ] }),
-      /* @__PURE__ */ jsx2(NumF, { label: "Season start month (0\u201311)", value: season.startMonth, onChange: (v) => updEC("seasonality", { startMonth: n0(v) }) }),
-      /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
-        /* @__PURE__ */ jsx2("label", { children: "Presets" }),
-        /* @__PURE__ */ jsx2("p", { className: "hint", children: "The same library powers the shape chips on the Volume tab." })
+      /* @__PURE__ */ jsx(NumF, { label: "Season start month (0\u201311)", value: season.startMonth, onChange: (v) => updEC("seasonality", { startMonth: n0(v) }) }),
+      /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
+        /* @__PURE__ */ jsx("label", { children: "Presets" }),
+        /* @__PURE__ */ jsx("p", { className: "hint", children: "The same library powers the shape chips on the Volume tab." })
       ] })
     ] })
   ] });
 }
 
 // ui/v2/LeversPage.jsx
-import { useState as useState5, useMemo as useMemo4, Fragment as Fragment3 } from "react";
+import { useState as useState4, useMemo as useMemo3, Fragment as Fragment2 } from "react";
 
 // ui/v2/compute.js
 var import_adapter = __toESM(require_adapter());
+var import_bridge2 = __toESM(require_bridge());
 var import_engine3 = __toESM(require_engine());
 
 // ui/sim-set.js
 var import_engine2 = __toESM(require_engine());
-import { useRef, useState as useState3, useEffect, useMemo as useMemo3 } from "react";
+import { useRef, useState as useState2, useEffect, useMemo as useMemo2 } from "react";
 
 // ui/views.js
 var STRATEGIES = [
@@ -6171,6 +5420,7 @@ function bestCell(matrix) {
 }
 
 // ui/v2/compute.js
+var toEngineCfg = (model) => model && model.requestTypes && model.volumeEntries ? (0, import_bridge2.domainToEngineConfig)(model) : (0, import_adapter.v2ToEngineConfig)(model);
 function richMatrix(cfg) {
   const groups = cfg.groups || [];
   const strategies = strategyList(cfg);
@@ -6204,7 +5454,7 @@ function richMatrix(cfg) {
   return { cells };
 }
 function computeBase(model) {
-  const cfg = (0, import_adapter.v2ToEngineConfig)(model);
+  const cfg = toEngineCfg(model);
   const matrix = richMatrix(cfg);
   const strategies = strategyList(cfg);
   const groups = (cfg.groups || []).map((g) => ({ id: g.id, name: g.name }));
@@ -6219,7 +5469,7 @@ function pickSelection(selected, base) {
   return normalizeSel(selected, base.matrix, base.groups, base.strategies);
 }
 function quickHeadline(model) {
-  const cfg = (0, import_adapter.v2ToEngineConfig)(model);
+  const cfg = toEngineCfg(model);
   const sim = (0, import_engine3.simulate)(cfg, { strategy: "S1" });
   const w = sim.weeks;
   const lastWk = w[w.length - 1];
@@ -6246,10 +5496,10 @@ function normalizeSel(selected, matrix, groups, strategies) {
 }
 
 // ui/v2/hooks.js
-import { useState as useState4, useEffect as useEffect2, useRef as useRef2 } from "react";
+import { useState as useState3, useEffect as useEffect2, useRef as useRef2 } from "react";
 function useDeferred(input, compute) {
-  const [value, setValue] = useState4(() => compute(input));
-  const [pending, setPending] = useState4(false);
+  const [value, setValue] = useState3(() => compute(input));
+  const [pending, setPending] = useState3(false);
   const seen = useRef2(input);
   useEffect2(() => {
     if (input === seen.current) return;
@@ -6265,63 +5515,63 @@ function useDeferred(input, compute) {
 }
 
 // ui/v2/LeversPage.jsx
-import { Fragment as Fragment4, jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 var fmtM = (n) => "\xA3" + (n / 1e6).toFixed(1) + "m";
 var pct = (n) => Math.round(n * 100) + "%";
 var GLYPH = { ok: "\u25CF", warn: "\u25B2", bad: "\u2715" };
-var NAV3 = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
+var NAV2 = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 function LeversPage({ model, onModelChange, onNav = () => {
 }, selected: selProp, onSelectedChange }) {
   const { value: base, pending } = useDeferred(model, computeBase);
-  const [weight, setWeight] = useState5(50);
-  const [localSel, setLocalSel] = useState5(null);
+  const [weight, setWeight] = useState4(50);
+  const [localSel, setLocalSel] = useState4(null);
   const sel = selProp !== void 0 ? selProp : localSel;
   const setSel = onSelectedChange || setLocalSel;
-  const best = useMemo4(() => bestUnderWeight(base, weight / 100), [base, weight]);
+  const best = useMemo3(() => bestUnderWeight(base, weight / 100), [base, weight]);
   const cfg = base.cfg;
   const set = onModelChange;
-  return /* @__PURE__ */ jsxs3("div", { className: "shell", children: [
-    /* @__PURE__ */ jsxs3("header", { className: "top", children: [
-      /* @__PURE__ */ jsxs3("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx3("div", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsxs3("div", { children: [
-          /* @__PURE__ */ jsx3("h1", { children: cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation" }),
-          /* @__PURE__ */ jsx3("small", { children: "Capacity Simulator" })
+  return /* @__PURE__ */ jsxs2("div", { className: "shell", children: [
+    /* @__PURE__ */ jsxs2("header", { className: "top", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "brand", children: [
+        /* @__PURE__ */ jsx2("div", { className: "mark", children: "C" }),
+        /* @__PURE__ */ jsxs2("div", { children: [
+          /* @__PURE__ */ jsx2("h1", { children: cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation" }),
+          /* @__PURE__ */ jsx2("small", { children: "Capacity Simulator" })
         ] })
       ] }),
-      /* @__PURE__ */ jsx3("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV3.map(([k, label]) => /* @__PURE__ */ jsx3("button", { role: "tab", className: k === "levers" ? "on" : "", "aria-selected": k === "levers", onClick: () => onNav(k), children: label }, k)) })
+      /* @__PURE__ */ jsx2("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV2.map(([k, label]) => /* @__PURE__ */ jsx2("button", { role: "tab", className: k === "levers" ? "on" : "", "aria-selected": k === "levers", onClick: () => onNav(k), children: label }, k)) })
     ] }),
-    /* @__PURE__ */ jsx3("h2", { style: { marginBottom: 14 }, children: "Levers" }),
-    /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
-      /* @__PURE__ */ jsxs3("h3", { children: [
+    /* @__PURE__ */ jsx2("h2", { style: { marginBottom: 14 }, children: "Levers" }),
+    /* @__PURE__ */ jsxs2("div", { className: "panel", children: [
+      /* @__PURE__ */ jsxs2("h3", { children: [
         "Decision matrix ",
-        /* @__PURE__ */ jsx3("small", { children: pending ? "recalculating\u2026" : "every scenario group \xD7 every strategy" })
+        /* @__PURE__ */ jsx2("small", { children: pending ? "recalculating\u2026" : "every scenario group \xD7 every strategy" })
       ] }),
-      /* @__PURE__ */ jsxs3("div", { className: "weight", children: [
-        /* @__PURE__ */ jsx3("label", { children: "Lowest cost" }),
-        /* @__PURE__ */ jsx3("input", { type: "range", min: "0", max: "100", value: weight, onChange: (e) => setWeight(+e.target.value), "aria-label": "cost versus service weighting" }),
-        /* @__PURE__ */ jsx3("label", { children: "Best service" })
+      /* @__PURE__ */ jsxs2("div", { className: "weight", children: [
+        /* @__PURE__ */ jsx2("label", { children: "Lowest cost" }),
+        /* @__PURE__ */ jsx2("input", { type: "range", min: "0", max: "100", value: weight, onChange: (e) => setWeight(+e.target.value), "aria-label": "cost versus service weighting" }),
+        /* @__PURE__ */ jsx2("label", { children: "Best service" })
       ] }),
-      /* @__PURE__ */ jsx3("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs3("table", { className: "mx", children: [
-        /* @__PURE__ */ jsx3("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-          /* @__PURE__ */ jsx3("th", { className: "rh", "aria-hidden": "true" }),
-          base.strategies.map((s) => /* @__PURE__ */ jsx3("th", { children: s.name }, s.id))
+      /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs2("table", { className: "mx", children: [
+        /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { children: [
+          /* @__PURE__ */ jsx2("th", { className: "rh", "aria-hidden": "true" }),
+          base.strategies.map((s) => /* @__PURE__ */ jsx2("th", { children: s.name }, s.id))
         ] }) }),
-        /* @__PURE__ */ jsx3("tbody", { children: base.groups.map((g) => /* @__PURE__ */ jsxs3("tr", { children: [
-          /* @__PURE__ */ jsx3("th", { className: "rh", children: g.name }),
+        /* @__PURE__ */ jsx2("tbody", { children: base.groups.map((g) => /* @__PURE__ */ jsxs2("tr", { children: [
+          /* @__PURE__ */ jsx2("th", { className: "rh", children: g.name }),
           base.strategies.map((s) => {
             const c = base.matrix.cells[g.id][s.id];
             const flag = c.redWeeks === 0 ? "ok" : c.redWeeks <= 2 ? "warn" : "bad";
             const isSel = sel && sel.gid === g.id && sel.sid === s.id;
             const isBest = best && best.gid === g.id && best.sid === s.id;
-            return /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsxs3("button", { className: "cell" + (isSel ? " sel" : ""), onClick: () => setSel({ gid: g.id, sid: s.id }), "aria-label": `${g.name} \xD7 ${s.name}`, children: [
-              isBest ? /* @__PURE__ */ jsx3("span", { className: "best", children: "Best fit" }) : null,
-              /* @__PURE__ */ jsx3("div", { className: "c1 num", children: fmtM(c.allIn) }),
-              /* @__PURE__ */ jsxs3("div", { className: "c2 num", children: [
+            return /* @__PURE__ */ jsx2("td", { children: /* @__PURE__ */ jsxs2("button", { className: "cell" + (isSel ? " sel" : ""), onClick: () => setSel({ gid: g.id, sid: s.id }), "aria-label": `${g.name} \xD7 ${s.name}`, children: [
+              isBest ? /* @__PURE__ */ jsx2("span", { className: "best", children: "Best fit" }) : null,
+              /* @__PURE__ */ jsx2("div", { className: "c1 num", children: fmtM(c.allIn) }),
+              /* @__PURE__ */ jsxs2("div", { className: "c2 num", children: [
                 pct(c.sla),
                 " SLA"
               ] }),
-              /* @__PURE__ */ jsxs3("div", { className: "c3 " + flag, children: [
+              /* @__PURE__ */ jsxs2("div", { className: "c3 " + flag, children: [
                 GLYPH[flag],
                 " ",
                 c.redWeeks,
@@ -6331,39 +5581,39 @@ function LeversPage({ model, onModelChange, onNav = () => {
           })
         ] }, g.id)) })
       ] }) }),
-      /* @__PURE__ */ jsxs3("p", { className: "mxnote", children: [
+      /* @__PURE__ */ jsxs2("p", { className: "mxnote", children: [
         "Tap a cell to make that pair the live context on every tab. Badge = best fit under your weighting.",
-        sel && base.strategies.find((s) => s.id === sel.sid) ? /* @__PURE__ */ jsxs3(Fragment4, { children: [
+        sel && base.strategies.find((s) => s.id === sel.sid) ? /* @__PURE__ */ jsxs2(Fragment3, { children: [
           " Selected: ",
-          /* @__PURE__ */ jsxs3("b", { children: [
+          /* @__PURE__ */ jsxs2("b", { children: [
             base.strategies.find((s) => s.id === sel.sid).name,
             " \xD7 ",
             base.groups.find((g) => g.id === sel.gid).name
           ] }),
           ". ",
-          /* @__PURE__ */ jsx3("button", { className: "link", style: { background: "none", border: "none", color: "var(--blue)", font: "inherit", cursor: "pointer", padding: 0, fontWeight: 600 }, onClick: () => onNav("results"), children: "Review in Results \u2192" })
+          /* @__PURE__ */ jsx2("button", { className: "link", style: { background: "none", border: "none", color: "var(--blue)", font: "inherit", cursor: "pointer", padding: 0, fontWeight: 600 }, onClick: () => onNav("results"), children: "Review in Results \u2192" })
         ] }) : null
       ] })
     ] }),
-    /* @__PURE__ */ jsxs3("div", { className: "cols", children: [
-      /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
-        /* @__PURE__ */ jsxs3("h3", { children: [
+    /* @__PURE__ */ jsxs2("div", { className: "cols", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "panel", children: [
+        /* @__PURE__ */ jsxs2("h3", { children: [
           "Strategies ",
-          /* @__PURE__ */ jsx3("small", { children: "what we could do" })
+          /* @__PURE__ */ jsx2("small", { children: "what we could do" })
         ] }),
-        /* @__PURE__ */ jsx3("div", { className: "cardlist", children: base.strategies.map((s) => /* @__PURE__ */ jsx3(StrategyCard, { s, cfg, model, set }, s.id)) })
+        /* @__PURE__ */ jsx2("div", { className: "cardlist", children: base.strategies.map((s) => /* @__PURE__ */ jsx2(StrategyCard, { s, cfg, model, set }, s.id)) })
       ] }),
-      /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
-        /* @__PURE__ */ jsxs3("h3", { children: [
+      /* @__PURE__ */ jsxs2("div", { className: "panel", children: [
+        /* @__PURE__ */ jsxs2("h3", { children: [
           "Scenario groups ",
-          /* @__PURE__ */ jsx3("small", { children: "what could happen" })
+          /* @__PURE__ */ jsx2("small", { children: "what could happen" })
         ] }),
-        /* @__PURE__ */ jsx3("div", { className: "cardlist", children: base.groups.map((g) => /* @__PURE__ */ jsx3(GroupCard, { g, cfg }, g.id)) })
+        /* @__PURE__ */ jsx2("div", { className: "cardlist", children: base.groups.map((g) => /* @__PURE__ */ jsx2(GroupCard, { g, cfg }, g.id)) })
       ] })
     ] }),
-    /* @__PURE__ */ jsx3(HiringCaps, { cfg, model, set }),
-    /* @__PURE__ */ jsxs3("p", { className: "note", children: [
-      /* @__PURE__ */ jsx3("b", { children: "Design notes:" }),
+    /* @__PURE__ */ jsx2(HiringCaps, { cfg, model, set }),
+    /* @__PURE__ */ jsxs2("p", { className: "note", children: [
+      /* @__PURE__ */ jsx2("b", { children: "Design notes:" }),
       " strategies and scenarios flank the matrix they feed \xB7 each cell = cost (amber) + SLA (teal) + red weeks (glyph) \xB7 Best fit follows the cost\u2194service slider \xB7 cell tap sets live context \xB7 caps live here (a lever, not a setting)."
     ] })
   ] });
@@ -6375,21 +5625,21 @@ var BLURB = {
   manual: "Your per-queue hires exactly as entered; ignores the cap."
 };
 function StrategyCard({ s, cfg, model, set }) {
-  const [open, setOpen] = useState5(false);
+  const [open, setOpen] = useState4(false);
   const buffer = Math.round((cfg.hiring.buffer || 0) * 100);
-  const grouped = groupQueues2(cfg);
-  return /* @__PURE__ */ jsxs3("div", { className: "scard" + (open ? " open" : ""), children: [
-    /* @__PURE__ */ jsxs3("button", { className: "schead", onClick: () => setOpen((o) => !o), children: [
-      /* @__PURE__ */ jsxs3("span", { children: [
-        /* @__PURE__ */ jsx3("b", { children: s.name }),
+  const grouped = groupQueues(cfg);
+  return /* @__PURE__ */ jsxs2("div", { className: "scard" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs2("button", { className: "schead", onClick: () => setOpen((o) => !o), children: [
+      /* @__PURE__ */ jsxs2("span", { children: [
+        /* @__PURE__ */ jsx2("b", { children: s.name }),
         " ",
-        /* @__PURE__ */ jsx3("span", { className: "pill builtin", children: "built-in" }),
-        /* @__PURE__ */ jsx3("br", {}),
-        /* @__PURE__ */ jsx3("span", { className: "desc", children: BLURB[s.baseType] || "" })
+        /* @__PURE__ */ jsx2("span", { className: "pill builtin", children: "built-in" }),
+        /* @__PURE__ */ jsx2("br", {}),
+        /* @__PURE__ */ jsx2("span", { className: "desc", children: BLURB[s.baseType] || "" })
       ] }),
-      s.baseType === "buffer" ? /* @__PURE__ */ jsxs3("span", { className: "param", onClick: (e) => e.stopPropagation(), children: [
+      s.baseType === "buffer" ? /* @__PURE__ */ jsxs2("span", { className: "param", onClick: (e) => e.stopPropagation(), children: [
         "Buffer ",
-        /* @__PURE__ */ jsx3(
+        /* @__PURE__ */ jsx2(
           "input",
           {
             className: "num",
@@ -6400,9 +5650,9 @@ function StrategyCard({ s, cfg, model, set }) {
           }
         ),
         " %"
-      ] }) : s.baseType === "backfill" ? /* @__PURE__ */ jsxs3("span", { className: "param", onClick: (e) => e.stopPropagation(), children: [
+      ] }) : s.baseType === "backfill" ? /* @__PURE__ */ jsxs2("span", { className: "param", onClick: (e) => e.stopPropagation(), children: [
         "Look-ahead ",
-        /* @__PURE__ */ jsx3(
+        /* @__PURE__ */ jsx2(
           "input",
           {
             className: "num",
@@ -6414,51 +5664,51 @@ function StrategyCard({ s, cfg, model, set }) {
         ),
         " mo"
       ] }) : null,
-      /* @__PURE__ */ jsx3("span", { className: "chev", children: "\u25BC" })
+      /* @__PURE__ */ jsx2("span", { className: "chev", children: "\u25BC" })
     ] }),
-    /* @__PURE__ */ jsx3("div", { className: "scbody", children: grouped.map((grp) => /* @__PURE__ */ jsxs3(Fragment3, { children: [
-      /* @__PURE__ */ jsx3("div", { className: "grph", children: /* @__PURE__ */ jsx3("span", { className: "path", children: grp.label }) }),
-      grp.queues.map((q) => /* @__PURE__ */ jsxs3("div", { className: "qtoggle", children: [
-        /* @__PURE__ */ jsx3("span", { children: q.name }),
-        /* @__PURE__ */ jsx3("b", { children: "included" })
+    /* @__PURE__ */ jsx2("div", { className: "scbody", children: grouped.map((grp) => /* @__PURE__ */ jsxs2(Fragment2, { children: [
+      /* @__PURE__ */ jsx2("div", { className: "grph", children: /* @__PURE__ */ jsx2("span", { className: "path", children: grp.label }) }),
+      grp.queues.map((q) => /* @__PURE__ */ jsxs2("div", { className: "qtoggle", children: [
+        /* @__PURE__ */ jsx2("span", { children: q.name }),
+        /* @__PURE__ */ jsx2("b", { children: "included" })
       ] }, q.id))
     ] }, grp.key)) })
   ] });
 }
 function GroupCard({ g, cfg }) {
-  const [open, setOpen] = useState5(false);
+  const [open, setOpen] = useState4(false);
   const ids = groupScenarioIdsLocal(cfg, g.id);
   const factors = (cfg.scenarios || []).filter((s) => ids.includes(s.id));
-  return /* @__PURE__ */ jsxs3("div", { className: "scard" + (open ? " open" : ""), children: [
-    /* @__PURE__ */ jsxs3("button", { className: "schead", onClick: () => setOpen((o) => !o), children: [
-      /* @__PURE__ */ jsxs3("span", { children: [
-        /* @__PURE__ */ jsx3("b", { children: g.name }),
+  return /* @__PURE__ */ jsxs2("div", { className: "scard" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs2("button", { className: "schead", onClick: () => setOpen((o) => !o), children: [
+      /* @__PURE__ */ jsxs2("span", { children: [
+        /* @__PURE__ */ jsx2("b", { children: g.name }),
         " ",
-        /* @__PURE__ */ jsx3("span", { className: "pill builtin", children: "built-in" }),
+        /* @__PURE__ */ jsx2("span", { className: "pill builtin", children: "built-in" }),
         " ",
-        /* @__PURE__ */ jsx3("span", { className: "pill", children: g.id === "g_none" ? "reference" : "all services" }),
-        /* @__PURE__ */ jsx3("br", {}),
-        /* @__PURE__ */ jsxs3("span", { className: "desc", children: [
+        /* @__PURE__ */ jsx2("span", { className: "pill", children: g.id === "g_none" ? "reference" : "all services" }),
+        /* @__PURE__ */ jsx2("br", {}),
+        /* @__PURE__ */ jsxs2("span", { className: "desc", children: [
           factors.length,
           " factor",
           factors.length === 1 ? "" : "s",
           " in force"
         ] })
       ] }),
-      /* @__PURE__ */ jsx3("span", { className: "chev", children: "\u25BC" })
+      /* @__PURE__ */ jsx2("span", { className: "chev", children: "\u25BC" })
     ] }),
-    /* @__PURE__ */ jsx3("div", { className: "scbody", children: factors.length ? factors.map((f) => /* @__PURE__ */ jsxs3(Fragment3, { children: [
-      /* @__PURE__ */ jsxs3("div", { className: "grph", children: [
+    /* @__PURE__ */ jsx2("div", { className: "scbody", children: factors.length ? factors.map((f) => /* @__PURE__ */ jsxs2(Fragment2, { children: [
+      /* @__PURE__ */ jsxs2("div", { className: "grph", children: [
         f.name,
         " \xB7 from week ",
         (f.startWeek || 0) + 1
       ] }),
-      /* @__PURE__ */ jsx3("div", { className: "tl", children: Array.from({ length: 13 }, (_, i) => {
+      /* @__PURE__ */ jsx2("div", { className: "tl", children: Array.from({ length: 13 }, (_, i) => {
         const wk = i * 4;
         const on = wk >= (f.startWeek || 0);
-        return /* @__PURE__ */ jsx3("span", { className: on ? "on" : "" }, i);
+        return /* @__PURE__ */ jsx2("span", { className: on ? "on" : "" }, i);
       }) })
-    ] }, f.id)) : /* @__PURE__ */ jsx3("span", { children: "Empty by design \u2014 every delta is measured against this." }) })
+    ] }, f.id)) : /* @__PURE__ */ jsx2("span", { children: "Empty by design \u2014 every delta is measured against this." }) })
   ] });
 }
 function HiringCaps({ cfg, model, set }) {
@@ -6470,19 +5720,19 @@ function HiringCaps({ cfg, model, set }) {
     return v != null ? v : "";
   };
   const total = caps.total != null ? caps.total : cfg.hiring.cap;
-  return /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
-    /* @__PURE__ */ jsxs3("h3", { children: [
+  return /* @__PURE__ */ jsxs2("div", { className: "panel", children: [
+    /* @__PURE__ */ jsxs2("h3", { children: [
       "Hiring caps ",
-      /* @__PURE__ */ jsx3("small", { children: "brand \xD7 channel \xB7 effective limit = tightest of segment, brand and total" })
+      /* @__PURE__ */ jsx2("small", { children: "brand \xD7 channel \xB7 effective limit = tightest of segment, brand and total" })
     ] }),
-    /* @__PURE__ */ jsx3("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs3("table", { className: "caps", children: [
-      /* @__PURE__ */ jsx3("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
-        /* @__PURE__ */ jsx3("th", { children: "Brand" }),
-        channels.map((ch) => /* @__PURE__ */ jsx3("th", { style: { textTransform: "capitalize" }, children: ch }, ch))
+    /* @__PURE__ */ jsx2("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs2("table", { className: "caps", children: [
+      /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { children: [
+        /* @__PURE__ */ jsx2("th", { children: "Brand" }),
+        channels.map((ch) => /* @__PURE__ */ jsx2("th", { style: { textTransform: "capitalize" }, children: ch }, ch))
       ] }) }),
-      /* @__PURE__ */ jsx3("tbody", { children: brands.map((b) => /* @__PURE__ */ jsxs3("tr", { children: [
-        /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsx3("b", { children: b.name }) }),
-        channels.map((ch) => /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsx3(
+      /* @__PURE__ */ jsx2("tbody", { children: brands.map((b) => /* @__PURE__ */ jsxs2("tr", { children: [
+        /* @__PURE__ */ jsx2("td", { children: /* @__PURE__ */ jsx2("b", { children: b.name }) }),
+        channels.map((ch) => /* @__PURE__ */ jsx2("td", { children: /* @__PURE__ */ jsx2(
           "input",
           {
             className: "num",
@@ -6494,9 +5744,9 @@ function HiringCaps({ cfg, model, set }) {
         ) }, ch))
       ] }, b.id)) })
     ] }) }),
-    /* @__PURE__ */ jsxs3("p", { className: "hint", style: { marginTop: 8 }, children: [
+    /* @__PURE__ */ jsxs2("p", { className: "hint", style: { marginTop: 8 }, children: [
       "Total ceiling ",
-      /* @__PURE__ */ jsx3(
+      /* @__PURE__ */ jsx2(
         "input",
         {
           className: "num",
@@ -6510,7 +5760,7 @@ function HiringCaps({ cfg, model, set }) {
     ] })
   ] });
 }
-function groupQueues2(cfg) {
+function groupQueues(cfg) {
   const groups = /* @__PURE__ */ new Map();
   for (const q of cfg.queues) {
     const brand = (cfg.brands || []).find((b) => b.id === q.brandId);
@@ -6547,61 +5797,61 @@ function bestUnderWeight(base, w) {
 }
 
 // ui/v2/ResultsPage.jsx
-import { useState as useState6, useMemo as useMemo5, useEffect as useEffect3, useRef as useRef3, useCallback as useCallback2, Fragment as Fragment5 } from "react";
-import { Fragment as Fragment6, jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+import { useState as useState5, useMemo as useMemo4, useEffect as useEffect3, useRef as useRef3, useCallback, Fragment as Fragment4 } from "react";
+import { Fragment as Fragment5, jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 var fmtGBP = (n) => "\xA3" + Math.round(n).toLocaleString("en-GB");
 var fmtM2 = (n) => "\xA3" + (n / 1e6).toFixed(1) + "m";
 var fmtN = (n) => Math.round(n).toLocaleString("en-GB");
 var pct2 = (n) => Math.round(n * 100) + "%";
 var RC = { green: "g", amber: "a", red: "r" };
 var GLYPH2 = { green: "\u25CF", amber: "\u25B2", red: "\u2715", g: "\u25CF", a: "\u25B2", r: "\u2715" };
-var NAV4 = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
+var NAV3 = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 function ResultsPage({ model, onNav = () => {
 }, selected: selProp, onSelectedChange }) {
   const { value: base, pending } = useDeferred(model, computeBase);
-  const [localSel, setLocalSel] = useState6(null);
+  const [localSel, setLocalSel] = useState5(null);
   const selected = selProp !== void 0 ? selProp : localSel;
   const setSelected = onSelectedChange || setLocalSel;
-  const sel = useMemo5(() => pickSelection(selected, base), [selected, base]);
-  const { detail, summary } = useMemo5(() => computeDetail(base.cfg, sel), [base, sel]);
+  const sel = useMemo4(() => pickSelection(selected, base), [selected, base]);
+  const { detail, summary } = useMemo4(() => computeDetail(base.cfg, sel), [base, sel]);
   const weeks = detail.weeks;
   const cfg = base.cfg;
-  const [lens, setLens] = useState6(0);
-  const [week, setWeek] = useState6(0);
-  const [weight, setWeight] = useState6(50);
-  const scrub = useCallback2((w) => setWeek((prev) => {
+  const [lens, setLens] = useState5(0);
+  const [week, setWeek] = useState5(0);
+  const [weight, setWeight] = useState5(50);
+  const scrub = useCallback((w) => setWeek((prev) => {
     const next = typeof w === "function" ? w(prev) : w;
     return Math.max(0, Math.min(weeks.length - 1, Number.isFinite(next) ? next : prev));
   }), [weeks.length]);
   const stratName = base.strategies.find((s) => s.id === sel.sid)?.name || sel.sid;
   const grpName = base.groups.find((g) => g.id === sel.gid)?.name || sel.gid;
-  return /* @__PURE__ */ jsxs4("div", { className: "shell", children: [
-    /* @__PURE__ */ jsxs4("header", { className: "top", children: [
-      /* @__PURE__ */ jsxs4("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx4("div", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsxs4("div", { children: [
-          /* @__PURE__ */ jsx4("h1", { children: cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation" }),
-          /* @__PURE__ */ jsx4("small", { children: "Capacity Simulator" })
+  return /* @__PURE__ */ jsxs3("div", { className: "shell", children: [
+    /* @__PURE__ */ jsxs3("header", { className: "top", children: [
+      /* @__PURE__ */ jsxs3("div", { className: "brand", children: [
+        /* @__PURE__ */ jsx3("div", { className: "mark", children: "C" }),
+        /* @__PURE__ */ jsxs3("div", { children: [
+          /* @__PURE__ */ jsx3("h1", { children: cfg.brands && cfg.brands[0] ? cfg.brands[0].name : "Simulation" }),
+          /* @__PURE__ */ jsx3("small", { children: "Capacity Simulator" })
         ] })
       ] }),
-      /* @__PURE__ */ jsx4("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV4.map(([k, label]) => /* @__PURE__ */ jsx4("button", { role: "tab", className: k === "results" ? "on" : "", "aria-selected": k === "results", onClick: () => onNav(k), children: label }, k)) })
+      /* @__PURE__ */ jsx3("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV3.map(([k, label]) => /* @__PURE__ */ jsx3("button", { role: "tab", className: k === "results" ? "on" : "", "aria-selected": k === "results", onClick: () => onNav(k), children: label }, k)) })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { className: "ctx", children: [
-      /* @__PURE__ */ jsx4("label", { children: "Strategy" }),
-      /* @__PURE__ */ jsx4("select", { value: sel.sid, onChange: (e) => setSelected({ gid: sel.gid, sid: e.target.value }), children: base.strategies.map((s) => /* @__PURE__ */ jsx4("option", { value: s.id, children: s.name }, s.id)) }),
-      /* @__PURE__ */ jsx4("label", { children: "Scenario" }),
-      /* @__PURE__ */ jsx4("select", { value: sel.gid, onChange: (e) => setSelected({ gid: e.target.value, sid: sel.sid }), children: base.groups.map((g) => /* @__PURE__ */ jsx4("option", { value: g.id, children: g.name }, g.id)) }),
-      /* @__PURE__ */ jsx4("button", { className: "btn", disabled: true, title: "Saved runs are not available in this build yet", children: "Save run" }),
-      /* @__PURE__ */ jsx4("span", { className: "fresh" + (pending ? " stale" : ""), children: pending ? "recalculating\u2026" : "\u25CF Up to date" })
+    /* @__PURE__ */ jsxs3("div", { className: "ctx", children: [
+      /* @__PURE__ */ jsx3("label", { children: "Strategy" }),
+      /* @__PURE__ */ jsx3("select", { value: sel.sid, onChange: (e) => setSelected({ gid: sel.gid, sid: e.target.value }), children: base.strategies.map((s) => /* @__PURE__ */ jsx3("option", { value: s.id, children: s.name }, s.id)) }),
+      /* @__PURE__ */ jsx3("label", { children: "Scenario" }),
+      /* @__PURE__ */ jsx3("select", { value: sel.gid, onChange: (e) => setSelected({ gid: e.target.value, sid: sel.sid }), children: base.groups.map((g) => /* @__PURE__ */ jsx3("option", { value: g.id, children: g.name }, g.id)) }),
+      /* @__PURE__ */ jsx3("button", { className: "btn", disabled: true, title: "Saved runs are not available in this build yet", children: "Save run" }),
+      /* @__PURE__ */ jsx3("span", { className: "fresh" + (pending ? " stale" : ""), children: pending ? "recalculating\u2026" : "\u25CF Up to date" })
     ] }),
-    /* @__PURE__ */ jsx4("div", { className: "sub", role: "tablist", "aria-label": "Lenses", children: ["Summary", "Plan", "Intraday", "Data", "Flow"].map((l, i) => /* @__PURE__ */ jsx4("button", { role: "tab", "aria-selected": lens === i, className: lens === i ? "on" : "", onClick: () => setLens(i), children: l }, l)) }),
-    lens === 0 && /* @__PURE__ */ jsx4(Summary, { base, sel, setSelected, summary, weeks, cfg, stratName, grpName, weight, setWeight, model }),
-    lens === 1 && /* @__PURE__ */ jsx4(Plan, { weeks, cfg, week, setWeek: scrub }),
-    lens === 2 && /* @__PURE__ */ jsx4(Intraday, { weeks, cfg, week, setWeek: scrub }),
-    lens === 3 && /* @__PURE__ */ jsx4(DataLens, { weeks, cfg }),
-    lens === 4 && /* @__PURE__ */ jsx4(Flow, { weeks, cfg, week, setWeek: scrub }),
-    /* @__PURE__ */ jsxs4("p", { className: "note", children: [
-      /* @__PURE__ */ jsx4("b", { children: "Design notes:" }),
+    /* @__PURE__ */ jsx3("div", { className: "sub", role: "tablist", "aria-label": "Lenses", children: ["Summary", "Plan", "Intraday", "Data", "Flow"].map((l, i) => /* @__PURE__ */ jsx3("button", { role: "tab", "aria-selected": lens === i, className: lens === i ? "on" : "", onClick: () => setLens(i), children: l }, l)) }),
+    lens === 0 && /* @__PURE__ */ jsx3(Summary, { base, sel, setSelected, summary, weeks, cfg, stratName, grpName, weight, setWeight, model }),
+    lens === 1 && /* @__PURE__ */ jsx3(Plan, { weeks, cfg, week, setWeek: scrub }),
+    lens === 2 && /* @__PURE__ */ jsx3(Intraday, { weeks, cfg, week, setWeek: scrub }),
+    lens === 3 && /* @__PURE__ */ jsx3(DataLens, { weeks, cfg }),
+    lens === 4 && /* @__PURE__ */ jsx3(Flow, { weeks, cfg, week, setWeek: scrub }),
+    /* @__PURE__ */ jsxs3("p", { className: "note", children: [
+      /* @__PURE__ */ jsx3("b", { children: "Design notes:" }),
       " one context bar, five lenses, one week cursor \xB7 Summary = year (matrix + six family cards + risk register) \xB7 Plan sets the cursor \xB7 Intraday & Flow inherit it \xB7 Data grouped by path, export = template \xB7 Flow animates cached weekly results \u2014 no re-simulation."
     ] })
   ] });
@@ -6609,7 +5859,7 @@ function ResultsPage({ model, onNav = () => {
 function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpName, weight, setWeight, model }) {
   const redOf = (gid, sid) => base.matrix.cells[gid][sid].redWeeks;
   const costOf = (gid, sid) => base.matrix.cells[gid][sid].allIn;
-  const best = useMemo5(() => bestUnderWeight2(base, weight / 100), [base, weight]);
+  const best = useMemo4(() => bestUnderWeight2(base, weight / 100), [base, weight]);
   const totalVol = weeks.reduce((a, w) => a + w.totals.volume, 0);
   const greenWeeks = weeks.reduce((a, w) => a + (cfg.queues.every((q) => w.queues[q.id].status === "green") ? 1 : 0), 0);
   const slaAtt = weeks.length ? greenWeeks / weeks.length : 1;
@@ -6631,33 +5881,33 @@ function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpNa
     { key: "customer", name: "Customer", v: fmtN(summary.lost), s: "customers lost" },
     { key: "outputs", name: "Outputs", v: fmtM2(summary.allIn), s: (totalVol ? fmtGBP(summary.allIn / totalVol) : "\xA30") + " / contact" }
   ];
-  return /* @__PURE__ */ jsxs4(Fragment6, { children: [
-    /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-      /* @__PURE__ */ jsxs4("h3", { children: [
+  return /* @__PURE__ */ jsxs3(Fragment5, { children: [
+    /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+      /* @__PURE__ */ jsxs3("h3", { children: [
         "Decision matrix ",
-        /* @__PURE__ */ jsx4("small", { children: "tap a cell \u2014 the whole page reviews that mix \xB7 full editing in Levers" })
+        /* @__PURE__ */ jsx3("small", { children: "tap a cell \u2014 the whole page reviews that mix \xB7 full editing in Levers" })
       ] }),
-      /* @__PURE__ */ jsxs4("div", { className: "weight", children: [
-        /* @__PURE__ */ jsx4("label", { children: "Lowest cost" }),
-        /* @__PURE__ */ jsx4("input", { type: "range", min: "0", max: "100", value: weight, onChange: (e) => setWeight(+e.target.value), "aria-label": "cost versus service weighting" }),
-        /* @__PURE__ */ jsx4("label", { children: "Best service" })
+      /* @__PURE__ */ jsxs3("div", { className: "weight", children: [
+        /* @__PURE__ */ jsx3("label", { children: "Lowest cost" }),
+        /* @__PURE__ */ jsx3("input", { type: "range", min: "0", max: "100", value: weight, onChange: (e) => setWeight(+e.target.value), "aria-label": "cost versus service weighting" }),
+        /* @__PURE__ */ jsx3("label", { children: "Best service" })
       ] }),
-      /* @__PURE__ */ jsx4("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs4("table", { className: "mx", children: [
-        /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
-          /* @__PURE__ */ jsx4("th", { className: "rh" }),
-          base.strategies.map((s) => /* @__PURE__ */ jsx4("th", { children: s.name }, s.id))
+      /* @__PURE__ */ jsx3("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs3("table", { className: "mx", children: [
+        /* @__PURE__ */ jsx3("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
+          /* @__PURE__ */ jsx3("th", { className: "rh" }),
+          base.strategies.map((s) => /* @__PURE__ */ jsx3("th", { children: s.name }, s.id))
         ] }) }),
-        /* @__PURE__ */ jsx4("tbody", { children: base.groups.map((g) => /* @__PURE__ */ jsxs4("tr", { children: [
-          /* @__PURE__ */ jsx4("th", { className: "rh", children: g.name }),
+        /* @__PURE__ */ jsx3("tbody", { children: base.groups.map((g) => /* @__PURE__ */ jsxs3("tr", { children: [
+          /* @__PURE__ */ jsx3("th", { className: "rh", children: g.name }),
           base.strategies.map((s) => {
             const isSel = sel.gid === g.id && sel.sid === s.id;
             const red = redOf(g.id, s.id);
             const flag = red === 0 ? "ok" : red <= 2 ? "warn" : "bad";
             const isBest = best && best.gid === g.id && best.sid === s.id;
-            return /* @__PURE__ */ jsx4("td", { children: /* @__PURE__ */ jsxs4("button", { className: "cell" + (isSel ? " sel" : ""), onClick: () => setSelected({ gid: g.id, sid: s.id }), "aria-label": `${g.name} \xD7 ${s.name}`, children: [
-              isBest ? /* @__PURE__ */ jsx4("span", { className: "best", children: "Best fit" }) : null,
-              /* @__PURE__ */ jsx4("div", { className: "c1 num", children: fmtM2(costOf(g.id, s.id)) }),
-              /* @__PURE__ */ jsxs4("div", { className: "c3 " + flag, children: [
+            return /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsxs3("button", { className: "cell" + (isSel ? " sel" : ""), onClick: () => setSelected({ gid: g.id, sid: s.id }), "aria-label": `${g.name} \xD7 ${s.name}`, children: [
+              isBest ? /* @__PURE__ */ jsx3("span", { className: "best", children: "Best fit" }) : null,
+              /* @__PURE__ */ jsx3("div", { className: "c1 num", children: fmtM2(costOf(g.id, s.id)) }),
+              /* @__PURE__ */ jsxs3("div", { className: "c3 " + flag, children: [
                 GLYPH2[flag === "ok" ? "g" : flag === "warn" ? "a" : "r"],
                 " ",
                 red,
@@ -6667,9 +5917,9 @@ function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpNa
           })
         ] }, g.id)) })
       ] }) }),
-      /* @__PURE__ */ jsxs4("p", { className: "wklabel", children: [
+      /* @__PURE__ */ jsxs3("p", { className: "wklabel", children: [
         "Reviewing ",
-        /* @__PURE__ */ jsxs4("b", { children: [
+        /* @__PURE__ */ jsxs3("b", { children: [
           stratName,
           " \xD7 ",
           grpName
@@ -6677,14 +5927,14 @@ function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpNa
         " \u2014 every lens on this page shows this mix."
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-      /* @__PURE__ */ jsxs4("p", { className: "verdict", children: [
+    /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+      /* @__PURE__ */ jsxs3("p", { className: "verdict", children: [
         "Across ",
         weeks.length,
         " weeks, ",
         cfg.queues.length,
         " queues, ",
-        /* @__PURE__ */ jsxs4("b", { children: [
+        /* @__PURE__ */ jsxs3("b", { children: [
           weeks.length * cfg.queues.length - redQW - atRiskQW,
           " queue-weeks meet SLA, ",
           atRiskQW,
@@ -6697,110 +5947,117 @@ function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpNa
         " \xD7 ",
         grpName,
         ". All-in ",
-        /* @__PURE__ */ jsx4("b", { children: fmtM2(summary.allIn) }),
+        /* @__PURE__ */ jsx3("b", { children: fmtM2(summary.allIn) }),
         "; ",
         fmtGBP(summary.churnCost),
         " lost to poor experience (",
         fmtN(summary.lost),
         " customers)."
       ] }),
-      /* @__PURE__ */ jsx4("div", { className: "fam6", children: cards.map((c) => /* @__PURE__ */ jsxs4("div", { className: "fcard", style: { borderLeftColor: FAMILY_COLORS[c.key] }, children: [
-        /* @__PURE__ */ jsx4("div", { className: "fl", style: { color: FAMILY_COLORS[c.key] }, children: c.name }),
-        /* @__PURE__ */ jsx4("div", { className: "fv num", children: c.v }),
-        /* @__PURE__ */ jsx4("div", { className: "fs", children: c.s })
+      /* @__PURE__ */ jsx3("div", { className: "fam6", children: cards.map((c) => /* @__PURE__ */ jsxs3("div", { className: "fcard", style: { borderLeftColor: FAMILY_COLORS[c.key] }, children: [
+        /* @__PURE__ */ jsx3("div", { className: "fl", style: { color: FAMILY_COLORS[c.key] }, children: c.name }),
+        /* @__PURE__ */ jsx3("div", { className: "fv num", children: c.v }),
+        /* @__PURE__ */ jsx3("div", { className: "fs", children: c.s })
       ] }, c.key)) })
     ] }),
-    /* @__PURE__ */ jsx4(RiskRegister, { summary, cfg, model })
+    /* @__PURE__ */ jsx3(RiskRegister, { summary, cfg, model })
   ] });
 }
 function RiskRegister({ summary, cfg, model }) {
-  const [bu, setBu] = useState6("all");
-  const [ch, setCh] = useState6("all");
-  const bus = useMemo5(() => (model.brands || []).flatMap((b) => b.businessUnits.map((x) => x.name)), [model]);
-  const channels = useMemo5(() => [...new Set((cfg.queues || []).map((q) => q.channel))], [cfg]);
-  const queueBu = useMemo5(() => {
+  const [bu, setBu] = useState5("all");
+  const [ch, setCh] = useState5("all");
+  const isDomain = !!model.businessUnits;
+  const bus = useMemo4(() => isDomain ? (model.businessUnits || []).map((x) => x.name) : (model.brands || []).flatMap((b) => (b.businessUnits || []).map((x) => x.name)), [model, isDomain]);
+  const channels = useMemo4(() => [...new Set((cfg.queues || []).map((q) => q.channel))], [cfg]);
+  const queueBu = useMemo4(() => {
+    const map = {};
+    if (isDomain) {
+      const buName = {};
+      for (const b of model.businessUnits || []) buName[b.id] = b.name;
+      for (const q of model.queues || []) map[q.name] = q.homeBuId ? buName[q.homeBuId] || null : "Shared";
+      return map;
+    }
     const chBu = {};
     for (const b of model.brands || []) for (const bu2 of b.businessUnits || []) for (const p of bu2.products || []) for (const c of p.channels || []) chBu[c.id] = bu2.name;
-    const map = {};
     for (const q of model.queues || []) map[q.name] = q.attachment && q.attachment.kind === "structural" ? chBu[q.attachment.channelInstanceId] || null : "Shared";
     return map;
-  }, [model]);
-  const rows = useMemo5(() => summary.findings.filter((f) => f.tone !== "green").map((f) => {
+  }, [model, isDomain]);
+  const rows = useMemo4(() => summary.findings.filter((f) => f.tone !== "green").map((f) => {
     const q = cfg.queues.find((qq) => f.text.includes(qq.name));
     return { tone: f.tone, text: f.text, channel: q ? q.channel : null, bu: q ? queueBu[q.name] : null };
   }), [summary, cfg, queueBu]);
   const shown = rows.filter((r) => (bu === "all" || r.bu === bu) && (ch === "all" || r.channel === ch));
-  return /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-    /* @__PURE__ */ jsxs4("h3", { children: [
+  return /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+    /* @__PURE__ */ jsxs3("h3", { children: [
       "Risk register ",
-      /* @__PURE__ */ jsxs4("small", { children: [
+      /* @__PURE__ */ jsxs3("small", { children: [
         shown.length,
         " risk(s) shown \xB7 thresholds in Setup"
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { className: "filters", children: [
-      /* @__PURE__ */ jsx4("label", { children: "Business unit" }),
-      /* @__PURE__ */ jsxs4("select", { value: bu, onChange: (e) => setBu(e.target.value), children: [
-        /* @__PURE__ */ jsx4("option", { value: "all", children: "All" }),
-        bus.map((n) => /* @__PURE__ */ jsx4("option", { children: n }, n))
+    /* @__PURE__ */ jsxs3("div", { className: "filters", children: [
+      /* @__PURE__ */ jsx3("label", { children: "Business unit" }),
+      /* @__PURE__ */ jsxs3("select", { value: bu, onChange: (e) => setBu(e.target.value), children: [
+        /* @__PURE__ */ jsx3("option", { value: "all", children: "All" }),
+        bus.map((n) => /* @__PURE__ */ jsx3("option", { children: n }, n))
       ] }),
-      /* @__PURE__ */ jsx4("label", { children: "Channel" }),
-      /* @__PURE__ */ jsxs4("select", { value: ch, onChange: (e) => setCh(e.target.value), children: [
-        /* @__PURE__ */ jsx4("option", { value: "all", children: "All" }),
-        channels.map((c) => /* @__PURE__ */ jsx4("option", { value: c, children: c }, c))
+      /* @__PURE__ */ jsx3("label", { children: "Channel" }),
+      /* @__PURE__ */ jsxs3("select", { value: ch, onChange: (e) => setCh(e.target.value), children: [
+        /* @__PURE__ */ jsx3("option", { value: "all", children: "All" }),
+        channels.map((c) => /* @__PURE__ */ jsx3("option", { value: c, children: c }, c))
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("table", { className: "risk", children: [
-      /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
-        /* @__PURE__ */ jsx4("th", { children: "Risk" }),
-        /* @__PURE__ */ jsx4("th", { children: "Severity" })
+    /* @__PURE__ */ jsxs3("table", { className: "risk", children: [
+      /* @__PURE__ */ jsx3("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
+        /* @__PURE__ */ jsx3("th", { children: "Risk" }),
+        /* @__PURE__ */ jsx3("th", { children: "Severity" })
       ] }) }),
-      /* @__PURE__ */ jsx4("tbody", { children: shown.length ? shown.map((r, i) => /* @__PURE__ */ jsxs4("tr", { children: [
-        /* @__PURE__ */ jsx4("td", { children: r.text }),
-        /* @__PURE__ */ jsx4("td", { children: /* @__PURE__ */ jsx4("span", { className: "sev " + (r.tone === "red" ? "red" : "amb"), children: r.tone === "red" ? "\u2715 red" : "\u25B2 amber" }) })
-      ] }, i)) : /* @__PURE__ */ jsx4("tr", { children: /* @__PURE__ */ jsx4("td", { colSpan: 2, className: "hint", children: "No risks under this mix \u2014 every queue holds SLA." }) }) })
+      /* @__PURE__ */ jsx3("tbody", { children: shown.length ? shown.map((r, i) => /* @__PURE__ */ jsxs3("tr", { children: [
+        /* @__PURE__ */ jsx3("td", { children: r.text }),
+        /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsx3("span", { className: "sev " + (r.tone === "red" ? "red" : "amb"), children: r.tone === "red" ? "\u2715 red" : "\u25B2 amber" }) })
+      ] }, i)) : /* @__PURE__ */ jsx3("tr", { children: /* @__PURE__ */ jsx3("td", { colSpan: 2, className: "hint", children: "No risks under this mix \u2014 every queue holds SLA." }) }) })
     ] })
   ] });
 }
 function Plan({ weeks, cfg, week, setWeek }) {
-  const grouped = groupQueues3(cfg);
-  return /* @__PURE__ */ jsxs4(Fragment6, { children: [
-    /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-      /* @__PURE__ */ jsxs4("h3", { children: [
+  const grouped = groupQueues2(cfg);
+  return /* @__PURE__ */ jsxs3(Fragment5, { children: [
+    /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+      /* @__PURE__ */ jsxs3("h3", { children: [
         "RAG ribbon ",
-        /* @__PURE__ */ jsx4("small", { children: "tap a week \u2014 every lens follows it" })
+        /* @__PURE__ */ jsx3("small", { children: "tap a week \u2014 every lens follows it" })
       ] }),
-      /* @__PURE__ */ jsx4("div", { className: "ribwrap", children: /* @__PURE__ */ jsx4("table", { className: "ribbon", children: /* @__PURE__ */ jsxs4("tbody", { children: [
-        /* @__PURE__ */ jsxs4("tr", { children: [
-          /* @__PURE__ */ jsx4("th", { "aria-hidden": "true" }),
-          weeks.map((w, i) => /* @__PURE__ */ jsx4("th", { children: i === 0 || (i + 1) % 4 === 0 ? i + 1 : "" }, i))
+      /* @__PURE__ */ jsx3("div", { className: "ribwrap", children: /* @__PURE__ */ jsx3("table", { className: "ribbon", children: /* @__PURE__ */ jsxs3("tbody", { children: [
+        /* @__PURE__ */ jsxs3("tr", { children: [
+          /* @__PURE__ */ jsx3("th", { "aria-hidden": "true" }),
+          weeks.map((w, i) => /* @__PURE__ */ jsx3("th", { children: i === 0 || (i + 1) % 4 === 0 ? i + 1 : "" }, i))
         ] }),
-        grouped.map((grp) => /* @__PURE__ */ jsxs4(Fragment5, { children: [
-          /* @__PURE__ */ jsx4("tr", { children: /* @__PURE__ */ jsx4("td", { className: "gh", colSpan: weeks.length + 1, children: grp.label }) }),
-          grp.queues.map((q) => /* @__PURE__ */ jsxs4("tr", { children: [
-            /* @__PURE__ */ jsx4("th", { className: "qh", children: q.name }),
+        grouped.map((grp) => /* @__PURE__ */ jsxs3(Fragment4, { children: [
+          /* @__PURE__ */ jsx3("tr", { children: /* @__PURE__ */ jsx3("td", { className: "gh", colSpan: weeks.length + 1, children: grp.label }) }),
+          grp.queues.map((q) => /* @__PURE__ */ jsxs3("tr", { children: [
+            /* @__PURE__ */ jsx3("th", { className: "qh", children: q.name }),
             weeks.map((w, i) => {
               const st = RC[w.queues[q.id].status] || "g";
-              return /* @__PURE__ */ jsx4("td", { children: /* @__PURE__ */ jsx4("button", { className: "rc " + st + (i === week ? " cur" : ""), onClick: () => setWeek(i), "aria-label": `${q.name} week ${i + 1}`, children: GLYPH2[st] }) }, i);
+              return /* @__PURE__ */ jsx3("td", { children: /* @__PURE__ */ jsx3("button", { className: "rc " + st + (i === week ? " cur" : ""), onClick: () => setWeek(i), "aria-label": `${q.name} week ${i + 1}`, children: GLYPH2[st] }) }, i);
             })
           ] }, q.id))
         ] }, grp.key))
       ] }) }) }),
-      /* @__PURE__ */ jsxs4("p", { className: "wklabel", children: [
+      /* @__PURE__ */ jsxs3("p", { className: "wklabel", children: [
         "Selected: ",
-        /* @__PURE__ */ jsxs4("b", { children: [
+        /* @__PURE__ */ jsxs3("b", { children: [
           "week ",
           week + 1
         ] }),
         " \u2014 Intraday and Flow follow this cursor."
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-      /* @__PURE__ */ jsxs4("h3", { children: [
+    /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+      /* @__PURE__ */ jsxs3("h3", { children: [
         "Required vs active FTE ",
-        /* @__PURE__ */ jsx4("small", { children: "total operation" })
+        /* @__PURE__ */ jsx3("small", { children: "total operation" })
       ] }),
-      /* @__PURE__ */ jsx4(FteChart, { weeks, cfg, week })
+      /* @__PURE__ */ jsx3(FteChart, { weeks, cfg, week })
     ] })
   ] });
 }
@@ -6812,14 +6069,14 @@ function FteChart({ weeks, cfg, week }) {
   const Y = (v) => 112 - v / max * 100;
   const line = (arr) => arr.map((v, i) => X(i) + "," + Y(v)).join(" ");
   const cx = X(week);
-  return /* @__PURE__ */ jsxs4("svg", { width: "100%", viewBox: "0 0 620 130", "aria-label": "Required versus active FTE across the horizon", children: [
-    /* @__PURE__ */ jsx4("polyline", { fill: "none", stroke: FAMILY_COLORS.workforce, strokeWidth: "2", points: line(req) }),
-    /* @__PURE__ */ jsx4("polyline", { fill: "none", stroke: FAMILY_COLORS.inputs, strokeWidth: "2", points: line(act) }),
-    /* @__PURE__ */ jsx4("line", { x1: cx, x2: cx, y1: "6", y2: "112", stroke: "#EF9F27", strokeWidth: "1.5", strokeDasharray: "4 3" }),
-    /* @__PURE__ */ jsx4("text", { x: "10", y: "14", fontSize: "10.5", fill: FAMILY_COLORS.workforce, children: "required" }),
-    /* @__PURE__ */ jsx4("text", { x: "70", y: "14", fontSize: "10.5", fill: FAMILY_COLORS.inputs, children: "active" }),
-    /* @__PURE__ */ jsx4("text", { x: "10", y: "126", fontSize: "10", fill: "#8a887f", children: "wk 1" }),
-    /* @__PURE__ */ jsxs4("text", { x: "588", y: "126", fontSize: "10", fill: "#8a887f", children: [
+  return /* @__PURE__ */ jsxs3("svg", { width: "100%", viewBox: "0 0 620 130", "aria-label": "Required versus active FTE across the horizon", children: [
+    /* @__PURE__ */ jsx3("polyline", { fill: "none", stroke: FAMILY_COLORS.workforce, strokeWidth: "2", points: line(req) }),
+    /* @__PURE__ */ jsx3("polyline", { fill: "none", stroke: FAMILY_COLORS.inputs, strokeWidth: "2", points: line(act) }),
+    /* @__PURE__ */ jsx3("line", { x1: cx, x2: cx, y1: "6", y2: "112", stroke: "#EF9F27", strokeWidth: "1.5", strokeDasharray: "4 3" }),
+    /* @__PURE__ */ jsx3("text", { x: "10", y: "14", fontSize: "10.5", fill: FAMILY_COLORS.workforce, children: "required" }),
+    /* @__PURE__ */ jsx3("text", { x: "70", y: "14", fontSize: "10.5", fill: FAMILY_COLORS.inputs, children: "active" }),
+    /* @__PURE__ */ jsx3("text", { x: "10", y: "126", fontSize: "10", fill: "#8a887f", children: "wk 1" }),
+    /* @__PURE__ */ jsxs3("text", { x: "588", y: "126", fontSize: "10", fill: "#8a887f", children: [
       "wk ",
       weeks.length
     ] })
@@ -6831,41 +6088,41 @@ function Intraday({ weeks, cfg, week, setWeek }) {
   const intr = wk && wk.intraday && wk.intraday.res && wk.intraday.res[q0.id];
   const byInt = intr && intr.byInterval ? intr.byInterval : [];
   const max = Math.max(1, ...byInt.map((b) => Math.max(b.req || 0, b.agents || 0)));
-  return /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-    /* @__PURE__ */ jsxs4("span", { className: "inherit", children: [
+  return /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+    /* @__PURE__ */ jsxs3("span", { className: "inherit", children: [
       "Week ",
-      /* @__PURE__ */ jsx4("b", { className: "num", children: week + 1 }),
+      /* @__PURE__ */ jsx3("b", { className: "num", children: week + 1 }),
       " \xB7 inherited from Plan",
-      /* @__PURE__ */ jsx4("button", { onClick: () => setWeek(week - 1), "aria-label": "previous week", children: "\u2212" }),
-      /* @__PURE__ */ jsx4("button", { onClick: () => setWeek(week + 1), "aria-label": "next week", children: "+" })
+      /* @__PURE__ */ jsx3("button", { onClick: () => setWeek(week - 1), "aria-label": "previous week", children: "\u2212" }),
+      /* @__PURE__ */ jsx3("button", { onClick: () => setWeek(week + 1), "aria-label": "next week", children: "+" })
     ] }),
-    /* @__PURE__ */ jsxs4("h3", { children: [
+    /* @__PURE__ */ jsxs3("h3", { children: [
       "Required vs available agents ",
-      /* @__PURE__ */ jsxs4("small", { children: [
+      /* @__PURE__ */ jsxs3("small", { children: [
         q0.name,
         " \xB7 first day of week ",
         week + 1
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("svg", { width: "100%", viewBox: "0 0 620 140", "aria-label": "Intraday required versus available agents", children: [
+    /* @__PURE__ */ jsxs3("svg", { width: "100%", viewBox: "0 0 620 140", "aria-label": "Intraday required versus available agents", children: [
       byInt.map((b, i) => {
         const x = 12 + i * 596 / Math.max(1, byInt.length);
         const wdt = Math.max(3, 596 / byInt.length / 2 - 1);
         const rH = (b.req || 0) / max * 110, aH = (b.agents || 0) / max * 110;
-        return /* @__PURE__ */ jsxs4("g", { children: [
-          /* @__PURE__ */ jsx4("rect", { x, y: 120 - rH, width: wdt, height: rH, fill: "#F0997B" }),
-          /* @__PURE__ */ jsx4("rect", { x: x + wdt + 1, y: 120 - aH, width: wdt, height: aH, fill: FAMILY_COLORS.inputs })
+        return /* @__PURE__ */ jsxs3("g", { children: [
+          /* @__PURE__ */ jsx3("rect", { x, y: 120 - rH, width: wdt, height: rH, fill: "#F0997B" }),
+          /* @__PURE__ */ jsx3("rect", { x: x + wdt + 1, y: 120 - aH, width: wdt, height: aH, fill: FAMILY_COLORS.inputs })
         ] }, i);
       }),
-      /* @__PURE__ */ jsx4("text", { x: "12", y: "136", fontSize: "10", fill: "#8a887f", children: "required" }),
-      /* @__PURE__ */ jsx4("text", { x: "80", y: "136", fontSize: "10", fill: FAMILY_COLORS.inputs, children: "available" })
+      /* @__PURE__ */ jsx3("text", { x: "12", y: "136", fontSize: "10", fill: "#8a887f", children: "required" }),
+      /* @__PURE__ */ jsx3("text", { x: "80", y: "136", fontSize: "10", fill: FAMILY_COLORS.inputs, children: "available" })
     ] }),
-    /* @__PURE__ */ jsx4("p", { className: "wklabel", children: byInt.length ? `Week ${week + 1} \xB7 ${byInt.length} intervals` : "No intraday detail captured for this queue." })
+    /* @__PURE__ */ jsx3("p", { className: "wklabel", children: byInt.length ? `Week ${week + 1} \xB7 ${byInt.length} intervals` : "No intraday detail captured for this queue." })
   ] });
 }
 function DataLens({ weeks, cfg }) {
-  const grouped = groupQueues3(cfg);
-  const csv = useCallback2(() => {
+  const grouped = groupQueues2(cfg);
+  const csv = useCallback(() => {
     const head = ["Group", "Queue", "Week", "Volume", "AHT", "SLA", "Abandon", "ReqFTE", "Active", "RunCost", "ChurnCost"];
     const lines = [head.join(",")];
     for (const grp of grouped) for (const q of grp.queues) weeks.forEach((w, i) => {
@@ -6874,66 +6131,66 @@ function DataLens({ weeks, cfg }) {
     });
     return lines.join("\n");
   }, [weeks, grouped]);
-  const [csvOut, setCsvOut] = useState6("");
+  const [csvOut, setCsvOut] = useState5("");
   const q0 = cfg.queues[0];
   const someWeeks = [0, Math.floor(weeks.length / 2), weeks.length - 1];
-  return /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-    /* @__PURE__ */ jsxs4("h3", { children: [
+  return /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+    /* @__PURE__ */ jsxs3("h3", { children: [
       "Weekly data ",
-      /* @__PURE__ */ jsx4("small", { children: "grouped by path \xB7 columns by KPI family \xB7 export matches the template" })
+      /* @__PURE__ */ jsx3("small", { children: "grouped by path \xB7 columns by KPI family \xB7 export matches the template" })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }, children: [
-      /* @__PURE__ */ jsx4("span", { className: "sev", style: { background: "var(--blue-tint)", color: "var(--blue-deep)" }, children: "Inputs" }),
-      /* @__PURE__ */ jsx4("span", { className: "sev", style: { background: "var(--teal-bg)", color: "var(--teal)" }, children: "Performance" }),
-      /* @__PURE__ */ jsx4("span", { className: "sev", style: { background: "var(--coral-bg)", color: "var(--coral)" }, children: "Workforce" }),
-      /* @__PURE__ */ jsx4("span", { className: "sev", style: { background: "var(--amber-bg)", color: "var(--amber-ink)" }, children: "Outputs" }),
-      /* @__PURE__ */ jsx4("button", { className: "btn", style: { marginLeft: "auto" }, onClick: () => setCsvOut(csv()), children: "Export CSV" })
+    /* @__PURE__ */ jsxs3("div", { style: { display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx3("span", { className: "sev", style: { background: "var(--blue-tint)", color: "var(--blue-deep)" }, children: "Inputs" }),
+      /* @__PURE__ */ jsx3("span", { className: "sev", style: { background: "var(--teal-bg)", color: "var(--teal)" }, children: "Performance" }),
+      /* @__PURE__ */ jsx3("span", { className: "sev", style: { background: "var(--coral-bg)", color: "var(--coral)" }, children: "Workforce" }),
+      /* @__PURE__ */ jsx3("span", { className: "sev", style: { background: "var(--amber-bg)", color: "var(--amber-ink)" }, children: "Outputs" }),
+      /* @__PURE__ */ jsx3("button", { className: "btn", style: { marginLeft: "auto" }, onClick: () => setCsvOut(csv()), children: "Export CSV" })
     ] }),
-    /* @__PURE__ */ jsx4("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs4("table", { className: "dtab", children: [
-      /* @__PURE__ */ jsx4("thead", { children: /* @__PURE__ */ jsxs4("tr", { children: [
-        /* @__PURE__ */ jsx4("th", { className: "l", children: "Week" }),
-        /* @__PURE__ */ jsx4("th", { className: "gInp", children: "Volume" }),
-        /* @__PURE__ */ jsx4("th", { className: "gInp", children: "AHT" }),
-        /* @__PURE__ */ jsx4("th", { className: "gPerf", children: "SLA" }),
-        /* @__PURE__ */ jsx4("th", { className: "gPerf", children: "Abandon" }),
-        /* @__PURE__ */ jsx4("th", { className: "gWf", children: "Req FTE" }),
-        /* @__PURE__ */ jsx4("th", { className: "gWf", children: "Active" }),
-        /* @__PURE__ */ jsx4("th", { className: "gOut", children: "Run \xA3" }),
-        /* @__PURE__ */ jsx4("th", { className: "gOut", children: "Churn \xA3" })
+    /* @__PURE__ */ jsx3("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs3("table", { className: "dtab", children: [
+      /* @__PURE__ */ jsx3("thead", { children: /* @__PURE__ */ jsxs3("tr", { children: [
+        /* @__PURE__ */ jsx3("th", { className: "l", children: "Week" }),
+        /* @__PURE__ */ jsx3("th", { className: "gInp", children: "Volume" }),
+        /* @__PURE__ */ jsx3("th", { className: "gInp", children: "AHT" }),
+        /* @__PURE__ */ jsx3("th", { className: "gPerf", children: "SLA" }),
+        /* @__PURE__ */ jsx3("th", { className: "gPerf", children: "Abandon" }),
+        /* @__PURE__ */ jsx3("th", { className: "gWf", children: "Req FTE" }),
+        /* @__PURE__ */ jsx3("th", { className: "gWf", children: "Active" }),
+        /* @__PURE__ */ jsx3("th", { className: "gOut", children: "Run \xA3" }),
+        /* @__PURE__ */ jsx3("th", { className: "gOut", children: "Churn \xA3" })
       ] }) }),
-      /* @__PURE__ */ jsx4("tbody", { children: groupQueues3(cfg).map((grp) => grp.queues.map((q) => /* @__PURE__ */ jsxs4(Fragment5, { children: [
-        /* @__PURE__ */ jsx4("tr", { className: "grp", children: /* @__PURE__ */ jsxs4("td", { colSpan: 9, children: [
+      /* @__PURE__ */ jsx3("tbody", { children: groupQueues2(cfg).map((grp) => grp.queues.map((q) => /* @__PURE__ */ jsxs3(Fragment4, { children: [
+        /* @__PURE__ */ jsx3("tr", { className: "grp", children: /* @__PURE__ */ jsxs3("td", { colSpan: 9, children: [
           grp.label,
           " \xB7 ",
           q.name
         ] }) }),
         someWeeks.map((i) => {
           const s = weeks[i].queues[q.id];
-          return /* @__PURE__ */ jsxs4("tr", { children: [
-            /* @__PURE__ */ jsx4("td", { className: "l num", children: i + 1 }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: fmtN(s.volume) }),
-            /* @__PURE__ */ jsxs4("td", { className: "num", children: [
+          return /* @__PURE__ */ jsxs3("tr", { children: [
+            /* @__PURE__ */ jsx3("td", { className: "l num", children: i + 1 }),
+            /* @__PURE__ */ jsx3("td", { className: "num", children: fmtN(s.volume) }),
+            /* @__PURE__ */ jsxs3("td", { className: "num", children: [
               Math.round(s.ahtInEffect),
               " s"
             ] }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: pct2(s.sl) }),
-            /* @__PURE__ */ jsxs4("td", { className: "num", children: [
+            /* @__PURE__ */ jsx3("td", { className: "num", children: pct2(s.sl) }),
+            /* @__PURE__ */ jsxs3("td", { className: "num", children: [
               (s.abandon * 100).toFixed(1),
               "%"
             ] }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: s.reqFte.toFixed(1) }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: (s.active || 0).toFixed(1) }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: fmtGBP(s.cost) }),
-            /* @__PURE__ */ jsx4("td", { className: "num", children: fmtGBP(s.churnCost) })
+            /* @__PURE__ */ jsx3("td", { className: "num", children: s.reqFte.toFixed(1) }),
+            /* @__PURE__ */ jsx3("td", { className: "num", children: (s.active || 0).toFixed(1) }),
+            /* @__PURE__ */ jsx3("td", { className: "num", children: fmtGBP(s.cost) }),
+            /* @__PURE__ */ jsx3("td", { className: "num", children: fmtGBP(s.churnCost) })
           ] }, q.id + i);
         })
       ] }, q.id))) })
     ] }) }),
-    csvOut ? /* @__PURE__ */ jsx4("textarea", { readOnly: true, className: "num", "data-testid": "csv", style: { width: "100%", height: 60, marginTop: 8, fontSize: 11 }, value: csvOut }) : null
+    csvOut ? /* @__PURE__ */ jsx3("textarea", { readOnly: true, className: "num", "data-testid": "csv", style: { width: "100%", height: 60, marginTop: 8, fontSize: 11 }, value: csvOut }) : null
   ] });
 }
 function Flow({ weeks, cfg, week, setWeek }) {
-  const [playing, setPlaying] = useState6(false);
+  const [playing, setPlaying] = useState5(false);
   const timer = useRef3(null);
   useEffect3(() => {
     if (!playing) return;
@@ -6948,50 +6205,50 @@ function Flow({ weeks, cfg, week, setWeek }) {
   const anyAmb = cfg.queues.some((q) => wk.queues[q.id].status === "amber");
   const tint = anyRed ? "#F09595" : anyAmb ? "#FAC775" : "#E6F1FB";
   const H2 = 210, y0 = 30, resH = H2 * (1 - failPct), failH = Math.max(8, H2 * failPct);
-  return /* @__PURE__ */ jsxs4("div", { className: "panel", children: [
-    /* @__PURE__ */ jsxs4("h3", { children: [
+  return /* @__PURE__ */ jsxs3("div", { className: "panel", children: [
+    /* @__PURE__ */ jsxs3("h3", { children: [
       "Flow ",
-      /* @__PURE__ */ jsx4("small", { children: "the plan, played through the horizon" })
+      /* @__PURE__ */ jsx3("small", { children: "the plan, played through the horizon" })
     ] }),
-    /* @__PURE__ */ jsxs4("div", { className: "flowctl", children: [
-      /* @__PURE__ */ jsx4("button", { className: "btn primary", onClick: () => setPlaying((p) => !p), children: playing ? "\u275A\u275A Pause" : "\u25B6 Play" }),
-      /* @__PURE__ */ jsx4("input", { type: "range", min: "1", max: weeks.length, value: week + 1, onChange: (e) => setWeek(+e.target.value - 1), "aria-label": "week scrubber" }),
-      /* @__PURE__ */ jsxs4("span", { className: "wk num", children: [
+    /* @__PURE__ */ jsxs3("div", { className: "flowctl", children: [
+      /* @__PURE__ */ jsx3("button", { className: "btn primary", onClick: () => setPlaying((p) => !p), children: playing ? "\u275A\u275A Pause" : "\u25B6 Play" }),
+      /* @__PURE__ */ jsx3("input", { type: "range", min: "1", max: weeks.length, value: week + 1, onChange: (e) => setWeek(+e.target.value - 1), "aria-label": "week scrubber" }),
+      /* @__PURE__ */ jsxs3("span", { className: "wk num", children: [
         "Week ",
         week + 1
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("svg", { width: "100%", viewBox: "0 0 640 300", "aria-label": "Volume flow for the selected week", children: [
-      /* @__PURE__ */ jsx4("text", { x: "60", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Brand" }),
-      /* @__PURE__ */ jsx4("text", { x: "330", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Queues" }),
-      /* @__PURE__ */ jsx4("text", { x: "590", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Outcome" }),
-      /* @__PURE__ */ jsx4("rect", { x: "16", y: y0, width: "88", height: H2, rx: "8", fill: "#E6F1FB", stroke: "#185FA5" }),
-      /* @__PURE__ */ jsxs4("text", { x: "60", y: y0 + H2 / 2, textAnchor: "middle", fontSize: "11.5", fontWeight: "600", fill: "#0C447C", children: [
+    /* @__PURE__ */ jsxs3("svg", { width: "100%", viewBox: "0 0 640 300", "aria-label": "Volume flow for the selected week", children: [
+      /* @__PURE__ */ jsx3("text", { x: "60", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Brand" }),
+      /* @__PURE__ */ jsx3("text", { x: "330", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Queues" }),
+      /* @__PURE__ */ jsx3("text", { x: "590", y: "18", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: "Outcome" }),
+      /* @__PURE__ */ jsx3("rect", { x: "16", y: y0, width: "88", height: H2, rx: "8", fill: "#E6F1FB", stroke: "#185FA5" }),
+      /* @__PURE__ */ jsxs3("text", { x: "60", y: y0 + H2 / 2, textAnchor: "middle", fontSize: "11.5", fontWeight: "600", fill: "#0C447C", children: [
         fmtN(vol),
         "/day"
       ] }),
-      /* @__PURE__ */ jsx4("polygon", { points: `104,${y0} 250,${y0} 250,${y0 + H2} 104,${y0 + H2}`, fill: tint, fillOpacity: "0.35" }),
-      /* @__PURE__ */ jsx4("rect", { x: "250", y: y0, width: "160", height: H2, rx: "8", fill: tint, stroke: "#185FA5" }),
-      /* @__PURE__ */ jsxs4("text", { x: "330", y: y0 + H2 / 2, textAnchor: "middle", fontSize: "11", fontWeight: "600", fill: "#0C447C", children: [
+      /* @__PURE__ */ jsx3("polygon", { points: `104,${y0} 250,${y0} 250,${y0 + H2} 104,${y0 + H2}`, fill: tint, fillOpacity: "0.35" }),
+      /* @__PURE__ */ jsx3("rect", { x: "250", y: y0, width: "160", height: H2, rx: "8", fill: tint, stroke: "#185FA5" }),
+      /* @__PURE__ */ jsxs3("text", { x: "330", y: y0 + H2 / 2, textAnchor: "middle", fontSize: "11", fontWeight: "600", fill: "#0C447C", children: [
         cfg.queues.length,
         " stations ",
         anyRed ? "\u2715" : anyAmb ? "\u25B2" : "\u25CF"
       ] }),
-      /* @__PURE__ */ jsx4("polygon", { points: `410,${y0} 540,${y0} 540,${y0 + resH} 410,${y0 + resH}`, fill: "#1D9E75", fillOpacity: "0.25" }),
-      /* @__PURE__ */ jsx4("rect", { x: "540", y: y0, width: "84", height: resH, rx: "8", fill: "#E1F5EE", stroke: "#0F6E56" }),
-      /* @__PURE__ */ jsxs4("text", { x: "582", y: y0 + resH / 2, textAnchor: "middle", fontSize: "11", fontWeight: "600", fill: "#085041", children: [
+      /* @__PURE__ */ jsx3("polygon", { points: `410,${y0} 540,${y0} 540,${y0 + resH} 410,${y0 + resH}`, fill: "#1D9E75", fillOpacity: "0.25" }),
+      /* @__PURE__ */ jsx3("rect", { x: "540", y: y0, width: "84", height: resH, rx: "8", fill: "#E1F5EE", stroke: "#0F6E56" }),
+      /* @__PURE__ */ jsxs3("text", { x: "582", y: y0 + resH / 2, textAnchor: "middle", fontSize: "11", fontWeight: "600", fill: "#085041", children: [
         "Resolved ",
         Math.round((1 - failPct) * 100),
         "%"
       ] }),
-      /* @__PURE__ */ jsx4("rect", { x: "540", y: y0 + resH + 6, width: "84", height: failH, rx: "6", fill: "#FAEEDA", stroke: "#BA7517" }),
-      /* @__PURE__ */ jsxs4("text", { x: "582", y: y0 + resH + 6 + failH / 2 + 3, textAnchor: "middle", fontSize: "9.5", fontWeight: "600", fill: "#633806", children: [
+      /* @__PURE__ */ jsx3("rect", { x: "540", y: y0 + resH + 6, width: "84", height: failH, rx: "6", fill: "#FAEEDA", stroke: "#BA7517" }),
+      /* @__PURE__ */ jsxs3("text", { x: "582", y: y0 + resH + 6 + failH / 2 + 3, textAnchor: "middle", fontSize: "9.5", fontWeight: "600", fill: "#633806", children: [
         "Failed ",
         (failPct * 100).toFixed(1),
         "%"
       ] })
     ] }),
-    /* @__PURE__ */ jsxs4("p", { className: "wklabel", children: [
+    /* @__PURE__ */ jsxs3("p", { className: "wklabel", children: [
       "Week ",
       week + 1,
       " \u2014 ",
@@ -7000,7 +6257,7 @@ function Flow({ weeks, cfg, week, setWeek }) {
     ] })
   ] });
 }
-function groupQueues3(cfg) {
+function groupQueues2(cfg) {
   const groups = /* @__PURE__ */ new Map();
   for (const q of cfg.queues) {
     const brand = (cfg.brands || []).find((b) => b.id === q.brandId);
@@ -7033,7 +6290,7 @@ function bestUnderWeight2(base, w) {
 }
 
 // ui/v2/HomePage.jsx
-import { useState as useState7, useMemo as useMemo6, useEffect as useEffect4 } from "react";
+import { useState as useState6, useMemo as useMemo5, useEffect as useEffect4 } from "react";
 
 // ui/v2/ecosystem.js
 var import_derive2 = __toESM(require_derive());
@@ -7143,59 +6400,59 @@ function sankeyLayout(model, opts = {}) {
 }
 
 // ui/v2/HomePage.jsx
-import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 var fmtM3 = (n) => "\xA3" + (n / 1e6).toFixed(1) + "m";
 var fmtN2 = (n) => Math.round(n).toLocaleString("en-GB");
 var RAG = { green: { cls: "ok", glyph: "\u25CF", label: "on track" }, amber: { cls: "warn", glyph: "\u25B2", label: "at risk" }, red: { cls: "bad", glyph: "\u2715", label: "red risks" } };
 function HomePage({ simulations, onOpen, onNew }) {
-  const [modal, setModal] = useState7(false);
-  const [eco, setEco] = useState7(null);
-  const [query, setQuery] = useState7("");
+  const [modal, setModal] = useState6(false);
+  const [eco, setEco] = useState6(null);
+  const [query, setQuery] = useState6("");
   const shown = simulations.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
   const soon = "Not available in this build yet";
-  return /* @__PURE__ */ jsxs5("div", { className: "shell", children: [
-    /* @__PURE__ */ jsxs5("header", { className: "top", children: [
-      /* @__PURE__ */ jsxs5("div", { className: "brand", children: [
-        /* @__PURE__ */ jsx5("div", { className: "mark", children: "C" }),
-        /* @__PURE__ */ jsxs5("div", { children: [
-          /* @__PURE__ */ jsx5("h1", { children: "Capacity Simulator" }),
-          /* @__PURE__ */ jsx5("small", { children: "Acme workspace" })
+  return /* @__PURE__ */ jsxs4("div", { className: "shell", children: [
+    /* @__PURE__ */ jsxs4("header", { className: "top", children: [
+      /* @__PURE__ */ jsxs4("div", { className: "brand", children: [
+        /* @__PURE__ */ jsx4("div", { className: "mark", children: "C" }),
+        /* @__PURE__ */ jsxs4("div", { children: [
+          /* @__PURE__ */ jsx4("h1", { children: "Capacity Simulator" }),
+          /* @__PURE__ */ jsx4("small", { children: "Acme workspace" })
         ] })
       ] }),
-      /* @__PURE__ */ jsx5("div", { className: "avatar", "aria-label": "Nick Morris", children: "NM" })
+      /* @__PURE__ */ jsx4("div", { className: "avatar", "aria-label": "Nick Morris", children: "NM" })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "pagehead", children: [
-      /* @__PURE__ */ jsx5("h2", { children: "Simulations" }),
-      /* @__PURE__ */ jsx5("button", { className: "btn primary", onClick: () => setModal(true), children: "+ New simulation" })
+    /* @__PURE__ */ jsxs4("div", { className: "pagehead", children: [
+      /* @__PURE__ */ jsx4("h2", { children: "Simulations" }),
+      /* @__PURE__ */ jsx4("button", { className: "btn primary", onClick: () => setModal(true), children: "+ New simulation" })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "toolbar", children: [
-      /* @__PURE__ */ jsxs5("label", { className: "search", children: [
+    /* @__PURE__ */ jsxs4("div", { className: "toolbar", children: [
+      /* @__PURE__ */ jsxs4("label", { className: "search", children: [
         "\u2315 ",
-        /* @__PURE__ */ jsx5("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Search simulations", "aria-label": "Search simulations", style: { border: "none", background: "none", font: "inherit", flex: 1, outline: "none", color: "var(--ink)" } })
+        /* @__PURE__ */ jsx4("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Search simulations", "aria-label": "Search simulations", style: { border: "none", background: "none", font: "inherit", flex: 1, outline: "none", color: "var(--ink)" } })
       ] }),
-      /* @__PURE__ */ jsx5("button", { className: "btn", onClick: () => setEco(simulations[0]), children: "Ecosystem" }),
-      /* @__PURE__ */ jsx5("button", { className: "btn", disabled: true, title: soon, children: "Compare" }),
-      /* @__PURE__ */ jsx5("button", { className: "btn", disabled: true, title: soon, children: "Presets" })
+      /* @__PURE__ */ jsx4("button", { className: "btn", onClick: () => setEco(simulations[0]), children: "Ecosystem" }),
+      /* @__PURE__ */ jsx4("button", { className: "btn", disabled: true, title: soon, children: "Compare" }),
+      /* @__PURE__ */ jsx4("button", { className: "btn", disabled: true, title: soon, children: "Presets" })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "grid", children: [
-      shown.map((sim) => /* @__PURE__ */ jsx5(SimCard, { sim, onEco: () => setEco(sim), onOpen, soon }, sim.id)),
-      query && !shown.length ? /* @__PURE__ */ jsxs5("p", { className: "hint", style: { gridColumn: "1 / -1" }, children: [
+    /* @__PURE__ */ jsxs4("div", { className: "grid", children: [
+      shown.map((sim) => /* @__PURE__ */ jsx4(SimCard, { sim, onEco: () => setEco(sim), onOpen, soon }, sim.id)),
+      query && !shown.length ? /* @__PURE__ */ jsxs4("p", { className: "hint", style: { gridColumn: "1 / -1" }, children: [
         "No simulations match \u201C",
         query,
         "\u201D."
       ] }) : null,
-      /* @__PURE__ */ jsxs5("button", { className: "newcard", onClick: () => setModal(true), children: [
-        /* @__PURE__ */ jsx5("span", { className: "plus", children: "+" }),
+      /* @__PURE__ */ jsxs4("button", { className: "newcard", onClick: () => setModal(true), children: [
+        /* @__PURE__ */ jsx4("span", { className: "plus", children: "+" }),
         "New simulation",
-        /* @__PURE__ */ jsx5("small", { children: "Ecosystem, subset, or single service" })
+        /* @__PURE__ */ jsx4("small", { children: "Ecosystem, subset, or single service" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs5("p", { className: "note", children: [
-      /* @__PURE__ */ jsx5("b", { children: "Design notes:" }),
+    /* @__PURE__ */ jsxs4("p", { className: "note", children: [
+      /* @__PURE__ */ jsx4("b", { children: "Design notes:" }),
       " one primary action per view \xB7 destructive actions behind \u22EF with type-to-confirm \xB7 thumbnails show scope \xB7 status always colour + glyph (\u2715 \u25B2 \u25CF) \xB7 chips use KPI-family colours \xB7 tabular numerals throughout."
     ] }),
-    modal ? /* @__PURE__ */ jsx5(ForkModal, { onClose: () => setModal(false), onNew }) : null,
-    eco ? /* @__PURE__ */ jsx5(Ecosystem, { sim: eco, onClose: () => setEco(null), onEditInSetup: () => {
+    modal ? /* @__PURE__ */ jsx4(ForkModal, { onClose: () => setModal(false), onNew }) : null,
+    eco ? /* @__PURE__ */ jsx4(Ecosystem, { sim: eco, onClose: () => setEco(null), onEditInSetup: () => {
       setEco(null);
       onOpen && onOpen();
     } }) : null
@@ -7204,12 +6461,12 @@ function HomePage({ simulations, onOpen, onNew }) {
 function SimCard({ sim, onEco, onOpen, soon }) {
   const h = sim.headline;
   const rag = RAG[h.worst];
-  return /* @__PURE__ */ jsxs5("article", { className: "card", children: [
-    /* @__PURE__ */ jsxs5("div", { className: "head", children: [
-      /* @__PURE__ */ jsx5("button", { className: "thumb", onClick: onEco, "aria-label": "Open ecosystem view for " + sim.name, children: /* @__PURE__ */ jsx5(Thumb, { model: sim.model }) }),
-      /* @__PURE__ */ jsxs5("div", { style: { minWidth: 0 }, children: [
-        /* @__PURE__ */ jsx5("h3", { children: sim.name }),
-        /* @__PURE__ */ jsxs5("p", { className: "meta", children: [
+  return /* @__PURE__ */ jsxs4("article", { className: "card", children: [
+    /* @__PURE__ */ jsxs4("div", { className: "head", children: [
+      /* @__PURE__ */ jsx4("button", { className: "thumb", onClick: onEco, "aria-label": "Open ecosystem view for " + sim.name, children: /* @__PURE__ */ jsx4(Thumb, { model: sim.model }) }),
+      /* @__PURE__ */ jsxs4("div", { style: { minWidth: 0 }, children: [
+        /* @__PURE__ */ jsx4("h3", { children: sim.name }),
+        /* @__PURE__ */ jsxs4("p", { className: "meta", children: [
           sim.scope,
           " \xB7 updated ",
           sim.updated,
@@ -7218,43 +6475,43 @@ function SimCard({ sim, onEco, onOpen, soon }) {
           " runs"
         ] })
       ] }),
-      /* @__PURE__ */ jsx5("button", { className: "dots", "aria-label": "More actions for " + sim.name, disabled: true, title: soon, children: "\u22EF" })
+      /* @__PURE__ */ jsx4("button", { className: "dots", "aria-label": "More actions for " + sim.name, disabled: true, title: soon, children: "\u22EF" })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "chips", children: [
-      /* @__PURE__ */ jsxs5("span", { className: "chip num", children: [
+    /* @__PURE__ */ jsxs4("div", { className: "chips", children: [
+      /* @__PURE__ */ jsxs4("span", { className: "chip num", children: [
         h.horizon,
         " wk"
       ] }),
-      /* @__PURE__ */ jsxs5("span", { className: "chip num", children: [
+      /* @__PURE__ */ jsxs4("span", { className: "chip num", children: [
         sim.services,
         " svc \xB7 ",
         h.queues,
         " queues"
       ] }),
-      /* @__PURE__ */ jsxs5("span", { className: "chip hc num", children: [
+      /* @__PURE__ */ jsxs4("span", { className: "chip hc num", children: [
         fmtN2(h.availFte),
         " FTE avail."
       ] }),
-      /* @__PURE__ */ jsxs5("span", { className: "chip money num", children: [
+      /* @__PURE__ */ jsxs4("span", { className: "chip money num", children: [
         fmtM3(h.allIn),
         " all-in"
       ] }),
-      /* @__PURE__ */ jsxs5("span", { className: "chip " + rag.cls, children: [
+      /* @__PURE__ */ jsxs4("span", { className: "chip " + rag.cls, children: [
         rag.glyph,
         " ",
         h.worst === "green" ? "on track" : rag.label
       ] })
     ] }),
-    /* @__PURE__ */ jsx5("button", { className: "btn open", onClick: onOpen, children: "Open" })
+    /* @__PURE__ */ jsx4("button", { className: "btn open", onClick: onOpen, children: "Open" })
   ] });
 }
 function Thumb({ model }) {
   const nodes = (model.queues || []).slice(0, 6);
   const pts = [[20, 14], [56, 12], [14, 45], [46, 49], [66, 38], [38, 31]];
-  return /* @__PURE__ */ jsx5("svg", { width: "76", height: "62", viewBox: "0 0 76 62", "aria-hidden": "true", children: nodes.map((q, i) => {
+  return /* @__PURE__ */ jsx4("svg", { width: "76", height: "62", viewBox: "0 0 76 62", "aria-hidden": "true", children: nodes.map((q, i) => {
     const [cx, cy] = pts[i % pts.length];
     const voice = q.type === "inbound_call" || q.type === "outbound_call";
-    return /* @__PURE__ */ jsx5("circle", { cx, cy, r: i === 0 ? 7 : 6, fill: voice ? "#185FA5" : q.type === "governance" ? "#534AB7" : "#378ADD" }, q.id);
+    return /* @__PURE__ */ jsx4("circle", { cx, cy, r: i === 0 ? 7 : 6, fill: voice ? "#185FA5" : q.type === "governance" ? "#534AB7" : "#378ADD" }, q.id);
   }) });
 }
 function ForkModal({ onClose, onNew }) {
@@ -7274,60 +6531,60 @@ function ForkModal({ onClose, onNew }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return /* @__PURE__ */ jsx5("div", { className: "overlay on", onClick: (e) => {
+  return /* @__PURE__ */ jsx4("div", { className: "overlay on", onClick: (e) => {
     if (e.target === e.currentTarget) onClose();
-  }, children: /* @__PURE__ */ jsxs5("div", { className: "modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "forktitle", children: [
-    /* @__PURE__ */ jsx5("h3", { id: "forktitle", children: "New simulation" }),
-    /* @__PURE__ */ jsx5("p", { children: "Choose the scope \u2014 it opens in Setup, where you can refine everything." }),
-    /* @__PURE__ */ jsx5("div", { className: "forks", children: forks.map((f) => /* @__PURE__ */ jsx5("button", { className: "fork", onClick: enter, children: /* @__PURE__ */ jsxs5("span", { children: [
-      /* @__PURE__ */ jsx5("span", { className: "t", children: f.t }),
-      /* @__PURE__ */ jsx5("br", {}),
-      /* @__PURE__ */ jsx5("span", { className: "d", children: f.d })
+  }, children: /* @__PURE__ */ jsxs4("div", { className: "modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "forktitle", children: [
+    /* @__PURE__ */ jsx4("h3", { id: "forktitle", children: "New simulation" }),
+    /* @__PURE__ */ jsx4("p", { children: "Choose the scope \u2014 it opens in Setup, where you can refine everything." }),
+    /* @__PURE__ */ jsx4("div", { className: "forks", children: forks.map((f) => /* @__PURE__ */ jsx4("button", { className: "fork", onClick: enter, children: /* @__PURE__ */ jsxs4("span", { children: [
+      /* @__PURE__ */ jsx4("span", { className: "t", children: f.t }),
+      /* @__PURE__ */ jsx4("br", {}),
+      /* @__PURE__ */ jsx4("span", { className: "d", children: f.d })
     ] }) }, f.t)) }),
-    /* @__PURE__ */ jsxs5("div", { className: "foot", children: [
-      /* @__PURE__ */ jsx5("button", { className: "link", disabled: true, title: "Not available in this build yet", style: { opacity: 0.5, cursor: "not-allowed" }, children: "Start from a template" }),
-      /* @__PURE__ */ jsx5("button", { className: "btn", onClick: onClose, children: "Cancel" })
+    /* @__PURE__ */ jsxs4("div", { className: "foot", children: [
+      /* @__PURE__ */ jsx4("button", { className: "link", disabled: true, title: "Not available in this build yet", style: { opacity: 0.5, cursor: "not-allowed" }, children: "Start from a template" }),
+      /* @__PURE__ */ jsx4("button", { className: "btn", onClick: onClose, children: "Cancel" })
     ] })
   ] }) });
 }
 function Ecosystem({ sim, onClose, onEditInSetup }) {
-  const layout = useMemo6(() => sankeyLayout(sim.model, { failedPct: sim.headline.allIn && sim.headline ? failedFrac(sim) : 0.02 }), [sim]);
+  const layout = useMemo5(() => sankeyLayout(sim.model, { failedPct: sim.headline.allIn && sim.headline ? failedFrac(sim) : 0.02 }), [sim]);
   const fill = (cls) => cls === "gov" ? "#7F77DD" : cls === "res" ? "#1D9E75" : cls === "fail" ? "#EF9F27" : "#378ADD";
   const nodeFill = (col, n) => col.key === "outcome" ? n.id === "failed" ? "#FAEEDA" : "#E1F5EE" : col.key === "service" ? "#fff" : n.gov ? "#EEEDFE" : "#E6F1FB";
   const nodeStroke = (col, n) => col.key === "outcome" ? n.id === "failed" ? "#BA7517" : "#0F6E56" : n.gov ? "#534AB7" : "#185FA5";
-  return /* @__PURE__ */ jsx5("div", { className: "eco-scrim on", onClick: (e) => {
+  return /* @__PURE__ */ jsx4("div", { className: "eco-scrim on", onClick: (e) => {
     if (e.target === e.currentTarget) onClose();
-  }, children: /* @__PURE__ */ jsxs5("div", { className: "eco", role: "dialog", "aria-modal": "true", "aria-labelledby": "ecotitle", children: [
-    /* @__PURE__ */ jsxs5("h3", { id: "ecotitle", children: [
+  }, children: /* @__PURE__ */ jsxs4("div", { className: "eco", role: "dialog", "aria-modal": "true", "aria-labelledby": "ecotitle", children: [
+    /* @__PURE__ */ jsxs4("h3", { id: "ecotitle", children: [
       "Ecosystem \u2014 ",
       layout.brandName
     ] }),
-    /* @__PURE__ */ jsx5("p", { className: "sub", children: "Volume flow \xB7 brand \u2192 channel \u2192 service mix \u2192 journey queues \u2192 outcome \xB7 view only, edit in Setup" }),
-    /* @__PURE__ */ jsx5("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs5("svg", { width: "100%", viewBox: `0 0 ${layout.width} ${layout.height}`, "aria-label": "Ecosystem volume flow", style: { minWidth: 560 }, children: [
-      layout.columns.map((col) => /* @__PURE__ */ jsx5("text", { x: col.x + layout.colw / 2, y: "16", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: col.label }, col.key)),
-      layout.links.map((lk, i) => /* @__PURE__ */ jsx5("polygon", { points: lk.points, fill: fill(lk.cls), fillOpacity: lk.cls === "fail" ? "0.5" : "0.28" }, i)),
-      layout.columns.map((col) => col.nodes.map((n) => /* @__PURE__ */ jsxs5("g", { children: [
-        /* @__PURE__ */ jsx5("rect", { x: col.x, y: n.y, width: layout.colw, height: n.h, rx: "7", fill: nodeFill(col, n), stroke: nodeStroke(col, n) }),
-        /* @__PURE__ */ jsxs5("text", { x: col.x + layout.colw / 2, y: n.y + n.h / 2 + 3, textAnchor: "middle", fontSize: "9.5", fontWeight: "600", fill: "#0C447C", children: [
+    /* @__PURE__ */ jsx4("p", { className: "sub", children: "Volume flow \xB7 brand \u2192 channel \u2192 service mix \u2192 journey queues \u2192 outcome \xB7 view only, edit in Setup" }),
+    /* @__PURE__ */ jsx4("div", { style: { overflowX: "auto" }, children: /* @__PURE__ */ jsxs4("svg", { width: "100%", viewBox: `0 0 ${layout.width} ${layout.height}`, "aria-label": "Ecosystem volume flow", style: { minWidth: 560 }, children: [
+      layout.columns.map((col) => /* @__PURE__ */ jsx4("text", { x: col.x + layout.colw / 2, y: "16", textAnchor: "middle", fontSize: "10.5", fill: "#8a887f", children: col.label }, col.key)),
+      layout.links.map((lk, i) => /* @__PURE__ */ jsx4("polygon", { points: lk.points, fill: fill(lk.cls), fillOpacity: lk.cls === "fail" ? "0.5" : "0.28" }, i)),
+      layout.columns.map((col) => col.nodes.map((n) => /* @__PURE__ */ jsxs4("g", { children: [
+        /* @__PURE__ */ jsx4("rect", { x: col.x, y: n.y, width: layout.colw, height: n.h, rx: "7", fill: nodeFill(col, n), stroke: nodeStroke(col, n) }),
+        /* @__PURE__ */ jsxs4("text", { x: col.x + layout.colw / 2, y: n.y + n.h / 2 + 3, textAnchor: "middle", fontSize: "9.5", fontWeight: "600", fill: "#0C447C", children: [
           clip(n.label),
           col.key === "outcome" ? " " + Math.round(n.value / layout.totalQ * 100) + "%" : ""
         ] })
       ] }, n.id)))
     ] }) }),
-    /* @__PURE__ */ jsxs5("p", { className: "ecohint", style: { marginTop: 6 }, children: [
+    /* @__PURE__ */ jsxs4("p", { className: "ecohint", style: { marginTop: 6 }, children: [
       "Channel volume profiles split by service mix %; journeys route it onward. Governance stations (purple) sample a % of cases. ",
-      /* @__PURE__ */ jsx5("b", { children: "Queue volumes are derived, never entered." })
+      /* @__PURE__ */ jsx4("b", { children: "Queue volumes are derived, never entered." })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "legend", children: [
-      /* @__PURE__ */ jsx5("span", { className: "lg pool", children: "ribbon = volume share" }),
-      /* @__PURE__ */ jsx5("span", { className: "lg sup", children: "green = resolved" }),
-      /* @__PURE__ */ jsx5("span", { className: "lg ovf", children: "amber = failed" })
+    /* @__PURE__ */ jsxs4("div", { className: "legend", children: [
+      /* @__PURE__ */ jsx4("span", { className: "lg pool", children: "ribbon = volume share" }),
+      /* @__PURE__ */ jsx4("span", { className: "lg sup", children: "green = resolved" }),
+      /* @__PURE__ */ jsx4("span", { className: "lg ovf", children: "amber = failed" })
     ] }),
-    /* @__PURE__ */ jsxs5("div", { className: "ecofoot", children: [
-      /* @__PURE__ */ jsx5("span", { className: "ecohint", children: "Flows shown for the current plan; scrub weeks in Results \u203A Flow." }),
-      /* @__PURE__ */ jsxs5("div", { style: { display: "flex", gap: 8 }, children: [
-        /* @__PURE__ */ jsx5("button", { className: "btn", onClick: onEditInSetup, children: "Edit in Setup" }),
-        /* @__PURE__ */ jsx5("button", { className: "btn primary", onClick: onClose, children: "Close" })
+    /* @__PURE__ */ jsxs4("div", { className: "ecofoot", children: [
+      /* @__PURE__ */ jsx4("span", { className: "ecohint", children: "Flows shown for the current plan; scrub weeks in Results \u203A Flow." }),
+      /* @__PURE__ */ jsxs4("div", { style: { display: "flex", gap: 8 }, children: [
+        /* @__PURE__ */ jsx4("button", { className: "btn", onClick: onEditInSetup, children: "Edit in Setup" }),
+        /* @__PURE__ */ jsx4("button", { className: "btn primary", onClick: onClose, children: "Close" })
       ] })
     ] })
   ] }) });
@@ -7341,15 +6598,6 @@ function failedFrac(sim) {
 
 // ui/v2/store.js
 var KEY = "capacity.v2.model";
-function saveModel(model) {
-  try {
-    if (typeof localStorage === "undefined") return false;
-    localStorage.setItem(KEY, JSON.stringify(model));
-    return true;
-  } catch {
-    return false;
-  }
-}
 function loadModel() {
   try {
     if (typeof localStorage === "undefined") return null;
@@ -7363,40 +6611,38 @@ function loadModel() {
 // ui/v2/App.jsx
 var import_store_domain = __toESM(require_store_domain());
 var import_migrate_domain = __toESM(require_migrate_domain());
-import { Fragment as Fragment7, jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var import_ops = __toESM(require_ops());
+import { Fragment as Fragment6, jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
 function App({ initialModel }) {
-  const [model, setModel] = useState8(() => loadModel() || initialModel);
-  const [tab, setTab] = useState8("home");
-  const [domainModel, setDomainModel] = useState8(() => {
+  const [model, setModel] = useState7(() => {
     try {
       const r = (0, import_store_domain.loadDomainModel)();
-      return r ? r.model : (0, import_migrate_domain.migrateV2ToDomain)(loadModel() || initialModel);
+      if (r) return r.model;
+    } catch {
+    }
+    try {
+      return (0, import_migrate_domain.migrateV2ToDomain)(loadModel() || initialModel);
     } catch {
       return (0, import_migrate_domain.migrateV2ToDomain)(initialModel);
     }
   });
-  const [importReport, setImportReport] = useState8(null);
-  const [selected, setSelected] = useState8(null);
-  const nav = useCallback3((t) => setTab(t), []);
-  const newSimulation = useCallback3(() => {
-    setModel(emptyModel(initialModel.engineConfig));
+  const [tab, setTab] = useState7("home");
+  const [importReport, setImportReport] = useState7(null);
+  const [selected, setSelected] = useState7(null);
+  const nav = useCallback2((t) => setTab(t), []);
+  const newSimulation = useCallback2(() => {
+    setModel((m) => (0, import_ops.blankDomainModel)(m.engineConfig || initialModel.engineConfig));
     setSelected(null);
     setTab("setup");
   }, [initialModel]);
   const timer = useRef4(null);
   useEffect5(() => {
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => saveModel(model), 300);
+    timer.current = setTimeout(() => (0, import_store_domain.saveDomainModel)(model), 300);
     return () => clearTimeout(timer.current);
   }, [model]);
-  const dTimer = useRef4(null);
-  useEffect5(() => {
-    clearTimeout(dTimer.current);
-    dTimer.current = setTimeout(() => (0, import_store_domain.saveDomainModel)(domainModel), 300);
-    return () => clearTimeout(dTimer.current);
-  }, [domainModel]);
   const lastHeadline = useRef4(null);
-  const simulations = useMemo7(() => {
+  const simulations = useMemo6(() => {
     let headline = lastHeadline.current;
     if (tab === "home" || !headline) {
       try {
@@ -7408,20 +6654,20 @@ function App({ initialModel }) {
     }
     return [{
       id: "sim_full",
-      name: (model.brands[0] && model.brands[0].name) + " \u2014 full estate",
+      name: (model.brands[0] && model.brands[0].name || "New simulation") + " \u2014 full estate",
       scope: "Whole ecosystem",
       updated: "just now",
       runs: 3,
       model,
-      services: model.services.length,
+      services: (model.requestTypes || []).length,
       headline
     }];
   }, [model, tab]);
-  const onDownloadTemplate = useCallback3(async (m) => {
-    const { downloadTemplate: downloadTemplate2 } = await Promise.resolve().then(() => (init_template_xlsx(), template_xlsx_exports));
-    await downloadTemplate2(m);
+  const onDownloadTemplate = useCallback2(async (m) => {
+    const { downloadDomainTemplate: downloadDomainTemplate2 } = await Promise.resolve().then(() => (init_template_domain_xlsx(), template_domain_xlsx_exports));
+    await downloadDomainTemplate2(m);
   }, []);
-  const onUploadTemplate = useCallback3(() => {
+  const onUploadTemplate = useCallback2(() => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".xlsx,.xls";
@@ -7429,13 +6675,13 @@ function App({ initialModel }) {
       const file = input.files && input.files[0];
       if (!file) return;
       try {
-        const { importWorkbook: importWorkbook2 } = await Promise.resolve().then(() => (init_template_xlsx(), template_xlsx_exports));
+        const { importDomainWorkbook: importDomainWorkbook2 } = await Promise.resolve().then(() => (init_template_domain_xlsx(), template_domain_xlsx_exports));
         const buf = await file.arrayBuffer();
-        const { model: imported } = await importWorkbook2(new Uint8Array(buf));
+        const { model: imported } = await importDomainWorkbook2(new Uint8Array(buf));
         const merged = { ...imported, engineConfig: model.engineConfig };
         setModel(merged);
         setSelected(null);
-        setImportReport({ ...buildImportReport(merged), filename: file.name });
+        setImportReport({ ...(0, import_ops.buildDomainImportReport)(merged), filename: file.name });
         setTab("setup");
       } catch (e) {
         setImportReport({ error: `Couldn\u2019t read \u201C${file.name}\u201D. ${e.message}` });
@@ -7444,22 +6690,18 @@ function App({ initialModel }) {
     };
     input.click();
   }, [model]);
-  return /* @__PURE__ */ jsxs6(Fragment7, { children: [
-    tab === "home" && /* @__PURE__ */ jsx6(HomePage, { simulations, onOpen: () => setTab("setup"), onNew: newSimulation, onNav: nav }),
-    tab === "setup" && /* @__PURE__ */ jsx6(SetupPage, { model, onModelChange: setModel, onNav: nav, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport: () => setImportReport(null), onOpenV3: () => {
-      setDomainModel((0, import_migrate_domain.migrateV2ToDomain)(model));
-      setTab("setup3");
-    } }),
-    tab === "setup3" && /* @__PURE__ */ jsx6(SetupV3Page, { model: domainModel, onModelChange: setDomainModel, onNav: nav, onOpenClassic: () => setTab("setup") }),
-    tab === "levers" && /* @__PURE__ */ jsx6(LeversPage, { model, onModelChange: setModel, onNav: nav, selected, onSelectedChange: setSelected }),
-    tab === "results" && /* @__PURE__ */ jsx6(ResultsPage, { model, onNav: nav, selected, onSelectedChange: setSelected })
+  return /* @__PURE__ */ jsxs5(Fragment6, { children: [
+    tab === "home" && /* @__PURE__ */ jsx5(HomePage, { simulations, onOpen: () => setTab("setup"), onNew: newSimulation, onNav: nav }),
+    tab === "setup" && /* @__PURE__ */ jsx5(SetupV3Page, { model, onModelChange: setModel, onNav: nav, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport: () => setImportReport(null) }),
+    tab === "levers" && /* @__PURE__ */ jsx5(LeversPage, { model, onModelChange: setModel, onNav: nav, selected, onSelectedChange: setSelected }),
+    tab === "results" && /* @__PURE__ */ jsx5(ResultsPage, { model, onNav: nav, selected, onSelectedChange: setSelected })
   ] });
 }
 
 // ui/v2/app-main.jsx
 var import_engine4 = __toESM(require_engine());
 var import_migrate = __toESM(require_migrate());
-import { jsx as jsx7 } from "react/jsx-runtime";
+import { jsx as jsx6 } from "react/jsx-runtime";
 var OWNER = "nick_morris";
 function seedModel() {
   return (0, import_migrate.migrateV1ToV2)((0, import_engine4.makeDefaultConfig)());
@@ -7474,7 +6716,7 @@ function injectStyle() {
 function mount(container, opts = {}) {
   injectStyle();
   const root = createRoot(container);
-  root.render(/* @__PURE__ */ jsx7(App, { initialModel: opts.model || seedModel() }));
+  root.render(/* @__PURE__ */ jsx6(App, { initialModel: opts.model || seedModel() }));
   return root;
 }
 var el = typeof document !== "undefined" ? document.getElementById("root") : null;

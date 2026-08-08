@@ -145,7 +145,7 @@ rewriting the logic.
 
 ---
 
-## 4. Honest summary
+## 4. Honest summary (v2.4, historical)
 
 v2.4 is a **better product architecture with a smaller feature surface**. It
 solved the problems the brief set (derived demand, hierarchy, journeys, one IA,
@@ -158,3 +158,30 @@ Roughly **two-thirds of v1's editable surface and half its analysis depth**
 remain to be reinstated. The good news is that the engine still computes all of
 it, the values still flow, and most of the v1 code that presented it is still
 in the tree.
+
+---
+
+## 5. RE-SCORE after the domain rebuild (F1 complete)
+
+**Compared:** v1 against the shipping six-tab app (SPEC-V3.md baseline).
+The Setup/editing side of the ledger has substantially closed; the analysis
+side (Results/Levers/Home depth) is deliberately untouched — next cycle.
+
+| Measure | v1 | v2.4 | **now (v3)** |
+|---|---|---|---|
+| Editable fields | 106 | ~32 | **~95** (six-tab Setup: registry + channel defaults 10 · queue families ~30 · request types/processes ~12 · volume grid n rows × value/shape · Defaults 24) |
+| Queue parameters | 41 | ~10 | **~30** exposed (six families × Advanced; pipeline, burnout, cross-skill, supports, subtype, backlog, priority, deflection all back) |
+| Global/engine settings exposed | 46 | 0 | **~26** (Defaults: frame 10 · hiring 2 · overtime 4 · costs 2 · customer 6 · seasonality 2; channel defaults moved to Structure; risk thresholds remain a Results lens) |
+| Manual hiring plan (S4) | ✔ | ⛔ absent | **✔ restored** — week × heads per queue, proven end-to-end to the engine |
+| Seasonality / weekly demand | ✔ | ⛔ absent | **✔ restored** — 52-week series + preset library at any cascade level, reaching `weeklyVolumes` |
+| Service teams (shared capacity) | ✔ | hidden | **✔ editable** (Queues › Shared capacity, 8 params + covers) |
+| Volume model | totals per queue | mix % profiles, deepest-wins | **cascade with provenance** (entered · weighted · equal · scaled-and-flagged) — better than both |
+| Ecosystem/global view | static | derived Sankey | **generated Map** (flow from steps, dashed capacity links, validation with jump-links) |
+| Data-tab columns | 53 × 52 wks | 9 × 3 wks | unchanged (next cycle) |
+| Charts | 6 | 1 (+2) | unchanged (next cycle) |
+| Saved runs / reports | ✔ | — | unchanged (next cycle) |
+
+**Remaining gaps are now concentrated in analysis depth, not authoring:**
+the two ⛔ functional holes (manual hires, seasonality) are closed; what's
+left of the v1 ledger is Results-side surface (columns, charts, saved runs,
+reports) plus the style pass the owner has queued behind function.

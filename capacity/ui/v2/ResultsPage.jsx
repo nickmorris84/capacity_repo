@@ -163,17 +163,29 @@ function Summary({ base, sel, setSelected, summary, weeks, cfg, stratName, grpNa
 function RiskRegister({ summary, cfg, model }) {
   const [bu, setBu] = useState("all");
   const [ch, setCh] = useState("all");
-  const bus = useMemo(() => (model.brands || []).flatMap((b) => b.businessUnits.map((x) => x.name)), [model]);
+  // Works for both model generations: the domain model carries a flat
+  // businessUnits list and per-queue homeBuId; the v2 model nests BUs under
+  // brands and attaches queues to structure paths.
+  const isDomain = !!model.businessUnits;
+  const bus = useMemo(() => isDomain
+    ? (model.businessUnits || []).map((x) => x.name)
+    : (model.brands || []).flatMap((b) => (b.businessUnits || []).map((x) => x.name)), [model, isDomain]);
   const channels = useMemo(() => [...new Set((cfg.queues || []).map((q) => q.channel))], [cfg]);
-  // Map each queue to the Business unit it sits under (via the v2 structure), so
-  // the BU filter works against the engine's queue-named findings.
+  // Map each queue to the Business unit it sits under, so the BU filter works
+  // against the engine's queue-named findings.
   const queueBu = useMemo(() => {
+    const map = {};
+    if (isDomain) {
+      const buName = {};
+      for (const b of model.businessUnits || []) buName[b.id] = b.name;
+      for (const q of model.queues || []) map[q.name] = q.homeBuId ? (buName[q.homeBuId] || null) : "Shared";
+      return map;
+    }
     const chBu = {};
     for (const b of model.brands || []) for (const bu of b.businessUnits || []) for (const p of bu.products || []) for (const c of p.channels || []) chBu[c.id] = bu.name;
-    const map = {};
     for (const q of model.queues || []) map[q.name] = q.attachment && q.attachment.kind === "structural" ? (chBu[q.attachment.channelInstanceId] || null) : "Shared";
     return map;
-  }, [model]);
+  }, [model, isDomain]);
   // Tag each finding with the queue it names, and that queue's BU + channel.
   const rows = useMemo(() => summary.findings.filter((f) => f.tone !== "green").map((f) => {
     const q = cfg.queues.find((qq) => f.text.includes(qq.name));

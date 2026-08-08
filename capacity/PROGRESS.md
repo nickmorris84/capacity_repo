@@ -6,6 +6,38 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — F1: THE SWAP ✅ — the six-tab app ships
+
+The domain model is now THE model:
+
+- **One cfg boundary** — `ui/v2/compute.js` gains `toEngineCfg()`: domain
+  models go through the bridge, v2.4 models keep the old adapter, so the
+  Results/Levers component gates (which mount with v2 fixtures) stay green
+  while the app runs on the domain path.
+- **App shell** — `App.jsx` holds ONE model (domain): restored from the v3
+  key, else a stored v2.4 save migrates, else the packaged default
+  migrates. Setup routes to the six-tab shell; classic SetupPage remains
+  only as a gate-covered component. "New simulation" = blank domain model
+  with the engine-defaults carry (empty world still simulates). Autosave →
+  `capacity.v3.model`.
+- **Levers/Results on the bridge** — Levers ops already edit only
+  `engineConfig` (shape-agnostic); Results' risk-register BU filter made
+  shape-aware (flat BUs + homeBuId vs the old nested structure).
+- **Template v3 in the app** — `ui/v2/template-domain-xlsx.js` (SheetJS
+  binding over model/template-domain.js); the shell gets Download/Upload +
+  the domain import report banner (counts, errors, warnings, dismissible).
+- **Docs** — SPEC-V3.md written as the new baseline (SPEC-V2 bannered as
+  superseded in its Setup/model sections); GAP-ANALYSIS gains §5 RE-SCORE:
+  editable fields ~32 → ~95, queue params ~10 → ~30, globals 0 → ~26, and
+  both ⛔ functional holes (manual hires, seasonality) closed — remaining
+  gaps are Results-side analysis depth.
+- Integration gate updated to the six-tab world (estate-row cascade edit →
+  Results data; empty-model progress strip; v3 autosave key).
+
+**Full suite: 32 gates green; dist ships the six-tab app; artifact
+republished.** Next: the style pass (owner-queued), then Results/Levers/
+Home depth per GAP-ANALYSIS §5.
+
 ## DOMAIN REDESIGN — U5 + U6: Volume cascade grid · Map · Defaults ✅ (two new gates)
 
 **U5 — the cascade grid** (REVIEW-SETUP §3.4). Rows are the spine (estate →
