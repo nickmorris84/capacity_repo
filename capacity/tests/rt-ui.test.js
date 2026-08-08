@@ -55,6 +55,13 @@ function subtab(label, r) {
   return b;
 }
 const rtRow = (name) => $$(".rtrow").find((r) => r.textContent.includes(name));
+// Tickets toggle, so opening is idempotent.
+function openRt(name, r) {
+  const head = $$(".rtrow", r).find((x) => x.textContent.includes(name));
+  ok(head, "request-type ticket not found: " + name);
+  if (head.getAttribute("aria-expanded") !== "true") click(head);
+  return head;
+}
 const detail = () => $('[data-testid="rt-detail"]');
 const byLabel = (re, r) => $$("input,select", r || detail()).find((i) => re.test(i.getAttribute("aria-label") || ""));
 
@@ -74,7 +81,7 @@ await t("mounts; master list shows rows with group, assignment and channels", ()
 });
 
 await t("identity edits: name, group select, AHT override are live model edits", () => {
-  click(rtRow("New card application"));
+  openRt("New card application");
   eq(byLabel(/^Request type name$/).value, "New card application", "name loaded");
   eq(byLabel(/^AHT override$/).value, "540", "AHT override loaded");
   setV(byLabel(/^Request type name$/), "Card application");
@@ -83,7 +90,7 @@ await t("identity edits: name, group select, AHT override are live model edits",
 });
 
 await t("assignment: unassigning the only brand spells out All; reassign restores", () => {
-  click(rtRow("Billing enquiry"));
+  openRt("Billing enquiry");
   const applies = () => $('[data-testid="applies-line"]').textContent;
   ok(/Acme · Customer Service/.test(applies()), "starts assigned");
   click($$(".chip.on-toggle", detail()).find((c) => c.textContent === "Acme"));
@@ -111,7 +118,7 @@ await t("V2 double-cover renders inline in Assignment (soft, scoped to the group
 });
 
 await t("THE CASCADE PROOF: editing the 60% split to 100 moves the derived queue volume", () => {
-  click(rtRow("New card application"));
+  openRt("New card application");
   const split = $$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || "") && i.value === "60");
   ok(split, "the 60% verification split input");
   setV(split, 100);
@@ -119,18 +126,18 @@ await t("THE CASCADE PROOF: editing the 60% split to 100 moves the derived queue
   const verify = $$(".mdlist button").find((r) => /Outbound — Verification/.test(r.textContent));
   ok(/702\/day/.test(verify.textContent.replace(/\s+/g, " ")), "q_verify derives 702/day at 100%: " + verify.textContent);
   subtab("Request types");
-  click(rtRow("New card application"));
+  openRt("New card application");
   setV($$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || "")), 60);
 });
 
 await t("the p/(1−p) multi-round rework figure rides the split field's tooltip", () => {
-  click(rtRow("New card application"));
+  openRt("New card application");
   const split = $$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || ""));
   ok(/effective 150%/.test(split.getAttribute("title") || ""), "60% branch tooltip shows eff. 150% (0.6/0.4): " + split.getAttribute("title"));
 });
 
 await t("terminal + outcome: unticking 'ends' flags V3 live; reticking clears it", () => {
-  click(rtRow("Billing enquiry"));
+  openRt("Billing enquiry");
   const ends = byLabel(/proc_billing_voice step 2 terminal/);
   toggle(ends); // off
   ok(/leads nowhere/.test(detail().textContent), "inline V3 error");
@@ -143,7 +150,7 @@ await t("terminal + outcome: unticking 'ends' flags V3 live; reticking clears it
 });
 
 await t("outcome chips: add one, use it on a terminal step, removal then blocks", () => {
-  click(rtRow("New card application"));
+  openRt("New card application");
   setV(byLabel(/proc_newcard_digital new outcome/), "escalated");
   click($$(".btn", detail()).find((b) => b.textContent === "Add"));
   const outSel = byLabel(/proc_newcard_digital step 3 outcome/);
@@ -156,7 +163,7 @@ await t("outcome chips: add one, use it on a terminal step, removal then blocks"
 });
 
 await t("channel picker: adding a Voice process to the card journey, then removing it", () => {
-  click(rtRow("New card application"));
+  openRt("New card application");
   click($$(".chip.off", detail()).find((c) => /Voice/.test(c.textContent)));
   const proc = $('[data-testid="process-rt_newcard-ch_voice"]');
   ok(proc, "voice process created");
@@ -182,7 +189,7 @@ await t("add + guarded delete: a new request type deletes; one with volume entri
   ok($$(".btn", detail()).some((b) => b.textContent === "Delete request type"), "fresh one deletable");
   click($$(".btn", detail()).find((b) => b.textContent === "Delete request type"));
   ok(!rtRow("New request type"), "deleted");
-  click(rtRow("Billing enquiry"));
+  openRt("Billing enquiry");
   ok(/Delete blocked/.test(detail().textContent) && /1 volume entry/.test(detail().textContent), "delete guarded by its volume entry: " + detail().textContent.slice(-120));
 });
 

@@ -235,14 +235,12 @@ function usageOf(model, kind, id) {
   });
   return rts.map((rt) => rt.name);
 }
-function UsageNote({ names, none }) {
-  if (!names.length) return <span className="hint usage-none">{none}</span>;
-  const shown = names.slice(0, 3).join(", ");
-  return (
-    <span className="hint usagenote" title={names.join(", ")}>
-      {names.length} request type{names.length === 1 ? "" : "s"}: {shown}{names.length > 3 ? ` +${names.length - 3}` : ""}
-    </span>
-  );
+function UsageNote({ names }) {
+  const on = names.length > 0;
+  const detail = on
+    ? `Active — used by ${names.length} request type${names.length === 1 ? "" : "s"}: ${names.join(", ")}`
+    : "Not active — nothing references this yet, so it has no effect on the plan.";
+  return <span className={"statusdot" + (on ? " on" : "")} title={detail} aria-label={detail}>{on ? "active" : "not active"}</span>;
 }
 
 function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
@@ -295,8 +293,8 @@ function ChannelRow({ model, c, set }) {
       guard={canDeleteChannel(model, c.id)} onDelete={() => set(Ops.deleteChannel(model, c.id))}
       extra={<>
         <span className="tax">{CHANNEL_LABELS[c.key] || "custom"}</span>
-        <UsageNote names={usageOf(model, "channel", c.id)} none="not used yet" />
-        <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}<span className="chev">▼</span></button>
+        <UsageNote names={usageOf(model, "channel", c.id)} />
+        <button className="linkbtn chdrw" onClick={() => setOpen(!open)} aria-expanded={open}>Settings{Object.keys(d).length ? " ●" : ""}<span className="chev">▼</span></button>
       </>}>
       {open ? (
         <div className="fields chdefaults" data-testid={"channel-defaults-" + c.key}>
@@ -350,7 +348,7 @@ function StructurePanel({ model, set }) {
           {(model.brands || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>);
     }
-    if (USAGE_KIND[key]) bits.push(<UsageNote key="u" names={usageOf(model, USAGE_KIND[key], e.id)} none="not used yet" />);
+    if (USAGE_KIND[key]) bits.push(<UsageNote key="u" names={usageOf(model, USAGE_KIND[key], e.id)} />);
     return bits;
   };
   const enabledKeys = new Set((model.channels || []).map((c) => c.key));
@@ -476,7 +474,7 @@ function QueueDetail({ model, set, q, d, detailRef, onClosed }) {
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
   return (
-    <div className="dbody" data-testid="queue-detail" ref={detailRef} tabIndex={-1} aria-label={q.name}>
+    <div data-testid="queue-detail" ref={detailRef} tabIndex={-1} aria-label={q.name}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <h4 style={{ marginRight: "auto" }}>{q._modified ? <>Tuned<span className="moddot" style={{ marginLeft: 6 }} aria-label="modified" /></> : "Defaults"}</h4>
         <button className="btn sm" onClick={() => set(Ops.resetQueueStaffing(model, q.id))}>Reset to defaults</button>
@@ -645,11 +643,25 @@ function QueuesPanel({ model, set, p }) {
                   const on = sel && sel.kind === "queue" && sel.id === x.id;
                   const shared = x.type === "shared_capacity";
                   return (
-                    <button key={x.id} role="option" aria-selected={on} className={(on ? "on" : "") + (shared ? " shared-cap" : "")} onClick={() => setSel({ kind: "queue", id: x.id })}>
-                      <b>{x.name}{x._modified ? <span className="moddot" style={{ marginLeft: 5 }} aria-label="modified" /> : null}</b>
-                      <small>{QTYPE_LABELS[x.type] || x.type}{u.processes ? ` · ${u.processes} process${u.processes === 1 ? "" : "es"} · ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " · unused"}</small>
-                      <span className="qstats num">{shared ? "lends capacity" : `${fmt(dx ? dx.volume : 0)}/day · ${fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s${dx && dx.ahtMarker === "weighted" ? " · weighted" : dx && dx.ahtMarker === "svc" ? " · svc" : ""}`}</span>
-                    </button>
+                    <div className={"ticket" + (on ? " open" : "") + (shared ? " shared-cap" : "")} key={x.id}>
+                      <button className="tickethead" aria-expanded={on}
+                        onClick={() => setSel(on ? null : { kind: "queue", id: x.id })}>
+                        <span className="tname">
+                          <b>{x.name}{x._modified ? <span className="moddot" aria-label="modified" /> : null}</b>
+                          <small>{QTYPE_LABELS[x.type] || x.type}</small>
+                        </span>
+                        <span className="tmeta">
+                          <span className={"statusdot" + (u.processes ? " on" : "")}
+                            title={u.processes ? `Active — used in ${u.processes} process${u.processes === 1 ? "" : "es"} across ${u.brands} brand${u.brands === 1 ? "" : "s"}` : "Not active — no process routes here, so it carries no load."}>
+                            {u.processes ? "active" : "not active"}</span>
+                          <span className="tsum num">{shared ? "lends capacity" : `${fmt(dx ? dx.volume : 0)}/day · ${fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s`}</span>
+                        </span>
+                        <span className="chev">▼</span>
+                      </button>
+                      {on ? <div className="ticketbody">
+                        <QueueDetail model={model} set={set} q={x} d={dx} detailRef={detailRef} onClosed={close} />
+                      </div> : null}
+                    </div>
                   );
                 })}
               </div>
@@ -662,24 +674,7 @@ function QueuesPanel({ model, set, p }) {
         </div>
       </div>
 
-      {/* Drill-down: the row list stays the surface, the ~30 parameters live in
-          a drawer over it. Full-width on a phone, so the editor is never a
-          cramped column and never renders below the whole list. */}
-      <div className={"scrim" + (open ? " on" : "")} onClick={close} />
-      <aside className={"drawer" + (open ? " on" : "")} aria-label="Edit queue" aria-hidden={!open}>
-        {q ? (
-          <>
-            <div className="dhead">
-              <div>
-                <h3>{q.name}</h3>
-                <p>{(QTYPE_LABELS[q.type] || q.type)}{q.homeBrandId ? " · " + nameOf(model.brands, q.homeBrandId) : " · no home"}</p>
-              </div>
-              <button className="close" onClick={close} aria-label="Close">✕</button>
-            </div>
-            <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} onClosed={close} />
-          </>
-        ) : null}
-      </aside>
+
     </>
   );
 }
@@ -954,21 +949,32 @@ function RequestTypesPanel({ model, set, p }) {
     <>
       <h3>Request types <small>the only place things are wired together</small></h3>
       {rts.length === 0 ? <p className="hint">No request types yet — add one to wire brands, channels and queues together.</p> : null}
-      <div className="md">
-        {/* The add button sits OUTSIDE .mdlist: inside, `.mdlist button` beats
-            `.btn` and it rendered as a sixth list row — and a plain button is
-            not a valid child of role="listbox". Wrapped like QueuesPanel so the
-            sibling does not become a second column of the .md grid. */}
+      <div>
         <div>
-        <div className="mdlist" role="listbox" aria-label="Request types">
+        <div className="mdlist">
           {rts.map((x) => {
             const errs = rtErr(x), warns = rtWarn(x);
+            const on = rt && rt.id === x.id;
+            const live = processesOf(model, x).length > 0 && errs.length === 0;
             return (
-              <button key={x.id} role="option" aria-selected={!!(rt && rt.id === x.id)} className={"rtrow" + (rt && rt.id === x.id ? " on" : "")} onClick={() => setSel(x.id)}>
-                <b>{x.name} <span className={"glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok")}>{errs.length ? "✕" : warns.length ? "▲" : "●"}</span></b>
-                <small>{nameOf(model.processGroups, x.groupId) || "no group"}{x.productId ? " · " + nameOf(model.products, x.productId) : ""} · {assignLine(x)}</small>
-                <small>{processesOf(model, x).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</small>
-              </button>
+              <div className={"ticket" + (on ? " open" : "")} key={x.id}>
+                <button className="tickethead rtrow" aria-expanded={!!on} onClick={() => setSel(on ? null : x.id)}>
+                  <span className="tname">
+                    <b>{x.name} <span className={"glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok")}>{errs.length ? "✕" : warns.length ? "▲" : "●"}</span></b>
+                    <small>{nameOf(model.processGroups, x.groupId) || "no group"}{x.productId ? " · " + nameOf(model.products, x.productId) : ""} · {assignLine(x)}</small>
+                  </span>
+                  <span className="tmeta">
+                    <span className={"statusdot" + (live ? " on" : "")}
+                      title={errs.length ? "Not active — " + errs[0].message
+                        : live ? `Active — ${processesOf(model, x).map((pr) => nameOf(model.channels, pr.channelId)).join(", ")}`
+                        : "Not active — no process is attached, so nothing routes anywhere."}>
+                      {live ? "active" : "not active"}</span>
+                    <span className="tsum">{processesOf(model, x).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</span>
+                  </span>
+                  <span className="chev">▼</span>
+                </button>
+                {on ? <div className="ticketbody">{renderDetail()}</div> : null}
+              </div>
             );
           })}
         </div>
@@ -977,8 +983,14 @@ function RequestTypesPanel({ model, set, p }) {
             set(m2); setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
           }}>+ Request type</button>
         </div>
-        <div className="mddetail" data-testid="rt-detail" ref={detailRef} tabIndex={-1}>
-          {rt ? <>
+      </div>
+    </>
+  );
+
+  function renderDetail() {
+    return (
+      <div data-testid="rt-detail" ref={detailRef} tabIndex={-1}>
+          <>
             <Drawer title="Identity" defaultOpen
               info="What this request is and how it is classified. The process group drives double-cover reporting; the AHT override replaces the queue's own handling time wherever this request type is routed.">
             <div className="fields">
@@ -1032,11 +1044,10 @@ function RequestTypesPanel({ model, set, p }) {
                 ? <button className="btn sm danger" onClick={() => { set(Ops.deleteRequestType(model, rt.id)); setSel(null); }}>Delete request type</button>
                 : <span className="hint blocked" style={{ marginLeft: 0 }}>▲ Delete blocked — referenced by {guardSummary(guard)}. Remove them first.</span>}
             </div>
-          </> : null}
-        </div>
+          </>
       </div>
-    </>
-  );
+    );
+  }
 }
 
 // ---- 4 · Volume — the cascade grid (U5) --------------------------------------
@@ -1088,7 +1099,7 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
   );
 }
 
-function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsShape }) {
+function VolRow({ model, set, level, name, kind, sub, scope, node, hasOwnShape, inheritsShape }) {
   const [shapeOpen, setShapeOpen] = useState(false);
   const entry = entryAt(model, scope);
   const total = node ? node.total : 0;
@@ -1096,8 +1107,10 @@ function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsSha
   const shown = total ? Math.round(total * 10) / 10 : (prov === "entered" ? 0 : "");
   return (
     <>
-      <div className={"volrow lvl" + level} data-key={keyOf(scope)} style={{ "--lvl": level }}>
-        <span className="volname">{name}</span>
+      <div className={"volrow lvl" + level} data-key={keyOf(scope)} data-row={name} data-kind={kind} style={{ "--lvl": level }}>
+        <span className="volname" title={sub ? `${kind} · ${sub}` : kind}>
+          <span className="volkind">{kind}</span>{name}
+        </span>
         <input className="num" value={shown === "" ? "" : shown} placeholder="—" aria-label={"Volume at " + name}
           onChange={(e) => {
             const v = e.target.value.trim();
@@ -1120,15 +1133,24 @@ function VolumePanel({ model, set, p }) {
   const rows = [];
   const seen = new Set();
   const hasShapeAt = (scope) => { const e = entryAt(model, scope); return !!(e && e.weekly); };
-  rows.push({ level: 0, name: "Whole estate", scope: {} });
+  rows.push({ level: 0, kind: "Estate", name: "Whole estate", scope: {} });
   for (const leaf of p.leaves) {
     const bKey = leaf.brandId;
-    if (!seen.has(bKey)) { seen.add(bKey); rows.push({ level: 1, name: nameOf(model.brands, leaf.brandId), scope: { brandId: leaf.brandId } }); }
+    if (!seen.has(bKey)) { seen.add(bKey); rows.push({ level: 1, kind: "Brand", name: nameOf(model.brands, leaf.brandId), scope: { brandId: leaf.brandId } }); }
     const buKey = leaf.brandId + "|" + leaf.buId;
-    if (!seen.has(buKey)) { seen.add(buKey); rows.push({ level: 2, name: nameOf(model.businessUnits, leaf.buId), scope: { brandId: leaf.brandId, buId: leaf.buId } }); }
+    if (!seen.has(buKey)) { seen.add(buKey); rows.push({ level: 2, kind: "Business unit", name: nameOf(model.businessUnits, leaf.buId), scope: { brandId: leaf.brandId, buId: leaf.buId } }); }
     const rtKey = buKey + "|" + leaf.requestTypeId;
-    if (!seen.has(rtKey)) { seen.add(rtKey); rows.push({ level: 3, name: leaf.rt.name, scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId } }); }
-    rows.push({ level: 4, name: nameOf(model.channels, leaf.channelId), scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId } });
+    if (!seen.has(rtKey)) { seen.add(rtKey); rows.push({ level: 3, kind: "Request type", name: leaf.rt.name, scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId } }); }
+    // The finest level a volume can be stated at is the PROCESS — the journey
+    // this demand actually runs through on that channel. (Queues are downstream
+    // of it: a queue's load is derived from the steps, never entered.)
+    const proc = processesOf(model, leaf.rt).find((pr) => pr.channelId === leaf.channelId);
+    rows.push({
+      level: 4, kind: "Process",
+      name: (proc && proc.name) || nameOf(model.channels, leaf.channelId),
+      sub: nameOf(model.channels, leaf.channelId),
+      scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId },
+    });
   }
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
   return (
@@ -1137,7 +1159,7 @@ function VolumePanel({ model, set, p }) {
       {rows.length <= 1 ? <p className="hint">Assign request types first — the spine builds itself from them.</p> : (
         <div className="scrollx">
           <div className="volgrid" data-testid="cascade-grid">
-            <div className="volrow head"><span className="volname">Spine</span><span>Daily</span><span>Provenance</span><span>Shape</span></div>
+            <div className="volrow head"><span className="volname">Level</span><span>Daily</span><span>Provenance</span><span>Shape</span></div>
             {rows.map((r) => {
               const anc = [];
               if (r.scope.brandId) {
@@ -1148,7 +1170,7 @@ function VolumePanel({ model, set, p }) {
                 anc.pop(); // self is not an ancestor
               }
               return (
-                <VolRow key={keyOf(r.scope)} model={model} set={set} level={r.level} name={r.name} scope={r.scope}
+                <VolRow key={keyOf(r.scope)} model={model} set={set} level={r.level} name={r.name} kind={r.kind} sub={r.sub} scope={r.scope}
                   node={p.nodes.get(keyOf(r.scope))} hasOwnShape={hasShapeAt(r.scope)}
                   inheritsShape={anc.some((a) => hasShapeAt(a))} />
               );

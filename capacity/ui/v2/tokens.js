@@ -354,8 +354,12 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   border:0.5px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap}
 .drwhead .chev{font-size:8px; color:var(--ink-3); transition:transform 0.12s}
 .drw.open>.drwhead .chev{transform:rotate(180deg)}
-.usagenote{cursor:help; border-bottom:0.5px dotted var(--line)}
-.usage-none{opacity:0.75; font-style:italic}
+.statusdot{font-size:10.5px; font-weight:600; padding:2px 9px; border-radius:999px; cursor:help; white-space:nowrap;
+  background:var(--canvas); border:0.5px solid var(--line); color:var(--ink-3)}
+.statusdot.on{background:var(--green-bg); border-color:#CBDDB4; color:var(--green-ink)}
+/* (7) every disclosure chevron sits hard right, whatever the header holds. */
+.drwhead .chev,.famhead .chev,.sechead .chev,.chdrw .chev{margin-left:auto}
+.chdrw{display:inline-flex; align-items:center; gap:4px}
 .prodbrand{font-size:11.5px; padding:3px 7px; border:0.5px solid var(--line); border-radius:7px; background:#fff; font-family:inherit}
 .info{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none;
   border-radius:50%; border:0.5px solid var(--line); background:var(--canvas); color:var(--ink-3);
@@ -417,6 +421,26 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .stepdash{color:var(--ink-3); text-align:center; font-size:11px}
 .steprow input[type="checkbox"]{justify-self:start; margin:0}
 .scrollx{overflow-x:auto}
+/* A "ticket": name on the left, status and headline figures on the right, and
+   it opens in place into its own drawers — no side panel. */
+.ticket{border:0.5px solid var(--line); border-radius:11px; background:#fff; margin-bottom:6px}
+.ticket.open{border-color:var(--blue); box-shadow:0 1px 0 var(--blue-tint)}
+.ticket.shared-cap{border-left:3px solid var(--teal)}
+.tickethead{display:flex; align-items:center; gap:10px; width:100%; background:none; border:none; font:inherit;
+  text-align:left; padding:10px 13px; cursor:pointer; border-radius:11px}
+.tickethead:hover b{color:var(--blue-deep)}
+.tickethead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+.tname{min-width:0; flex:1 1 auto}
+.tname b{font-size:12.5px; font-weight:600; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.tname small{font-size:10.5px; color:var(--ink-3)}
+.tmeta{display:flex; align-items:center; gap:10px; flex:none; margin-left:auto}
+.tsum{font-size:11.5px; color:var(--ink-2); white-space:nowrap}
+.ticketbody{padding:0 13px 12px; border-top:0.5px solid var(--line)}
+@media(max-width:640px){
+  .tickethead{flex-wrap:wrap; row-gap:4px}
+  .tmeta{margin-left:0; flex:1 1 100%; justify-content:space-between}
+}
+
 .mdgroup{margin-bottom:10px}
 .mdgrouplab{font-size:10.5px; color:var(--ink-3); font-weight:600; margin:2px 0 4px}
 .fam-sec{border-top:0.5px solid var(--line); padding:0; margin-top:0}
@@ -442,6 +466,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .volrow.lvl0 .volname{font-weight:600}
 .volrow.lvl1 .volname{font-weight:600}
 .volrow.lvl2 .volname{font-weight:500}
+.volkind{display:inline-block; font-size:9px; font-weight:700; letter-spacing:0.03em; text-transform:uppercase;
+  color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:5px;
+  padding:0 5px; margin-right:6px; vertical-align:1px}
 .volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   padding-left:calc(var(--lvl,0) * 18px)}
 /* The cascade and step grids were the only inputs in the stylesheet never given

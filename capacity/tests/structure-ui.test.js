@@ -113,7 +113,7 @@ await t("a used channel blocks delete; the unused one deletes cleanly", () => {
 
 await t("channel defaults edit and persist: set Voice ASA to 20, reopen, still 20", () => {
   const voice = () => $$(".regrow", reglist("Channels")).find((r) => $("input", r).value === "Voice");
-  click($$("button", voice()).find((b) => /defaults/.test(b.textContent)));
+  click($$("button", voice()).find((b) => /Settings/.test(b.textContent)));
   const panel = $('[data-testid="channel-defaults-voice"]');
   ok(panel, "defaults panel open");
   const asa = $$(".field", panel).find((f) => /ASA target/.test(f.textContent)).querySelector("input");
@@ -121,10 +121,10 @@ await t("channel defaults edit and persist: set Voice ASA to 20, reopen, still 2
   const slaPct = $$(".field", $('[data-testid="channel-defaults-voice"]')).find((f) => /SLA target/.test(f.textContent)).querySelector("input");
   setV(slaPct, 80);
   // close and reopen — the values live on the model, not the component
-  click($$("button", voice()).find((b) => /defaults/.test(b.textContent)));
+  click($$("button", voice()).find((b) => /Settings/.test(b.textContent)));
   ok(!$('[data-testid="channel-defaults-voice"]'), "panel closed");
-  ok(/defaults ●/.test(voice().textContent), "defaults-set marker on the row");
-  click($$("button", voice()).find((b) => /defaults/.test(b.textContent)));
+  ok(/Settings ●/.test(voice().textContent), "settings-set marker on the row");
+  click($$("button", voice()).find((b) => /Settings/.test(b.textContent)));
   const again = $('[data-testid="channel-defaults-voice"]');
   eq($$(".field", again).find((f) => /ASA target/.test(f.textContent)).querySelector("input").value, "20", "ASA persisted");
   eq($$(".field", again).find((f) => /SLA target/.test(f.textContent)).querySelector("input").value, "80", "SLA % persisted (stored as a fraction)");
@@ -143,12 +143,14 @@ await t("business units / products add and rename like brands", () => {
 await t("Structure shows what each entity is USED FOR, and products link to a brand", () => {
   // usage view: the brand row names the request types that rely on it
   const acme = $$(".regrow", reglist("Brands")).find((r) => $("input", r).value === "Acme Bank");
-  ok(/2 request types/.test(acme.textContent), "brand usage shown: " + acme.textContent.slice(-70));
-  ok(/Billing enquiry/.test(acme.textContent), "and names them");
+  const badge = $(".statusdot", acme);
+  ok(badge && /^active$/.test(badge.textContent), "a compact active badge, not a wall of names");
+  ok(/2 request types/.test(badge.getAttribute("title")), "the detail is on hover: " + badge.getAttribute("title"));
+  ok(/Billing enquiry/.test(badge.getAttribute("title")), "and names them there");
   const ch = $$(".regrow", reglist("Channels")).find((r) => $("input", r).value === "Voice");
-  ok(/1 request type/.test(ch.textContent), "channel usage shown");
+  ok(/active/.test($(".statusdot", ch).textContent), "channel status shown");
   const unused = $$(".regrow", reglist("Channels")).find((r) => $("input", r).value === "Third party");
-  if (unused) ok(/not used yet/.test(unused.textContent), "an unused channel says so");
+  if (unused) ok(/not active/.test($(".statusdot", unused).textContent), "an unused channel reads not active");
   // a product belongs to one brand, or to all
   const prodRow = $$(".regrow", reglist("Products")).find((r) => $("input", r).value === "Credit cards");
   const sel = $(".prodbrand", prodRow);
@@ -187,7 +189,7 @@ await t("channels beyond the taxonomy can be added and behave like the rest", ()
   // it is a first-class channel: renameable, deletable while unused, and it
   // carries its own channel defaults like any taxonomy channel
   ok($(".regdel", row), "deletable while unused");
-  ok($$("button", row).some((b) => /defaults/.test(b.textContent)), "carries channel defaults");
+  ok($$("button", row).some((b) => /Settings/.test(b.textContent)), "carries channel settings");
   setV($("input", row), "WhatsApp Business");
   ok($$(".regrow input", ch()).some((i) => i.value === "WhatsApp Business"), "renames like the rest");
 });

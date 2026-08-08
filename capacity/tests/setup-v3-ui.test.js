@@ -114,31 +114,36 @@ await t("tab navigation switches panels (Structure → Queues → Map)", () => {
   ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "Map validation clean for the sample");
 });
 
-await t("Queues: a row list you drill into — the editor opens as a drawer", () => {
+await t("Queues are tickets: name left, status right, opening in place", () => {
   subtab("Queues");
-  const rows = $$(".mdlist button");
-  ok(rows.length >= 4, "queue rows listed (plus any shared teams)");
-  ok(!$(".drawer.on"), "no drawer until a queue is picked — the list is the landing view");
-  const inbound = rows.find((r) => /Inbound — Billing/.test(r.textContent));
-  ok(/2,398\/day/.test(inbound.textContent.replace(/\s+/g, " ")), "derived 2,398/day on the row: " + inbound.textContent);
+  const heads = $$(".tickethead");
+  ok(heads.length >= 4, "one ticket per queue");
+  ok(!$(".ticket.open"), "nothing expanded on arrival");
+  const inbound = heads.find((r) => /Inbound — Billing/.test(r.textContent));
+  // name on the left, status and headline figures on the right
+  ok(/Inbound — Billing/.test($(".tname b", inbound).textContent), "name on the left");
+  ok(/^active$/.test($(".tmeta .statusdot", inbound).textContent), "status on the right");
+  ok(/2,398\/day/.test($(".tmeta .tsum", inbound).textContent.replace(/\s+/g, " ")), "headline figures on the right");
+  ok($(".chev", inbound), "and its chevron");
   click(inbound);
-  ok($(".drawer.on"), "drawer opens on click");
-  ok(/Inbound — Billing/.test($(".dhead h3").textContent), "drawer is titled with the queue");
+  ok(inbound.closest(".ticket").classList.contains("open"), "opens in place — no side panel");
+  ok(!$(".drawer.on"), "the slide-over is gone");
   const det = $('[data-testid="queue-detail"]');
-  ok(/2,398\/day/.test(det.textContent), "derived strip in the drawer");
-  ok(/used in 1 process across 1 brand/.test(det.textContent), "blast radius line");
-  ok(!$$("input", det).some((i) => /2,?398/.test(i.value)), "derived volume is never an input");
+  ok(det && inbound.closest(".ticket").contains(det), "the editor renders inside the ticket");
   const fams = $$(".famhead b", det).map((b) => b.textContent);
-  eq(fams.join("|"), "Inputs|Performance|Efficiency|Workforce|Customer|Outputs", "six KPI families");
-  // Each family is a section that opens on demand — only Inputs starts open.
-  eq($$(".fam-sec.open", det).length, 1, "one family open by default");
-  click($$(".famhead", det)[1]);
-  eq($$(".fam-sec.open", det).length, 2, "clicking a family header opens it");
-  const apps = rows.find((r) => /Case — Applications/.test(r.textContent));
-  click(apps);
-  ok(/Case — Applications/.test($(".dhead h3").textContent), "picking another queue retitles the drawer");
-  click($(".drawer .close"));
-  ok(!$(".drawer.on"), "drawer closes");
+  eq(fams.join("|"), "Inputs|Performance|Efficiency|Workforce|Customer|Outputs", "settings live in six drawers");
+  eq($$(".fam-sec.open", det).length, 1, "one drawer open by default");
+  click(inbound);
+  ok(!$(".ticket.open"), "clicking the head shuts it again");
+});
+
+await t("every drawer chevron sits on the right of its header", () => {
+  // One rule pins them, so assert the rule rather than 30 call sites.
+  const css = $("#capacity-v2-style").textContent;
+  const shared = css.split("}").map((b) => b + "}").find((b) => /\.drwhead \.chev/.test(b) && /margin-left:auto/.test(b));
+  ok(shared, "a shared rule pins the chevrons right");
+  for (const sel of [".drwhead .chev", ".famhead .chev", ".sechead .chev", ".chdrw .chev"])
+    ok(shared.includes(sel), sel + " covered by the shared rule — got: " + shared.trim());
 });
 
 await t("Request types is a master–detail editor: rows, assignment, step wiring", () => {

@@ -54,7 +54,14 @@ function subtab(label, r) {
   if (b && b.getAttribute("aria-selected") !== "true") click(b);
   return b;
 }
-const qRow = (name) => $$(".mdlist button").find((r) => r.textContent.includes(name));
+const qRow = (name) => $$(".tickethead").find((r) => r.textContent.includes(name));
+// Tickets toggle, so opening is idempotent — clicking an open one shuts it.
+function openQueue(name) {
+  const head = qRow(name);
+  ok(head, "queue ticket not found: " + name);
+  if (head.getAttribute("aria-expanded") !== "true") click(head);
+  return qRow(name);
+}
 const detail = () => $('[data-testid="queue-detail"]');
 const byLabel = (re, r) => $$("input,select", r || detail()).find((i) => re.test(i.getAttribute("aria-label") || ""));
 function famSec(name, r) { return $$(".fam-sec", r || detail()).find((s) => $(".famhead b", s).textContent === name); }
@@ -69,12 +76,19 @@ await t("mounts; master list grouped by home + Global", () => {
   const labs = $$(".mdgrouplab").map((l) => l.textContent);
   ok(labs.includes("Acme › Customer Service"), "home group present: " + labs.join(" | "));
   ok(labs.includes("Global — no home"), "global group present");
-  ok(/governance · 2 processes · 1 brand/.test(qRow("QA — Governance").textContent), "blast radius on the row: " + qRow("QA — Governance").textContent);
+  // The ticket shows name + status + headline figures; the blast radius is the
+  // status badge's detail rather than more text on the row.
+  const qa = qRow("QA — Governance");
+  ok(/governance/.test(qa.textContent), "type on the ticket");
+  const badge = $(".statusdot", qa);
+  ok(/^active$/.test(badge.textContent), "status reads active/not active, not a sentence");
+  ok(/2 processes across 1 brand/.test(badge.getAttribute("title")), "blast radius on hover: " + badge.getAttribute("title"));
+  ok(/\/day/.test($(".tsum", qa).textContent), "headline figures on the right");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
 await t("the editor shows six families; core params edit and mark the row modified", () => {
-  click(qRow("Inbound — Billing"));
+  openQueue("Inbound — Billing");
   eq($$(".fam-sec", detail()).length, 6, "six family sections");
   ok(!qRow("Inbound — Billing").querySelector(".moddot"), "not modified yet");
   setV(byLabel(/^ASA target/), 20);
@@ -108,7 +122,7 @@ await t("manual hires: add week × heads rows through the UI", () => {
 });
 
 await t("digital queues swap to SLA fields and expose subtype + backlog in advanced", () => {
-  click(qRow("Case — Applications"));
+  openQueue("Case — Applications");
   ok(byLabel(/SLA within/), "digital SLA fields");
   ok(!byLabel(/^ASA target/), "no voice fields on a digital queue");
   const inp = openAdv("Inputs");
@@ -118,7 +132,7 @@ await t("digital queues swap to SLA fields and expose subtype + backlog in advan
 });
 
 await t("rename + home reassignment reflect in the master list live", () => {
-  click(qRow("Inbound — Billing"));
+  openQueue("Inbound — Billing");
   setV(byLabel(/^Queue name$/), "Inbound — Billing & Payments");
   ok(qRow("Inbound — Billing & Payments"), "rename reflects");
   setV(byLabel(/^Home brand$/), "");
@@ -128,14 +142,14 @@ await t("rename + home reassignment reflect in the master list live", () => {
 });
 
 await t("guarded delete: a routed queue shows in-use; a fresh queue deletes; reset clears the dot", () => {
-  click(qRow("Inbound — Billing"));
+  openQueue("Inbound — Billing");
   ok(/▲ in use/.test(detail().textContent), "in-use marker instead of delete");
   click($$(".btn").find((b) => b.textContent === "+ Queue"));
   ok(qRow("New queue"), "queue added");
-  ok(/unused/.test(qRow("New queue").textContent), "flagged unused");
+  ok(/not active/.test(qRow("New queue").textContent), "flagged not active");
   click($$(".btn", detail()).find((b) => b.textContent === "Delete"));
   ok(!qRow("New queue"), "fresh queue deleted");
-  click(qRow("Inbound — Billing"));
+  openQueue("Inbound — Billing");
   click($$(".btn", detail()).find((b) => b.textContent === "Reset to defaults"));
   ok(!qRow("Inbound — Billing").querySelector(".moddot"), "reset clears the modified dot");
 });
@@ -170,9 +184,9 @@ await t("a shared-capacity queue is marked in the list and offered as a type", (
   let m = Ops2.addQueue(Ops2.sampleDomainModel(), { id: "q_flex", name: "Flex pool", type: "shared_capacity" });
   act(() => { mod.exports.mount(c, { model: m }); });
   subtab("Queues", c);
-  const row = $$(".mdlist button", c).find((r) => /Flex pool/.test(r.textContent));
+  const row = $$(".tickethead", c).find((r) => /Flex pool/.test(r.textContent));
   ok(row, "listed among the queues, not in a separate group");
-  ok(row.classList.contains("shared-cap"), "visually distinguished");
+  ok(row.closest(".ticket").classList.contains("shared-cap"), "visually distinguished");
   ok(/lends capacity/.test(row.textContent), "reads as lending, not receiving: " + row.textContent);
   click(row);
   const typeSel = $$("select", $('[data-testid="queue-detail"]', c)).find((x) => x.getAttribute("aria-label") === "Queue type");
