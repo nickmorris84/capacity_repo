@@ -43,7 +43,14 @@ function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEven
 function setV(el, v) { ok(el, "setV target missing"); const proto = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : el.tagName === "SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype; const s = Object.getOwnPropertyDescriptor(proto, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label, r) => $$(".subtabs button", r).find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 const row = (name, r) => $$(".volrow:not(.head)", r).find((x) => $(".volname", x).textContent === name);
 const val = (name, r) => $("input", row(name, r)).value;
 const prov = (name, r) => $(".prov", row(name, r)).textContent;
@@ -74,7 +81,7 @@ console.log("Volume cascade grid gate — BUILD-PLAN U5");
 async function main() {
 await t("mounts; the grid shows the full spine with sum/entered/equal provenance", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
-  click(subtab("Volume"));
+  subtab("Volume");
   ok($('[data-testid="cascade-grid"]'), "grid present");
   eq(prov("Whole estate"), "sum", "estate sums");
   eq(prov("Billing enquiry"), "entered", "sample entry entered at rt level");
@@ -86,7 +93,7 @@ await t("mounts; the grid shows the full spine with sum/entered/equal provenance
 await t("THE OWNER'S WORKED EXAMPLE: 10,000 at brand + 5,000 at Collections", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: workedModel() }); });
-  click(subtab("Volume", c));
+  subtab("Volume", c);
   setV($("input", row("Brand A", c)), 10000);
   setV($("input", row("Collections", c)), 5000);
   eq(prov("Brand A", c), "entered", "brand entered");
@@ -105,7 +112,7 @@ await t("THE OWNER'S WORKED EXAMPLE: 10,000 at brand + 5,000 at Collections", ()
 await t("type-anywhere: a finer entry becomes a weight; clearing restores equal", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: workedModel() }); });
-  click(subtab("Volume", c));
+  subtab("Volume", c);
   setV($("input", row("Brand A", c)), 9000);
   eq(val("Collections", c), "3000", "equal thirds initially");
   setV($("input", row("Billing", c)), 1000);
@@ -122,7 +129,7 @@ await t("type-anywhere: a finer entry becomes a weight; clearing restores equal"
 await t("V5: conflicting finer entries are scaled AND flagged, never silent", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: workedModel() }); });
-  click(subtab("Volume", c));
+  subtab("Volume", c);
   setV($("input", row("Brand A", c)), 6000);
   setV($("input", row("Collections", c)), 5000);
   setV($("input", row("Billing", c)), 5000);
@@ -136,7 +143,7 @@ await t("V5: conflicting finer entries are scaled AND flagged, never silent", ()
 await t("shapes: a preset expands to a 52-week series and marks the row", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: workedModel() }); });
-  click(subtab("Volume", c));
+  subtab("Volume", c);
   setV($("input", row("Brand A", c)), 10000);
   const shapeBtn = $$("button", row("Brand A", c)).find((b) => /flat|52-wk|inherited/.test(b.textContent));
   eq(shapeBtn.textContent.trim(), "flat", "starts flat");
@@ -153,7 +160,7 @@ await t("shapes: a preset expands to a 52-week series and marks the row", () => 
 await t("a typed 52-value series applies; a wrong count is rejected with a reason", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: workedModel() }); });
-  click(subtab("Volume", c));
+  subtab("Volume", c);
   setV($("input", row("Collections", c)), 1000);
   click($$("button", row("Collections", c)).find((b) => /flat/.test(b.textContent)));
   const ed = $('[data-testid="shape-editor"]', c);

@@ -45,7 +45,14 @@ function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "
 function toggle(el) { ok(el, "toggle target missing"); const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "checked").set; act(() => { s.call(el, !el.checked); el.dispatchEvent(new window.Event("click", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label) => $$(".subtabs button").find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 const rtRow = (name) => $$(".rtrow").find((r) => r.textContent.includes(name));
 const detail = () => $('[data-testid="rt-detail"]');
 const byLabel = (re, r) => $$("input,select", r || detail()).find((i) => re.test(i.getAttribute("aria-label") || ""));
@@ -55,7 +62,7 @@ console.log("Request types gate — BUILD-PLAN U3");
 async function main() {
 await t("mounts; master list shows rows with group, assignment and channels", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
-  click(subtab("Request types"));
+  subtab("Request types");
   eq($$(".rtrow").length, 2, "two rows");
   const card = rtRow("New card application");
   ok(/Cards/.test(card.textContent) && /Credit cards/.test(card.textContent), "group + product chips");
@@ -94,7 +101,7 @@ await t("V2 double-cover renders inline in Assignment (soft, scoped to the group
   m = Ops.addStep(m, rtId, "ch_voice", { queueId: "q_inbound" });
   m = Ops.updateStep(m, rtId, "ch_voice", 0, { terminal: true, outcome: "completed" });
   act(() => { mod.exports.mount(c, { model: m }); });
-  click($$(".subtabs button", c).find((b) => b.textContent.includes("Request types")));
+  subtab("Request types", c);
   const row = $$(".rtrow", c).find((r) => /Billing dispute/.test(r.textContent));
   ok(/▲/.test(row.textContent), "warn glyph on the row");
   click(row);
@@ -107,10 +114,10 @@ await t("THE CASCADE PROOF: editing the 60% split to 100 moves the derived queue
   const split = $$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || "") && i.value === "60");
   ok(split, "the 60% verification split input");
   setV(split, 100);
-  click(subtab("Queues"));
+  subtab("Queues");
   const verify = $$(".mdlist button").find((r) => /Outbound — Verification/.test(r.textContent));
   ok(/702\/day/.test(verify.textContent.replace(/\s+/g, " ")), "q_verify derives 702/day at 100%: " + verify.textContent);
-  click(subtab("Request types"));
+  subtab("Request types");
   click(rtRow("New card application"));
   setV($$("input", detail()).find((i) => /step 2 split percent/.test(i.getAttribute("aria-label") || "")), 60);
 });

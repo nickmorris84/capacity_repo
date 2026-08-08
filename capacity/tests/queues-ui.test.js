@@ -45,7 +45,14 @@ function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEven
 function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype; const s = Object.getOwnPropertyDescriptor(p, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label) => $$(".subtabs button").find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 const qRow = (name) => $$(".mdlist button").find((r) => r.textContent.includes(name));
 const detail = () => $('[data-testid="queue-detail"]');
 const byLabel = (re, r) => $$("input,select", r || detail()).find((i) => re.test(i.getAttribute("aria-label") || ""));
@@ -57,7 +64,7 @@ console.log("Queues tab gate — BUILD-PLAN U4");
 async function main() {
 await t("mounts; master list grouped by home + Global + Shared capacity", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
-  click(subtab("Queues"));
+  subtab("Queues");
   const labs = $$(".mdgrouplab").map((l) => l.textContent);
   ok(labs.includes("Acme › Customer Service"), "home group present: " + labs.join(" | "));
   ok(labs.includes("Global — no home"), "global group present");

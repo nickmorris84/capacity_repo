@@ -24,12 +24,12 @@ const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
 export const SETUP_TABS = [
-  ["structure", "Structure"],
-  ["queues", "Queues"],
-  ["requestTypes", "Request types"],
-  ["volume", "Volume"],
-  ["map", "Map"],
-  ["defaults", "Defaults"],
+  ["structure", "Structure", "brands, business units, channels, groups, products"],
+  ["queues", "Queues", "the stations work lands on, and their physics"],
+  ["requestTypes", "Request types", "the only place things are wired together"],
+  ["volume", "Volume", "how much arrives, at whatever level you know"],
+  ["map", "Map", "generated — does it all hang together?"],
+  ["defaults", "Defaults", "what every queue inherits"],
 ];
 
 // ---- completion: one status per tab, in dependency order ---------------------
@@ -89,12 +89,12 @@ function DomainImportReport({ report, onDismiss }) {
 export default function SetupV3Page({ model, onModelChange, onNav = () => {}, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
   const p = useMemo(() => propagateDomain(model), [model]);
   const status = useMemo(() => computeStatus(model, p), [model, p]);
-  const [tab, setTab] = useState("structure");
+  const [tab, setTab] = useState(null);
   const firstTodo = status.find((s) => !s.ok);
-  // Six labels overflow the strip on a phone, so a jump-link from Map (or the
-  // progress strip's Go) could select a tab whose button is off-screen.
+  // Opening a segment from the progress strip or a Map jump-link can land below
+  // the fold once the segments above it are tall — bring it into view.
   const activeTabRef = useRef(null);
-  useEffect(() => { activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" }); }, [tab]);
+  useEffect(() => { if (tab) activeTabRef.current?.scrollIntoView?.({ block: "nearest" }); }, [tab]);
 
   return (
     <div className="shell">
@@ -114,7 +114,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         <h2>Setup</h2>
         {onOpenClassic ? <button className="linkbtn" onClick={onOpenClassic}>← classic Setup</button> : null}
       </div>
-      <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined.</p>
+      <p className="lede">Six segments in dependency order — open one to work in it.</p>
 
       {importReport ? <DomainImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
@@ -123,31 +123,33 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
           <button className="btn sm" onClick={() => setTab(firstTodo.key)}>Go</button></div>
       ) : null}
 
-      <div className="subtabs" role="tablist" aria-label="Setup tabs">
-        {SETUP_TABS.map(([k, label]) => {
-          const s = status.find((x) => x.key === k);
-          const on = tab === k;
-          return (
-            <button key={k} role="tab" id={"tab-" + k} aria-controls="setup-panel" aria-selected={on}
-              ref={on ? activeTabRef : null} className={on ? "on" : ""} onClick={() => setTab(k)}
+      {SETUP_TABS.map(([k, label, caption], i) => {
+        const s = status.find((x) => x.key === k);
+        const open = tab === k;
+        return (
+          <div className={"sec" + (open ? " open" : "")} key={k} data-seg={k} ref={open ? activeTabRef : null}>
+            <button className="sechead" aria-expanded={open} onClick={() => setTab(open ? null : k)}
               aria-label={s.ok ? label : label + " — needs attention: " + s.next}>
-              {label}
-              {!s.ok ? <span className="glyph todo" title={s.next}>▲</span> : null}
+              <span className="secnum">{i + 1}</span>
+              <span><b>{label}</b><small>{caption}</small></span>
+              <span className={"badge" + (s.ok ? "" : " todo")} title={s.ok ? "" : s.next}>{s.ok ? "" : "▲ "}{s.badge}</span>
+              <span className="chev">▼</span>
             </button>
-          );
-        })}
-      </div>
+            {open ? (
+              <div className="secbody panel flat" role="region" aria-label={label}>
+                {k === "structure" && <StructurePanel model={model} set={onModelChange} />}
+                {k === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
+                {k === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
+                {k === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
+                {k === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
+                {k === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
 
-      <div role="tabpanel" id="setup-panel" aria-labelledby={"tab-" + tab} data-tab={tab} className="panel flat">
-        {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
-        {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
-        {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
-        {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
-        {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
-        {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
-      </div>
-
-      {(onDownloadTemplate || onUploadTemplate) && tab !== "map" && tab !== "defaults" ? (
+      {onDownloadTemplate || onUploadTemplate ? (
         <div className="importbox">
           <p><b>Bulk edit via the five-sheet template.</b> Download comes pre-filled; re-upload validates first.</p>
           <div style={{ display: "flex", gap: 8 }}>

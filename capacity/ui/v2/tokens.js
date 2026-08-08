@@ -337,6 +337,11 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
    hairlines as the only separation. Scoped with .flat so the real cards on
    Results and Levers keep .panel (and their own h3 sizing) untouched. */
 .panel.flat{background:transparent; border:none; border-radius:0; padding:0}
+/* A segment body is already inside the .sec card, so the panel inside it must
+   add no second card — but it keeps the section's own padding. */
+.secbody.panel.flat{padding:14px 16px; margin-bottom:0}
+.sechead small{margin-top:1px}
+.sec .badge{font-weight:500}
 .panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
 .panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}

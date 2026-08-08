@@ -3979,6 +3979,11 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
    hairlines as the only separation. Scoped with .flat so the real cards on
    Results and Levers keep .panel (and their own h3 sizing) untouched. */
 .panel.flat{background:transparent; border:none; border-radius:0; padding:0}
+/* A segment body is already inside the .sec card, so the panel inside it must
+   add no second card \u2014 but it keeps the section's own padding. */
+.secbody.panel.flat{padding:14px 16px; margin-bottom:0}
+.sechead small{margin-top:1px}
+.sec .badge{font-weight:500}
 .panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
 .panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}
@@ -4207,12 +4212,12 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var fmt = (n) => n == null || isNaN(n) ? "\u2014" : Math.round(n).toLocaleString("en-GB");
 var NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 var SETUP_TABS = [
-  ["structure", "Structure"],
-  ["queues", "Queues"],
-  ["requestTypes", "Request types"],
-  ["volume", "Volume"],
-  ["map", "Map"],
-  ["defaults", "Defaults"]
+  ["structure", "Structure", "brands, business units, channels, groups, products"],
+  ["queues", "Queues", "the stations work lands on, and their physics"],
+  ["requestTypes", "Request types", "the only place things are wired together"],
+  ["volume", "Volume", "how much arrives, at whatever level you know"],
+  ["map", "Map", "generated \u2014 does it all hang together?"],
+  ["defaults", "Defaults", "what every queue inherits"]
 ];
 function computeStatus(model, p) {
   const nBrands = (model.brands || []).length, nBus = (model.businessUnits || []).length, nChans = (model.channels || []).length, nQ = (model.queues || []).length, nRt = (model.requestTypes || []).length, nVe = (model.volumeEntries || []).length;
@@ -4307,11 +4312,11 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
 }, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
   const p = useMemo(() => (0, import_propagate.propagateDomain)(model), [model]);
   const status = useMemo(() => computeStatus(model, p), [model, p]);
-  const [tab, setTab] = useState("structure");
+  const [tab, setTab] = useState(null);
   const firstTodo = status.find((s) => !s.ok);
   const activeTabRef = useRef(null);
   useEffect(() => {
-    activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
+    if (tab) activeTabRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [tab]);
   return /* @__PURE__ */ jsxs("div", { className: "shell", children: [
     /* @__PURE__ */ jsxs("header", { className: "top", children: [
@@ -4328,7 +4333,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       /* @__PURE__ */ jsx("h2", { children: "Setup" }),
       onOpenClassic ? /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: onOpenClassic, children: "\u2190 classic Setup" }) : null
     ] }),
-    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined." }),
+    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six segments in dependency order \u2014 open one to work in it." }),
     importReport ? /* @__PURE__ */ jsx(DomainImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
     firstTodo ? /* @__PURE__ */ jsxs("div", { className: "pstrip", role: "status", children: [
       /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }),
@@ -4339,37 +4344,42 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       ] }),
       /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setTab(firstTodo.key), children: "Go" })
     ] }) : null,
-    /* @__PURE__ */ jsx("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
+    SETUP_TABS.map(([k, label, caption], i) => {
       const s = status.find((x) => x.key === k);
-      const on = tab === k;
-      return /* @__PURE__ */ jsxs(
-        "button",
-        {
-          role: "tab",
-          id: "tab-" + k,
-          "aria-controls": "setup-panel",
-          "aria-selected": on,
-          ref: on ? activeTabRef : null,
-          className: on ? "on" : "",
-          onClick: () => setTab(k),
-          "aria-label": s.ok ? label : label + " \u2014 needs attention: " + s.next,
-          children: [
-            label,
-            !s.ok ? /* @__PURE__ */ jsx("span", { className: "glyph todo", title: s.next, children: "\u25B2" }) : null
-          ]
-        },
-        k
-      );
-    }) }),
-    /* @__PURE__ */ jsxs("div", { role: "tabpanel", id: "setup-panel", "aria-labelledby": "tab-" + tab, "data-tab": tab, className: "panel flat", children: [
-      tab === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
-      tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
-      tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
-      tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
-      tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
-      tab === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
-    ] }),
-    (onDownloadTemplate || onUploadTemplate) && tab !== "map" && tab !== "defaults" ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
+      const open = tab === k;
+      return /* @__PURE__ */ jsxs("div", { className: "sec" + (open ? " open" : ""), "data-seg": k, ref: open ? activeTabRef : null, children: [
+        /* @__PURE__ */ jsxs(
+          "button",
+          {
+            className: "sechead",
+            "aria-expanded": open,
+            onClick: () => setTab(open ? null : k),
+            "aria-label": s.ok ? label : label + " \u2014 needs attention: " + s.next,
+            children: [
+              /* @__PURE__ */ jsx("span", { className: "secnum", children: i + 1 }),
+              /* @__PURE__ */ jsxs("span", { children: [
+                /* @__PURE__ */ jsx("b", { children: label }),
+                /* @__PURE__ */ jsx("small", { children: caption })
+              ] }),
+              /* @__PURE__ */ jsxs("span", { className: "badge" + (s.ok ? "" : " todo"), title: s.ok ? "" : s.next, children: [
+                s.ok ? "" : "\u25B2 ",
+                s.badge
+              ] }),
+              /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
+            ]
+          }
+        ),
+        open ? /* @__PURE__ */ jsxs("div", { className: "secbody panel flat", role: "region", "aria-label": label, children: [
+          k === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
+          k === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
+          k === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
+          k === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
+          k === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
+          k === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
+        ] }) : null
+      ] }, k);
+    }),
+    onDownloadTemplate || onUploadTemplate ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
       /* @__PURE__ */ jsxs("p", { children: [
         /* @__PURE__ */ jsx("b", { children: "Bulk edit via the five-sheet template." }),
         " Download comes pre-filled; re-upload validates first."

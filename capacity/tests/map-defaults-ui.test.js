@@ -45,7 +45,14 @@ function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEven
 function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype; const s = Object.getOwnPropertyDescriptor(p, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label, r) => $$(".subtabs button", r).find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 const byLabel = (re, r) => $$("input,select", r).find((i) => re.test(i.getAttribute("aria-label") || ""));
 
 console.log("Map + Defaults gate — BUILD-PLAN U6");
@@ -53,7 +60,7 @@ console.log("Map + Defaults gate — BUILD-PLAN U6");
 async function main() {
 await t("the Map generates itself from the sample: nodes by depth, flow edges labelled", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
-  click(subtab("Map"));
+  subtab("Map");
   const svg = $('[data-testid="map-svg"]');
   ok(svg, "svg rendered");
   eq($$(".mnode:not(.team)", svg).length, 4, "four queue nodes");
@@ -73,7 +80,7 @@ await t("capacity links draw dashed and distinct from flow", () => {
   m.engineConfig = ec;
   m = Ops.addServiceTeam(m, { name: "Flex pool", coversQueues: ["q_inbound", "q_apps"] });
   act(() => { mod.exports.mount(c, { model: m }); });
-  click(subtab("Map", c));
+  subtab("Map", c);
   const caps = $$(".medge.cap", c);
   ok(caps.some((e) => /supports/.test(e.textContent)), "supports link present");
   ok(caps.filter((e) => /covers/.test(e.textContent)).length === 2, "team covers links");
@@ -89,8 +96,8 @@ await t("tap a node → details + Edit in Queues jumps to the editor", () => {
   const det = $('[data-testid="map-node-detail"]');
   ok(det && /Inbound — Billing/.test(det.textContent), "node detail shown");
   click($$("button", det).find((b) => /Edit in Queues/.test(b.textContent)));
-  eq($('[role="tabpanel"]').getAttribute("data-tab"), "queues", "jumped to Queues");
-  click(subtab("Map"));
+  eq($(".sec.open").getAttribute("data-seg"), "queues", "jumped to Queues");
+  subtab("Map");
 });
 
 await t("validation issues carry jump-links to the tab that fixes them", () => {
@@ -100,7 +107,7 @@ await t("validation issues carry jump-links to the tab that fixes them", () => {
   m = Ops.addBrand(m, { id: "b_z", name: "Zeta" });
   m = Ops.setVolumeEntry(m, { brandId: "b_z" }, { daily: 500 });
   act(() => { mod.exports.mount(c, { model: m }); });
-  click(subtab("Map", c));
+  subtab("Map", c);
   const panel = $('[data-testid="validation-panel"]', c);
   ok(/leads nowhere/.test(panel.textContent), "V3 listed");
   ok(/inert/.test(panel.textContent), "V1 uncovered listed");
@@ -108,31 +115,31 @@ await t("validation issues carry jump-links to the tab that fixes them", () => {
   const fixVol = $$("button", panel).find((b) => /Fix in Volume/.test(b.textContent));
   ok(fixRt && fixVol, "jump-links per issue kind");
   click(fixVol);
-  eq($('[role="tabpanel"]', c).getAttribute("data-tab"), "volume", "jumped to Volume");
+  eq($(".sec.open", c).getAttribute("data-seg"), "volume", "jumped to Volume");
   c.remove();
 });
 
 await t("an empty model renders the Map clean (no crash, a hint instead)", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: Ops.blankDomainModel() }); });
-  click(subtab("Map", c));
-  ok(/draws itself once/.test($('[role="tabpanel"]', c).textContent), "empty hint");
+  subtab("Map", c);
+  ok(/draws itself once/.test($(".sec.open .secbody", c).textContent), "empty hint");
   ok(!$('[data-testid="map-svg"]', c), "no svg for an empty world");
   c.remove();
 });
 
 await t("Defaults edits reach the engineConfig: frame, overtime, seasonality preset", () => {
-  click(subtab("Defaults"));
-  const p = $('[role="tabpanel"]');
+  subtab("Defaults");
+  const p = $(".sec.open .secbody");
   setV(byLabel(/^Horizon/, p), 40);
-  eq(byLabel(/^Horizon/, $('[role="tabpanel"]')).value, "40", "horizon edit sticks");
-  setV(byLabel(/OT premium/, $('[role="tabpanel"]')), 2);
-  eq(byLabel(/OT premium/, $('[role="tabpanel"]')).value, "2", "overtime premium sticks (settings.ot)");
-  const sel = byLabel(/System seasonality/, $('[role="tabpanel"]'));
+  eq(byLabel(/^Horizon/, $(".sec.open .secbody")).value, "40", "horizon edit sticks");
+  setV(byLabel(/OT premium/, $(".sec.open .secbody")), 2);
+  eq(byLabel(/OT premium/, $(".sec.open .secbody")).value, "2", "overtime premium sticks (settings.ot)");
+  const sel = byLabel(/System seasonality/, $(".sec.open .secbody"));
   const target = [...sel.options].map((o) => o.value).find((v) => v && v !== "Flat");
   setV(sel, target);
-  eq(byLabel(/System seasonality/, $('[role="tabpanel"]')).value, target, "preset applied and recognised round-trip");
-  setV(byLabel(/^Horizon/, $('[role="tabpanel"]')), 52);
+  eq(byLabel(/System seasonality/, $(".sec.open .secbody")).value, target, "preset applied and recognised round-trip");
+  setV(byLabel(/^Horizon/, $(".sec.open .secbody")), 52);
 });
 
 await t("zero unexpected console output across the whole run", () => {

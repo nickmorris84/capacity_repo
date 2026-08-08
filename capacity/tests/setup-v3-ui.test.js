@@ -42,36 +42,57 @@ const Ops = require("../model/ops.js");
 function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label, r) => $$(".subtabs button", r).find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 
 console.log("Setup shell gate — BUILD-PLAN U1");
 
 async function main() {
-await t("mounts with zero console noise; six tabs in dependency order", () => {
+await t("mounts with zero console noise; six segments in dependency order", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   ok(document.getElementById("root").children.length > 0, "rendered");
-  const labels = $$(".subtabs button").map((b) => b.textContent.replace(/[●▲✕]/g, "").trim());
-  eq(labels.join(" | "), "Structure | Queues | Request types | Volume | Map | Defaults", "tab order");
+  const labels = $$(".sec .sechead b").map((b) => b.textContent.trim());
+  eq(labels.join(" | "), "Structure | Queues | Request types | Volume | Map | Defaults", "segment order");
+  // Every segment is numbered in dependency order and carries a caption while shut.
+  eq($$(".sec .secnum").map((n) => n.textContent).join(""), "123456", "numbered 1-6");
+  ok($$(".sec .sechead small").every((x) => x.textContent.length > 10), "each says what it is while collapsed");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
-await t("the sample model is complete: no attention markers, no progress strip", () => {
-  eq($$(".subtabs .glyph").length, 0, "no glyphs when everything checks out");
+await t("every segment is a drawer, shut by default", () => {
+  eq($$(".sec.open").length, 0, "nothing is open on arrival");
+  eq($$(".secbody").length, 0, "no segment body is mounted until opened");
   ok(!$(".pstrip"), "the strip only appears while incomplete");
+  ok($$(".sec .badge.todo").length === 0, "a complete model shows no amber badges");
 });
 
-await t("tab navigation switches panels (Structure → Queues → Map)", () => {
-  eq($('[role="tabpanel"]').getAttribute("data-tab"), "structure", "starts on Structure");
-  ok($$(".reglist").length === 5, "five flat registry lists");
-  click(subtab("Queues"));
-  eq($('[role="tabpanel"]').getAttribute("data-tab"), "queues", "Queues panel shown");
-  ok(subtab("Queues").getAttribute("aria-selected") === "true", "aria-selected moves");
-  click(subtab("Map"));
+await t("opening a segment reveals it; opening another leaves one open at a time", () => {
+  subtab("Structure");
+  eq($$(".sec.open").length, 1, "one open");
+  eq($(".sec.open").getAttribute("data-seg"), "structure", "the one clicked");
+  ok($$(".reglist").length === 5, "five flat registry lists inside it");
+  ok($(".sec.open .sechead").getAttribute("aria-expanded") === "true", "expanded state announced");
+  subtab("Map");
+  eq($(".sec.open").getAttribute("data-seg"), "map", "focus moves to the newly opened segment");
+  eq($$(".sec.open").length, 1, "the previous one closed");
   ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "Map validation clean for the sample");
 });
 
+await t("clicking an open segment's header shuts it again", () => {
+  subtab("Defaults");
+  eq($(".sec.open").getAttribute("data-seg"), "defaults", "opened");
+  click($(".sec.open .sechead"));
+  eq($$(".sec.open").length, 0, "closed by clicking its own header");
+});
+
 await t("Queues: a row list you drill into — the editor opens as a drawer", () => {
-  click(subtab("Queues"));
+  subtab("Queues");
   const rows = $$(".mdlist button");
   ok(rows.length >= 4, "queue rows listed (plus any shared teams)");
   ok(!$(".drawer.on"), "no drawer until a queue is picked — the list is the landing view");
@@ -98,7 +119,7 @@ await t("Queues: a row list you drill into — the editor opens as a drawer", ()
 });
 
 await t("Request types is a master–detail editor: rows, assignment, step wiring", () => {
-  click(subtab("Request types"));
+  subtab("Request types");
   const rows = $$(".rtrow");
   eq(rows.length, 2, "two sample request types");
   const bill = rows.find((c) => /Billing enquiry/.test(c.textContent));
@@ -111,7 +132,7 @@ await t("Request types is a master–detail editor: rows, assignment, step wirin
 });
 
 await t("Volume renders the cascade grid with the spine and provenance", () => {
-  click(subtab("Volume"));
+  subtab("Volume");
   const grid = $('[data-testid="cascade-grid"]');
   ok(grid, "cascade grid present");
   const rows = $$(".volrow:not(.head)", grid);
@@ -123,8 +144,8 @@ await t("Volume renders the cascade grid with the spine and provenance", () => {
 });
 
 await t("Defaults reads the attached engine config", () => {
-  click(subtab("Defaults"));
-  const p = $('[role="tabpanel"]');
+  subtab("Defaults");
+  const p = $(".sec.open .secbody");
   const horizon = $$("input", p).find((i) => /Horizon/.test(i.getAttribute("aria-label") || ""));
   eq(horizon.value, "52", "horizon loaded");
   const occ = $$("input", p).find((i) => /Occupancy ceiling/.test(i.getAttribute("aria-label") || ""));
@@ -136,11 +157,11 @@ await t("a blank model drives the progress strip: names the next step, Go jumps 
   act(() => { mod.exports.mount(c, { model: Ops.blankDomainModel() }); });
   ok(!$(".pstrip.done", c), "not done");
   ok(/Next:/.test($(".pstrip", c).textContent) && /brand/.test($(".pstrip", c).textContent), "names the Structure step first: " + $(".pstrip", c).textContent);
-  // amber on the incomplete tabs, in dependency order
-  ok(subtab("Structure", c).textContent.includes("▲"), "Structure flagged");
+  // amber badges on the incomplete segments, readable while they are shut
+  ok(/▲/.test($(".sechead .badge", segment("Structure", c)).textContent), "Structure flagged on its collapsed header");
   click($(".pstrip .btn", c));
-  eq($('[role="tabpanel"]', c).getAttribute("data-tab"), "structure", "Go jumps to Structure");
-  ok(/none yet/.test($('[role="tabpanel"]', c).textContent), "empty registry state shown");
+  eq($(".sec.open", c).getAttribute("data-seg"), "structure", "Go opens Structure");
+  ok(/none yet/.test($(".sec.open .secbody", c).textContent), "empty registry state shown");
   c.remove();
 });
 
@@ -149,8 +170,8 @@ await t("a broken process flags Request types and Map lists the error", () => {
   let m = Ops.sampleDomainModel();
   m = Ops.updateStep(m, "rt_billing", "ch_voice", 1, { terminal: false });
   act(() => { mod.exports.mount(c, { model: m }); });
-  ok(subtab("Request types", c).textContent.includes("▲"), "Request types flagged");
-  click(subtab("Map", c));
+  ok(/▲/.test($(".sechead .badge", segment("Request types", c)).textContent), "Request types flagged on its collapsed header");
+  subtab("Map", c);
   ok(/leads nowhere/.test($('[data-testid="validation-panel"]', c).textContent), "V3 error listed in Map");
   c.remove();
 });

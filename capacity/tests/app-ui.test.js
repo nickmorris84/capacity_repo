@@ -43,6 +43,13 @@ async function settle(ms = 60) { await act(async () => { await new Promise((r) =
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const navTab = (label) => { const b = $$('.tabs [role="tab"]').find((x) => x.textContent === label); click(b); };
+// Setup segments are drawers — opening one is how you reach its content.
+function openSeg(label) {
+  // NB: this gate's $ takes no scope argument — query off the element itself.
+  const sec = $$(".sec").find((x) => { const b = x.querySelector(".sechead b"); return b && b.textContent === label; });
+  ok(sec, "segment not found: " + label);
+  if (!sec.classList.contains("open")) click(sec.querySelector(".sechead"));
+}
 const activeTab = () => { const b = $('.tabs [role="tab"].on'); return b ? b.textContent : null; };
 
 console.log("App shell gate — v2.4 integration");
@@ -60,13 +67,14 @@ await t("Home → Open enters the Setup workspace", () => {
   eq(activeTab(), "Setup", "landed on Setup");
 });
 
-await t("the four tabs navigate across all surfaces (Setup is the six-tab shell)", () => {
+await t("the four tabs navigate across all surfaces (Setup is the six-segment shell)", () => {
   navTab("Levers"); eq(activeTab(), "Levers", "→ Levers");
   ok($(".mx .cell"), "Levers matrix renders");
   navTab("Results"); eq(activeTab(), "Results", "→ Results");
   ok($(".sub"), "Results lenses render");
   navTab("Setup"); eq(activeTab(), "Setup", "→ Setup");
-  eq($$(".subtabs [role='tab']").length, 6, "Setup shows six tabs");
+  eq($$(".sec .sechead").length, 6, "Setup shows six collapsible segments");
+  eq($$(".sec.open").length, 0, "all shut by default");
   navTab("Home"); ok($(".grid .card"), "→ Home launcher");
 });
 
@@ -74,7 +82,7 @@ await t("a Setup edit is reflected on Results (single shared model)", async () =
   // Enter Setup → Volume, double the estate total in the cascade grid, and
   // confirm the Results Data lens still renders volumes from the shared model.
   click($$(".card .open").find((b) => b.textContent === "Open")); // → Setup
-  click($$(".subtabs button").find((b) => b.textContent.includes("Volume")));
+  openSeg("Volume");
   const estate = $$(".volrow:not(.head)").find((r) => /Whole estate/.test(r.textContent));
   ok(estate, "estate row present in the cascade grid");
   const input = estate.querySelector("input");
@@ -109,7 +117,8 @@ await t("New simulation opens the empty six-tab shell and still runs the engine"
   await settle(120);
   eq(activeTab(), "Setup", "lands on Setup as the empty state");
   ok($(".pstrip") && /Next:/.test($(".pstrip").textContent), "the progress strip names the first step");
-  ok(/none yet/.test($('[role="tabpanel"]').textContent), "registry starts empty");
+  click($(".pstrip .btn"));
+  ok(/none yet/.test($(".sec.open .secbody").textContent), "registry starts empty");
   // The empty simulation must not crash Levers/Results (0 queues).
   const before = consoleEvents.length;
   navTab("Results"); await settle(150);

@@ -40,7 +40,14 @@ function click(el) { ok(el, "click target missing"); act(() => { el.dispatchEven
 function setV(el, v) { ok(el, "setV target missing"); const p = el.tagName === "SELECT" ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype; const s = Object.getOwnPropertyDescriptor(p, "value").set; act(() => { s.call(el, String(v)); el.dispatchEvent(new window.Event("input", { bubbles: true })); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); }
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-const subtab = (label) => $$(".subtabs button").find((b) => b.textContent.includes(label));
+// Segments are drawers: "navigating" means opening one. Idempotent so a test
+// that returns to a segment does not toggle it shut.
+function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+function subtab(label, r) {
+  const sec = segment(label, r);
+  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
+  return $(".sechead", segment(label, r));
+}
 const reglist = (title) => $$(".reglist").find((l) => $(".reghead b", l).textContent === title);
 
 console.log("Structure tab gate — BUILD-PLAN U2");
@@ -48,6 +55,7 @@ console.log("Structure tab gate — BUILD-PLAN U2");
 async function main() {
 await t("mounts on Structure with five editable lists and add buttons", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
+  subtab("Structure"); // segments are drawers — open it first
   eq($$(".reglist").length, 5, "five lists");
   ok(reglist("Brands") && reglist("Business units") && reglist("Channels") && reglist("Process groups") && reglist("Products"), "all five titled");
   ok($(".btn", reglist("Brands")), "Brands has an add button");
@@ -66,9 +74,9 @@ await t("add: + Brand appends a row and the list count moves", () => {
 await t("rename propagates by id: renaming Acme shows up in Request types' assignment", () => {
   const acme = $$(".regrow input", reglist("Brands")).find((i) => i.value === "Acme");
   setV(acme, "Acme Bank");
-  click(subtab("Request types"));
-  ok(/Acme Bank/.test($('[role="tabpanel"]').textContent), "assignment line shows the new name");
-  click(subtab("Structure"));
+  subtab("Request types");
+  ok(/Acme Bank/.test($(".sec.open .secbody").textContent), "assignment line shows the new name");
+  subtab("Structure");
 });
 
 await t("delete guard (V6): a referenced brand shows the dependents, an unused one deletes", () => {
@@ -135,6 +143,7 @@ await t("a new estate carries every default channel, ready to use", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   const Ops = require("../model/ops.js");
   act(() => { mod.exports.mount(c, { model: Ops.blankDomainModel() }); });
+  subtab("Structure", c);
   const ch = $$(".reglist", c).find((l) => $(".reghead b", l).textContent === "Channels");
   eq($$(".regrow", ch).length, 4, "all four taxonomy channels seeded");
   const names = $$(".regrow input", ch).map((i) => i.value).sort();
