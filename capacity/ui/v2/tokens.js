@@ -357,6 +357,11 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .chipx:hover{opacity:1; color:var(--red-ink)}
 .outin{border:0.5px solid var(--line); border-radius:7px; padding:4px 8px; font:inherit; font-size:11.5px; width:120px}
 .applies{margin-top:8px}
+.v3banner{display:flex; align-items:center; gap:14px; border:0.5px solid var(--blue-line); background:var(--blue-tint);
+  border-radius:12px; padding:12px 16px; margin-bottom:16px}
+.v3banner b{font-size:13px; color:var(--blue-deep)}
+.v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
+.v3banner .btn{margin-left:auto; white-space:nowrap}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}

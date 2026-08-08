@@ -3864,6 +3864,11 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .chipx:hover{opacity:1; color:var(--red-ink)}
 .outin{border:0.5px solid var(--line); border-radius:7px; padding:4px 8px; font:inherit; font-size:11.5px; width:120px}
 .applies{margin-top:8px}
+.v3banner{display:flex; align-items:center; gap:14px; border:0.5px solid var(--blue-line); background:var(--blue-tint);
+  border-radius:12px; padding:12px 16px; margin-bottom:16px}
+.v3banner b{font-size:13px; color:var(--blue-deep)}
+.v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
+.v3banner .btn{margin-left:auto; white-space:nowrap}
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 @media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -4186,13 +4191,14 @@ function SetupPage({ model, onModelChange, onDownloadTemplate, onUploadTemplate,
       /* @__PURE__ */ jsx("div", { className: "tabs", role: "tablist", "aria-label": "Sections", children: NAV.map(([k, label]) => /* @__PURE__ */ jsx("button", { role: "tab", className: k === "setup" ? "on" : "", "aria-selected": k === "setup", onClick: () => onNav(k), children: label }, k)) })
     ] }),
     /* @__PURE__ */ jsx("h2", { children: "Setup" }),
-    /* @__PURE__ */ jsxs("p", { className: "lede", children: [
-      "Four sections, in order \u2014 each unlocks the next. A new simulation is this page, empty, with Structure open.",
-      onOpenV3 ? /* @__PURE__ */ jsxs(Fragment, { children: [
-        " ",
-        /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: onOpenV3, children: "Preview the new six-tab Setup \u2192" })
-      ] }) : null
-    ] }),
+    /* @__PURE__ */ jsx("p", { className: "lede", children: "Four sections, in order \u2014 each unlocks the next. A new simulation is this page, empty, with Structure open." }),
+    onOpenV3 ? /* @__PURE__ */ jsxs("div", { className: "v3banner", "data-testid": "v3-banner", children: [
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("b", { children: "The redesigned Setup is ready to preview." }),
+        /* @__PURE__ */ jsx("p", { children: "Six tabs over the new domain model \u2014 Structure \xB7 Queues \xB7 Request types \xB7 Volume \xB7 Map \xB7 Defaults. Structure and Request types are fully editable; the rest are live read-only views while their editors are built." })
+      ] }),
+      /* @__PURE__ */ jsx("button", { className: "btn primary", onClick: onOpenV3, children: "Open the new Setup \u2192" })
+    ] }) : null,
     importReport ? /* @__PURE__ */ jsx(ImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
     /* @__PURE__ */ jsxs(
       Section,

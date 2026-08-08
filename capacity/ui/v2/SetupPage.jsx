@@ -61,8 +61,14 @@ export default function SetupPage({ model, onModelChange, onDownloadTemplate, on
       </header>
 
       <h2>Setup</h2>
-      <p className="lede">Four sections, in order — each unlocks the next. A new simulation is this page, empty, with Structure open.
-        {onOpenV3 ? <> <button className="linkbtn" onClick={onOpenV3}>Preview the new six-tab Setup →</button></> : null}</p>
+      <p className="lede">Four sections, in order — each unlocks the next. A new simulation is this page, empty, with Structure open.</p>
+      {onOpenV3 ? (
+        <div className="v3banner" data-testid="v3-banner">
+          <div><b>The redesigned Setup is ready to preview.</b>
+            <p>Six tabs over the new domain model — Structure · Queues · Request types · Volume · Map · Defaults. Structure and Request types are fully editable; the rest are live read-only views while their editors are built.</p></div>
+          <button className="btn primary" onClick={onOpenV3}>Open the new Setup →</button>
+        </div>
+      ) : null}
 
       {importReport ? <ImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
