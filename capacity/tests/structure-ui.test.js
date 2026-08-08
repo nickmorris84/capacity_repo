@@ -42,11 +42,12 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 // Segments are drawers: "navigating" means opening one. Idempotent so a test
 // that returns to a segment does not toggle it shut.
-function segment(label, r) { return $$(".sec", r).find((x) => $(".sechead b", x).textContent === label); }
+// Navigation is the tab strip; selecting is idempotent so a test returning to
+// a tab does not toggle anything. (Drawers live INSIDE each tab.)
 function subtab(label, r) {
-  const sec = segment(label, r);
-  if (sec && !sec.classList.contains("open")) click($(".sechead", sec));
-  return $(".sechead", segment(label, r));
+  const b = $$(".subtabs button", r).find((x) => x.textContent.includes(label));
+  if (b && b.getAttribute("aria-selected") !== "true") click(b);
+  return b;
 }
 const reglist = (title) => $$(".reglist").find((l) => $(".reghead b", l).textContent === title);
 
@@ -75,7 +76,7 @@ await t("rename propagates by id: renaming Acme shows up in Request types' assig
   const acme = $$(".regrow input", reglist("Brands")).find((i) => i.value === "Acme");
   setV(acme, "Acme Bank");
   subtab("Request types");
-  ok(/Acme Bank/.test($(".sec.open .secbody").textContent), "assignment line shows the new name");
+  ok(/Acme Bank/.test($('[role="tabpanel"]').textContent), "assignment line shows the new name");
   subtab("Structure");
 });
 

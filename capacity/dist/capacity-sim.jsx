@@ -3981,9 +3981,29 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .panel.flat{background:transparent; border:none; border-radius:0; padding:0}
 /* A segment body is already inside the .sec card, so the panel inside it must
    add no second card \u2014 but it keeps the section's own padding. */
-.secbody.panel.flat{padding:14px 16px; margin-bottom:0}
-.sechead small{margin-top:1px}
-.sec .badge{font-weight:500}
+/* One collapsible idiom for the option groups INSIDE a tab: registry lists,
+   request-type sections, queue KPI families, Defaults groups. Collapse is
+   CSS-driven so the fields stay mounted and a half-typed value survives a
+   toggle. */
+.drw{border:0.5px solid var(--line); border-radius:11px; background:#fff; margin-bottom:8px}
+.drwhead{display:flex; align-items:center; gap:9px; width:100%; background:none; border:none; font:inherit;
+  text-align:left; padding:10px 13px; cursor:pointer; border-radius:11px}
+.drwhead:hover b{color:var(--blue-deep)}
+.drwhead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+.drwhead b{font-size:13px; font-weight:600}
+.drwhead small{display:block; font-size:11.5px; color:var(--ink-3); font-weight:400; margin-top:1px}
+.drwhead .count{margin-left:auto; font-size:10.5px; color:var(--ink-3); background:var(--canvas);
+  border:0.5px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap}
+.drwhead .chev{font-size:8px; color:var(--ink-3); transition:transform 0.12s}
+.drw.open>.drwhead .chev{transform:rotate(180deg)}
+.info{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none;
+  border-radius:50%; border:0.5px solid var(--line); background:var(--canvas); color:var(--ink-3);
+  font-size:9.5px; font-weight:700; cursor:help; margin-left:6px; vertical-align:1px}
+.info:hover{border-color:var(--blue-line); background:var(--blue-tint); color:var(--blue-deep)}
+.tabnote{font-size:12px; color:var(--ink-2); background:var(--canvas); border:0.5px solid var(--line);
+  border-radius:9px; padding:8px 12px; margin:0 0 14px}
+.drwbody{display:none; padding:2px 13px 12px}
+.drw.open>.drwbody{display:block}
 .panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
 .panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}
@@ -4212,12 +4232,12 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var fmt = (n) => n == null || isNaN(n) ? "\u2014" : Math.round(n).toLocaleString("en-GB");
 var NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 var SETUP_TABS = [
-  ["structure", "Structure", "brands, business units, channels, groups, products"],
-  ["queues", "Queues", "the stations work lands on, and their physics"],
-  ["requestTypes", "Request types", "the only place things are wired together"],
-  ["volume", "Volume", "how much arrives, at whatever level you know"],
-  ["map", "Map", "generated \u2014 does it all hang together?"],
-  ["defaults", "Defaults", "what every queue inherits"]
+  ["structure", "Structure", "Set up the vocabulary of the estate \u2014 the brands, business units, channels, groups and products that everything else refers to. Nothing is wired together here; that happens in Request types."],
+  ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes \u2014 they are never entered here. Tap a queue to open its editor."],
+  ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together \u2014 one process per channel, ending in a declared outcome."],
+  ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
+  ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here \u2014 it redraws from the model, and lists anything that does not hang together."],
+  ["defaults", "Defaults", "The physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams live in Queues; risk thresholds are a reading lens on Results."]
 ];
 function computeStatus(model, p) {
   const nBrands = (model.brands || []).length, nBus = (model.businessUnits || []).length, nChans = (model.channels || []).length, nQ = (model.queues || []).length, nRt = (model.requestTypes || []).length, nVe = (model.volumeEntries || []).length;
@@ -4312,11 +4332,11 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
 }, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
   const p = useMemo(() => (0, import_propagate.propagateDomain)(model), [model]);
   const status = useMemo(() => computeStatus(model, p), [model, p]);
-  const [tab, setTab] = useState(null);
+  const [tab, setTab] = useState("structure");
   const firstTodo = status.find((s) => !s.ok);
   const activeTabRef = useRef(null);
   useEffect(() => {
-    if (tab) activeTabRef.current?.scrollIntoView?.({ block: "nearest" });
+    activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
   }, [tab]);
   return /* @__PURE__ */ jsxs("div", { className: "shell", children: [
     /* @__PURE__ */ jsxs("header", { className: "top", children: [
@@ -4333,7 +4353,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       /* @__PURE__ */ jsx("h2", { children: "Setup" }),
       onOpenClassic ? /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: onOpenClassic, children: "\u2190 classic Setup" }) : null
     ] }),
-    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six segments in dependency order \u2014 open one to work in it." }),
+    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined." }),
     importReport ? /* @__PURE__ */ jsx(DomainImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
     firstTodo ? /* @__PURE__ */ jsxs("div", { className: "pstrip", role: "status", children: [
       /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }),
@@ -4344,41 +4364,37 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       ] }),
       /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => setTab(firstTodo.key), children: "Go" })
     ] }) : null,
-    SETUP_TABS.map(([k, label, caption], i) => {
+    /* @__PURE__ */ jsx("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
       const s = status.find((x) => x.key === k);
-      const open = tab === k;
-      return /* @__PURE__ */ jsxs("div", { className: "sec" + (open ? " open" : ""), "data-seg": k, ref: open ? activeTabRef : null, children: [
-        /* @__PURE__ */ jsxs(
-          "button",
-          {
-            className: "sechead",
-            "aria-expanded": open,
-            onClick: () => setTab(open ? null : k),
-            "aria-label": s.ok ? label : label + " \u2014 needs attention: " + s.next,
-            children: [
-              /* @__PURE__ */ jsx("span", { className: "secnum", children: i + 1 }),
-              /* @__PURE__ */ jsxs("span", { children: [
-                /* @__PURE__ */ jsx("b", { children: label }),
-                /* @__PURE__ */ jsx("small", { children: caption })
-              ] }),
-              /* @__PURE__ */ jsxs("span", { className: "badge" + (s.ok ? "" : " todo"), title: s.ok ? "" : s.next, children: [
-                s.ok ? "" : "\u25B2 ",
-                s.badge
-              ] }),
-              /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
-            ]
-          }
-        ),
-        open ? /* @__PURE__ */ jsxs("div", { className: "secbody panel flat", role: "region", "aria-label": label, children: [
-          k === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
-          k === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
-          k === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
-          k === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
-          k === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
-          k === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
-        ] }) : null
-      ] }, k);
-    }),
+      const on = tab === k;
+      return /* @__PURE__ */ jsxs(
+        "button",
+        {
+          role: "tab",
+          id: "tab-" + k,
+          "aria-controls": "setup-panel",
+          "aria-selected": on,
+          ref: on ? activeTabRef : null,
+          className: on ? "on" : "",
+          onClick: () => setTab(k),
+          "aria-label": s.ok ? label : label + " \u2014 needs attention: " + s.next,
+          children: [
+            label,
+            !s.ok ? /* @__PURE__ */ jsx("span", { className: "glyph todo", title: s.next, children: "\u25B2" }) : null
+          ]
+        },
+        k
+      );
+    }) }),
+    /* @__PURE__ */ jsxs("div", { role: "tabpanel", id: "setup-panel", "aria-labelledby": "tab-" + tab, "data-tab": tab, className: "panel flat", children: [
+      /* @__PURE__ */ jsx("p", { className: "tabnote", "data-testid": "tab-note", children: (SETUP_TABS.find(([k]) => k === tab) || [])[2] }),
+      tab === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
+      tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
+      tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
+      tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
+      tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
+      tab === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
+    ] }),
     onDownloadTemplate || onUploadTemplate ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
       /* @__PURE__ */ jsxs("p", { children: [
         /* @__PURE__ */ jsx("b", { children: "Bulk edit via the five-sheet template." }),
@@ -4400,9 +4416,31 @@ function useRevealOnSelect(sel) {
   }, [sel]);
   return ref;
 }
+function Drawer({ title, sub, info, count, defaultOpen, children, testid }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return /* @__PURE__ */ jsxs("div", { className: "drw" + (open ? " open" : ""), "data-testid": testid, children: [
+    /* @__PURE__ */ jsxs("button", { className: "drwhead", "aria-expanded": open, onClick: () => setOpen(!open), children: [
+      /* @__PURE__ */ jsxs("span", { children: [
+        /* @__PURE__ */ jsx("b", { children: title }),
+        info ? /* @__PURE__ */ jsx("span", { className: "info", title: info, "aria-label": info, children: "i" }) : null,
+        sub ? /* @__PURE__ */ jsx("small", { children: sub }) : null
+      ] }),
+      count != null ? /* @__PURE__ */ jsx("span", { className: "count", children: count }) : null,
+      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "drwbody", children })
+  ] });
+}
 var nameOf = (list, id) => {
   const e = (list || []).find((x) => x.id === id);
   return e ? e.name : id;
+};
+var CH_INFO = "The contact channels this estate uses. All four defaults are ready to use; add your own for anything else. Each channel carries the defaults new processes inherit \u2014 ASA, abandon, patience, concurrency and SLA.";
+var REG_INFO = {
+  Brands: "The brands you plan for. A request type is assigned to one or more; leaving it unassigned means it applies to every brand.",
+  "Business units": "An independent axis from brands \u2014 one BU can serve many brands. Used to scope request types and to give a queue its home.",
+  "Process groups": "A way of reporting on similar processes together. The double-cover warning is scoped to a group: two request types in the same group covering the same brand, BU and channel is flagged.",
+  Products: "Optional. Tag a request type with the product it concerns, for reporting."
 };
 var KIND_LABELS = { requestType: ["request type", "request types"], queue: ["queue", "queues"], volumeEntry: ["volume entry", "volume entries"], process: ["process", "processes"] };
 function guardSummary(guard) {
@@ -4426,15 +4464,22 @@ function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
     children
   ] });
 }
-function RegistryList({ title, list, hint, onAdd, addLabel, row }) {
-  return /* @__PURE__ */ jsxs("div", { className: "reglist", children: [
-    /* @__PURE__ */ jsxs("div", { className: "reghead", children: [
-      /* @__PURE__ */ jsx("b", { children: title }),
+function RegistryList({ title, list, hint, info, onAdd, addLabel, row, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return /* @__PURE__ */ jsxs("div", { className: "reglist drw" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs("button", { className: "reghead drwhead", "aria-expanded": open, onClick: () => setOpen(!open), children: [
+      /* @__PURE__ */ jsxs("span", { children: [
+        /* @__PURE__ */ jsx("b", { children: title }),
+        info ? /* @__PURE__ */ jsx("span", { className: "info", title: info, "aria-label": info, children: "i" }) : null
+      ] }),
       /* @__PURE__ */ jsx("span", { className: "count", children: (list || []).length }),
-      onAdd ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginLeft: "auto" }, onClick: onAdd, children: addLabel || "+ Add" }) : null
+      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
     ] }),
-    hint ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginBottom: 6 }, children: hint }) : null,
-    (list || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : list.map(row)
+    /* @__PURE__ */ jsxs("div", { className: "drwbody", children: [
+      hint ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginBottom: 6 }, children: hint }) : null,
+      (list || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : list.map(row),
+      onAdd ? /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: onAdd, children: addLabel || "+ Add" }) }) : null
+    ] })
   ] });
 }
 var CH_DEFAULT_FIELDS = [
@@ -4520,6 +4565,8 @@ function StructurePanel({ model, set }) {
     {
       title,
       list: model[key],
+      info: REG_INFO[title],
+      defaultOpen: key === "brands",
       onAdd: () => set(add(model, { name: seed })),
       addLabel,
       row: (e) => /* @__PURE__ */ jsx(
@@ -4543,23 +4590,35 @@ function StructurePanel({ model, set }) {
     /* @__PURE__ */ jsxs("div", { className: "structgrid", children: [
       brandsL,
       busL,
-      /* @__PURE__ */ jsxs("div", { className: "reglist", children: [
-        /* @__PURE__ */ jsxs("div", { className: "reghead", children: [
-          /* @__PURE__ */ jsx("b", { children: "Channels" }),
-          /* @__PURE__ */ jsx("span", { className: "count", children: (model.channels || []).length })
-        ] }),
-        (model.channels || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : null,
-        (model.channels || []).map((c) => /* @__PURE__ */ jsx(ChannelRow, { model, c, set }, c.id)),
-        /* @__PURE__ */ jsxs("div", { className: "regoff", children: [
-          offKeys.map((k) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
-            "+ ",
-            CHANNEL_LABELS[k]
-          ] }, k)),
-          /* @__PURE__ */ jsx(AddChannel, { model, set })
-        ] })
-      ] }),
+      /* @__PURE__ */ jsx(ChannelList, { model, set }),
       groupsL,
       prodsL
+    ] })
+  ] });
+}
+function ChannelList({ model, set }) {
+  const [open, setOpen] = useState(false);
+  const enabledKeys = new Set((model.channels || []).map((c) => c.key));
+  const offKeys = import_taxonomy2.CHANNELS.filter((k) => !enabledKeys.has(k));
+  return /* @__PURE__ */ jsxs("div", { className: "reglist drw" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs("button", { className: "reghead drwhead", "aria-expanded": open, onClick: () => setOpen(!open), children: [
+      /* @__PURE__ */ jsxs("span", { children: [
+        /* @__PURE__ */ jsx("b", { children: "Channels" }),
+        /* @__PURE__ */ jsx("span", { className: "info", "aria-label": CH_INFO, title: CH_INFO, children: "i" })
+      ] }),
+      /* @__PURE__ */ jsx("span", { className: "count", children: (model.channels || []).length }),
+      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "drwbody", children: [
+      (model.channels || []).length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : null,
+      (model.channels || []).map((c) => /* @__PURE__ */ jsx(ChannelRow, { model, c, set }, c.id)),
+      /* @__PURE__ */ jsxs("div", { className: "regoff", children: [
+        offKeys.map((k) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addChannel(model, { key: k, name: CHANNEL_LABELS[k] })), "aria-label": "Enable " + CHANNEL_LABELS[k], children: [
+          "+ ",
+          CHANNEL_LABELS[k]
+        ] }, k)),
+        /* @__PURE__ */ jsx(AddChannel, { model, set })
+      ] })
     ] })
   ] });
 }
@@ -4579,6 +4638,14 @@ function NumF({ label, value, onChange, placeholder }) {
   ] });
 }
 var n0 = (v) => +v || 0;
+var FAM_INFO = {
+  Inputs: "What arrives and what it costs to handle. Volume and effective AHT are derived from the processes that route here \u2014 the fallback AHT is only used when a request type does not declare its own.",
+  Performance: "The service promise for this queue. Voice queues answer on ASA and abandon; digital queues answer on a percentage within a time. This is what red and amber are measured against.",
+  Efficiency: "How hard staff can be run. The occupancy ceiling caps sustainable utilisation; the advanced burnout block models what happens when you exceed it \u2014 attrition rises and handling slows.",
+  Workforce: "Who staffs this queue and how they arrive. Covers the hiring pipeline (request to start, training, learning curve), shrinkage, attrition, cross-skilling, and the manual hire plan the Manual strategy uses.",
+  Customer: "What a failure here costs commercially \u2014 the churn value applied when this queue misses.",
+  Outputs: "The unit costs the plan is priced with."
+};
 function Fam({ fam, name, children, advanced, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [adv, setAdv] = useState(false);
@@ -4586,6 +4653,7 @@ function Fam({ fam, name, children, advanced, defaultOpen }) {
     /* @__PURE__ */ jsxs("button", { className: "famhead", onClick: () => setOpen(!open), "aria-expanded": open, children: [
       /* @__PURE__ */ jsx("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
       /* @__PURE__ */ jsx("b", { children: name }),
+      FAM_INFO[name] ? /* @__PURE__ */ jsx("span", { className: "info", title: FAM_INFO[name], "aria-label": FAM_INFO[name], children: "i" }) : null,
       /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
     ] }),
     /* @__PURE__ */ jsxs("div", { className: "fambody", children: [
@@ -5127,88 +5195,112 @@ function RequestTypesPanel({ model, set, p }) {
         }, children: "+ Request type" })
       ] }),
       /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "rt-detail", ref: detailRef, tabIndex: -1, children: rt ? /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx("h4", { children: "Identity" }),
-        /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "Name" }),
-            /* @__PURE__ */ jsx("input", { value: rt.name, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value })), "aria-label": "Request type name" })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "Activity" }),
-            /* @__PURE__ */ jsx("select", { value: rt.activity, "aria-label": "Activity", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "Product request" }),
-            /* @__PURE__ */ jsxs("select", { value: rt.productRequest, "aria-label": "Product request", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
-              /* @__PURE__ */ jsx("option", { value: "existing", children: "Existing product" }),
-              /* @__PURE__ */ jsx("option", { value: "new", children: "New product" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "Process group" }),
-            /* @__PURE__ */ jsxs("select", { value: rt.groupId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || void 0 })), "aria-label": "Process group", children: [
-              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
-              (model.processGroups || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "Product (optional)" }),
-            /* @__PURE__ */ jsxs("select", { value: rt.productId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || void 0 })), "aria-label": "Product", children: [
-              /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
-              (model.products || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "field", children: [
-            /* @__PURE__ */ jsx("label", { children: "AHT override (s) \u2014 optional" }),
-            /* @__PURE__ */ jsx(
-              "input",
-              {
-                className: "num",
-                placeholder: "\u2014 uses queue AHT",
-                value: rt.ahtSec != null ? rt.ahtSec : "",
-                onChange: (e) => set(Ops.updateRequestType(model, rt.id, { ahtSec: e.target.value === "" ? void 0 : +e.target.value })),
-                "aria-label": "AHT override"
-              }
-            )
-          ] })
-        ] }),
-        /* @__PURE__ */ jsx("h4", { style: { marginTop: 14 }, children: "Assignment" }),
-        /* @__PURE__ */ jsx("p", { className: "hint", children: "None selected = applies to all." }),
         /* @__PURE__ */ jsx(
-          ToggleChips,
+          Drawer,
           {
-            label: "Brands",
-            options: model.brands || [],
-            selected: rt.brandIds || [],
-            allLabel: "no brands defined yet",
-            onToggle: (id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...rt.brandIds || [], id] }))
+            title: "Identity",
+            defaultOpen: true,
+            info: "What this request is and how it is classified. The process group drives double-cover reporting; the AHT override replaces the queue's own handling time wherever this request type is routed.",
+            children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "Name" }),
+                /* @__PURE__ */ jsx("input", { value: rt.name, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value })), "aria-label": "Request type name" })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "Activity" }),
+                /* @__PURE__ */ jsx("select", { value: rt.activity, "aria-label": "Activity", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "Product request" }),
+                /* @__PURE__ */ jsxs("select", { value: rt.productRequest, "aria-label": "Product request", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
+                  /* @__PURE__ */ jsx("option", { value: "existing", children: "Existing product" }),
+                  /* @__PURE__ */ jsx("option", { value: "new", children: "New product" })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "Process group" }),
+                /* @__PURE__ */ jsxs("select", { value: rt.groupId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { groupId: e.target.value || void 0 })), "aria-label": "Process group", children: [
+                  /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+                  (model.processGroups || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "Product (optional)" }),
+                /* @__PURE__ */ jsxs("select", { value: rt.productId || "", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productId: e.target.value || void 0 })), "aria-label": "Product", children: [
+                  /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+                  (model.products || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "field", children: [
+                /* @__PURE__ */ jsx("label", { children: "AHT override (s) \u2014 optional" }),
+                /* @__PURE__ */ jsx(
+                  "input",
+                  {
+                    className: "num",
+                    placeholder: "\u2014 uses queue AHT",
+                    value: rt.ahtSec != null ? rt.ahtSec : "",
+                    onChange: (e) => set(Ops.updateRequestType(model, rt.id, { ahtSec: e.target.value === "" ? void 0 : +e.target.value })),
+                    "aria-label": "AHT override"
+                  }
+                )
+              ] })
+            ] })
           }
         ),
-        /* @__PURE__ */ jsx(
-          ToggleChips,
+        /* @__PURE__ */ jsxs(
+          Drawer,
           {
-            label: "Business units",
-            options: model.businessUnits || [],
-            selected: rt.buIds || [],
-            allLabel: "no business units defined yet",
-            onToggle: (id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...rt.buIds || [], id] }))
+            title: "Assignment",
+            info: "Which brands and business units this request type applies to. Selecting none means ALL \u2014 useful for a request every brand handles the same way. Two request types in the same process group covering the same brand, BU and channel raise a double-cover warning.",
+            children: [
+              /* @__PURE__ */ jsx("p", { className: "hint", children: "None selected = applies to all." }),
+              /* @__PURE__ */ jsx(
+                ToggleChips,
+                {
+                  label: "Brands",
+                  options: model.brands || [],
+                  selected: rt.brandIds || [],
+                  allLabel: "no brands defined yet",
+                  onToggle: (id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...rt.brandIds || [], id] }))
+                }
+              ),
+              /* @__PURE__ */ jsx(
+                ToggleChips,
+                {
+                  label: "Business units",
+                  options: model.businessUnits || [],
+                  selected: rt.buIds || [],
+                  allLabel: "no business units defined yet",
+                  onToggle: (id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...rt.buIds || [], id] }))
+                }
+              ),
+              /* @__PURE__ */ jsxs("p", { className: "hint applies", "data-testid": "applies-line", children: [
+                /* @__PURE__ */ jsx("b", { children: "Applies to:" }),
+                " ",
+                assignLine(rt)
+              ] }),
+              rtWarn(rt).map((w, i) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
+                "\u25B2 ",
+                w.message
+              ] }, i))
+            ]
           }
         ),
-        /* @__PURE__ */ jsxs("p", { className: "hint applies", "data-testid": "applies-line", children: [
-          /* @__PURE__ */ jsx("b", { children: "Applies to:" }),
-          " ",
-          assignLine(rt)
-        ] }),
-        rtWarn(rt).map((w, i) => /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
-          "\u25B2 ",
-          w.message
-        ] }, i)),
-        /* @__PURE__ */ jsx("h4", { style: { marginTop: 14 }, children: "Processes \u2014 one per channel" }),
-        (rt.processes || []).map((pr) => /* @__PURE__ */ jsx(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
-        offChannels.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
-          "+ ",
-          c.name
-        ] }, c.id)) }) : null,
+        /* @__PURE__ */ jsxs(
+          Drawer,
+          {
+            title: "Processes \u2014 one per channel",
+            defaultOpen: true,
+            info: "The journey this request takes, per channel. Each step routes a percentage of what reaches it to a queue; a step marked Ends declares the outcome. A branch under 100% doubles as rework \u2014 hover the split to see the multi-round effective rate.",
+            children: [
+              (rt.processes || []).map((pr) => /* @__PURE__ */ jsx(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
+              offChannels.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
+                "+ ",
+                c.name
+              ] }, c.id)) }) : null
+            ]
+          }
+        ),
         /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => {
           set(Ops.deleteRequestType(model, rt.id));
           setSel(null);
@@ -5569,10 +5661,25 @@ function MapPanel({ model, p, onJump }) {
     ] })
   ] });
 }
-function G({ name, children }) {
-  return /* @__PURE__ */ jsxs("section", { className: "fam-sec", children: [
-    /* @__PURE__ */ jsx("div", { className: "famhead", children: /* @__PURE__ */ jsx("b", { children: name }) }),
-    /* @__PURE__ */ jsx("div", { className: "fields", children })
+var G_INFO = {
+  "Simulation frame": "How long the simulation runs and what a working day looks like. Changing the horizon or the operating day re-scores every strategy in the decision matrix.",
+  "Workforce policy": "Global hiring limits. The cap is the most heads that can start in any one week across the estate; the buffer is the headroom the sizing strategies aim for above bare requirement.",
+  "Overtime": "How far the estate can push existing staff before hiring. The premium multiplies the hourly rate; the burnout load feeds the attrition model, so heavy overtime costs you people as well as money.",
+  "Cost model": "Costs that are not per-agent. Manager cost and span of control set the overhead layered on top of the agent cost each queue carries.",
+  "Customer behaviour": "What poor service costs you. These drive the churn and lost-value figures on Results \u2014 the difference between an SLA miss and a commercial number.",
+  "Pattern libraries": "Reusable shapes. The system seasonality preset is the same library that powers the shape chips on the Volume tab."
+};
+function G({ name, children, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return /* @__PURE__ */ jsxs("div", { className: "drw" + (open ? " open" : ""), children: [
+    /* @__PURE__ */ jsxs("button", { className: "drwhead", "aria-expanded": open, onClick: () => setOpen(!open), children: [
+      /* @__PURE__ */ jsxs("span", { children: [
+        /* @__PURE__ */ jsx("b", { children: name }),
+        G_INFO[name] ? /* @__PURE__ */ jsx("span", { className: "info", title: G_INFO[name], "aria-label": G_INFO[name], children: "i" }) : null
+      ] }),
+      /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "drwbody", children: /* @__PURE__ */ jsx("div", { className: "fields", children }) })
   ] });
 }
 function DefaultsPanel({ model, set }) {
@@ -5601,7 +5708,7 @@ function DefaultsPanel({ model, set }) {
       "Defaults ",
       /* @__PURE__ */ jsx("small", { children: "what every queue inherits" })
     ] }),
-    /* @__PURE__ */ jsxs(G, { name: "Simulation frame", children: [
+    /* @__PURE__ */ jsxs(G, { name: "Simulation frame", defaultOpen: true, children: [
       /* @__PURE__ */ jsx(NumF, { label: "Horizon (weeks)", value: eng.horizonWeeks, onChange: (v) => updEC("engine", { horizonWeeks: n0(v) }) }),
       /* @__PURE__ */ jsx(NumF, { label: "Day start (h)", value: eng.dayStart, onChange: (v) => updEC("engine", { dayStart: n0(v) }) }),
       /* @__PURE__ */ jsx(NumF, { label: "Day end (h)", value: eng.dayEnd, onChange: (v) => updEC("engine", { dayEnd: n0(v) }) }),

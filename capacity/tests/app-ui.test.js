@@ -43,12 +43,12 @@ async function settle(ms = 60) { await act(async () => { await new Promise((r) =
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const navTab = (label) => { const b = $$('.tabs [role="tab"]').find((x) => x.textContent === label); click(b); };
-// Setup segments are drawers — opening one is how you reach its content.
-function openSeg(label) {
-  // NB: this gate's $ takes no scope argument — query off the element itself.
-  const sec = $$(".sec").find((x) => { const b = x.querySelector(".sechead b"); return b && b.textContent === label; });
-  ok(sec, "segment not found: " + label);
-  if (!sec.classList.contains("open")) click(sec.querySelector(".sechead"));
+
+// Setup navigates by tab; the drawers are inside each tab.
+function openTab(label) {
+  const b = $$(".subtabs button").find((x) => x.textContent.includes(label));
+  ok(b, "tab not found: " + label);
+  if (b.getAttribute("aria-selected") !== "true") click(b);
 }
 const activeTab = () => { const b = $('.tabs [role="tab"].on'); return b ? b.textContent : null; };
 
@@ -67,14 +67,14 @@ await t("Home → Open enters the Setup workspace", () => {
   eq(activeTab(), "Setup", "landed on Setup");
 });
 
-await t("the four tabs navigate across all surfaces (Setup is the six-segment shell)", () => {
+await t("the four tabs navigate across all surfaces (Setup is the six-tab shell)", () => {
   navTab("Levers"); eq(activeTab(), "Levers", "→ Levers");
   ok($(".mx .cell"), "Levers matrix renders");
   navTab("Results"); eq(activeTab(), "Results", "→ Results");
   ok($(".sub"), "Results lenses render");
   navTab("Setup"); eq(activeTab(), "Setup", "→ Setup");
-  eq($$(".sec .sechead").length, 6, "Setup shows six collapsible segments");
-  eq($$(".sec.open").length, 0, "all shut by default");
+  eq($$(".subtabs [role='tab']").length, 6, "Setup shows six tabs");
+  ok($('[data-testid="tab-note"]'), "the active tab explains itself");
   navTab("Home"); ok($(".grid .card"), "→ Home launcher");
 });
 
@@ -82,7 +82,7 @@ await t("a Setup edit is reflected on Results (single shared model)", async () =
   // Enter Setup → Volume, double the estate total in the cascade grid, and
   // confirm the Results Data lens still renders volumes from the shared model.
   click($$(".card .open").find((b) => b.textContent === "Open")); // → Setup
-  openSeg("Volume");
+  openTab("Volume");
   const estate = $$(".volrow:not(.head)").find((r) => /Whole estate/.test(r.textContent));
   ok(estate, "estate row present in the cascade grid");
   const input = estate.querySelector("input");
@@ -110,7 +110,7 @@ await t("a Levers matrix cell drives the Results context (shared selection)", as
   ok(/Plan of record/.test(scen.options[scen.selectedIndex].textContent), "Results scenario follows the tapped cell");
 });
 
-await t("New simulation opens the empty six-tab shell and still runs the engine", async () => {
+await t("New simulation opens the empty Setup and still runs the engine", async () => {
   navTab("Home");
   click($$(".btn.primary").find((b) => /New simulation/.test(b.textContent)));
   click($$(".fork .t").find((x) => x.textContent === "Whole ecosystem")); // a fork → new blank sim
@@ -118,7 +118,7 @@ await t("New simulation opens the empty six-tab shell and still runs the engine"
   eq(activeTab(), "Setup", "lands on Setup as the empty state");
   ok($(".pstrip") && /Next:/.test($(".pstrip").textContent), "the progress strip names the first step");
   click($(".pstrip .btn"));
-  ok(/none yet/.test($(".sec.open .secbody").textContent), "registry starts empty");
+  ok(/none yet/.test($('[role="tabpanel"]').textContent), "registry starts empty");
   // The empty simulation must not crash Levers/Results (0 queues).
   const before = consoleEvents.length;
   navTab("Results"); await settle(150);

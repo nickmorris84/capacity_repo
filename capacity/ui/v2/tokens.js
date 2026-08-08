@@ -339,9 +339,29 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .panel.flat{background:transparent; border:none; border-radius:0; padding:0}
 /* A segment body is already inside the .sec card, so the panel inside it must
    add no second card — but it keeps the section's own padding. */
-.secbody.panel.flat{padding:14px 16px; margin-bottom:0}
-.sechead small{margin-top:1px}
-.sec .badge{font-weight:500}
+/* One collapsible idiom for the option groups INSIDE a tab: registry lists,
+   request-type sections, queue KPI families, Defaults groups. Collapse is
+   CSS-driven so the fields stay mounted and a half-typed value survives a
+   toggle. */
+.drw{border:0.5px solid var(--line); border-radius:11px; background:#fff; margin-bottom:8px}
+.drwhead{display:flex; align-items:center; gap:9px; width:100%; background:none; border:none; font:inherit;
+  text-align:left; padding:10px 13px; cursor:pointer; border-radius:11px}
+.drwhead:hover b{color:var(--blue-deep)}
+.drwhead:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
+.drwhead b{font-size:13px; font-weight:600}
+.drwhead small{display:block; font-size:11.5px; color:var(--ink-3); font-weight:400; margin-top:1px}
+.drwhead .count{margin-left:auto; font-size:10.5px; color:var(--ink-3); background:var(--canvas);
+  border:0.5px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap}
+.drwhead .chev{font-size:8px; color:var(--ink-3); transition:transform 0.12s}
+.drw.open>.drwhead .chev{transform:rotate(180deg)}
+.info{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none;
+  border-radius:50%; border:0.5px solid var(--line); background:var(--canvas); color:var(--ink-3);
+  font-size:9.5px; font-weight:700; cursor:help; margin-left:6px; vertical-align:1px}
+.info:hover{border-color:var(--blue-line); background:var(--blue-tint); color:var(--blue-deep)}
+.tabnote{font-size:12px; color:var(--ink-2); background:var(--canvas); border:0.5px solid var(--line);
+  border-radius:9px; padding:8px 12px; margin:0 0 14px}
+.drwbody{display:none; padding:2px 13px 12px}
+.drw.open>.drwbody{display:block}
 .panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
 .panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}

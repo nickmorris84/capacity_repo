@@ -24,12 +24,12 @@ const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
 export const SETUP_TABS = [
-  ["structure", "Structure", "brands, business units, channels, groups, products"],
-  ["queues", "Queues", "the stations work lands on, and their physics"],
-  ["requestTypes", "Request types", "the only place things are wired together"],
-  ["volume", "Volume", "how much arrives, at whatever level you know"],
-  ["map", "Map", "generated — does it all hang together?"],
-  ["defaults", "Defaults", "what every queue inherits"],
+  ["structure", "Structure", "Set up the vocabulary of the estate — the brands, business units, channels, groups and products that everything else refers to. Nothing is wired together here; that happens in Request types."],
+  ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes — they are never entered here. Tap a queue to open its editor."],
+  ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together — one process per channel, ending in a declared outcome."],
+  ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
+  ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here — it redraws from the model, and lists anything that does not hang together."],
+  ["defaults", "Defaults", "The physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams live in Queues; risk thresholds are a reading lens on Results."],
 ];
 
 // ---- completion: one status per tab, in dependency order ---------------------
@@ -89,12 +89,12 @@ function DomainImportReport({ report, onDismiss }) {
 export default function SetupV3Page({ model, onModelChange, onNav = () => {}, onOpenClassic, onDownloadTemplate, onUploadTemplate, importReport, onDismissImport }) {
   const p = useMemo(() => propagateDomain(model), [model]);
   const status = useMemo(() => computeStatus(model, p), [model, p]);
-  const [tab, setTab] = useState(null);
+  const [tab, setTab] = useState("structure");
   const firstTodo = status.find((s) => !s.ok);
-  // Opening a segment from the progress strip or a Map jump-link can land below
-  // the fold once the segments above it are tall — bring it into view.
+  // Six labels overflow the strip on a phone, so a jump-link from Map (or the
+  // progress strip's Go) could select a tab whose button is off-screen.
   const activeTabRef = useRef(null);
-  useEffect(() => { if (tab) activeTabRef.current?.scrollIntoView?.({ block: "nearest" }); }, [tab]);
+  useEffect(() => { activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" }); }, [tab]);
 
   return (
     <div className="shell">
@@ -114,7 +114,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         <h2>Setup</h2>
         {onOpenClassic ? <button className="linkbtn" onClick={onOpenClassic}>← classic Setup</button> : null}
       </div>
-      <p className="lede">Six segments in dependency order — open one to work in it.</p>
+      <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined.</p>
 
       {importReport ? <DomainImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
@@ -123,31 +123,30 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
           <button className="btn sm" onClick={() => setTab(firstTodo.key)}>Go</button></div>
       ) : null}
 
-      {SETUP_TABS.map(([k, label, caption], i) => {
-        const s = status.find((x) => x.key === k);
-        const open = tab === k;
-        return (
-          <div className={"sec" + (open ? " open" : "")} key={k} data-seg={k} ref={open ? activeTabRef : null}>
-            <button className="sechead" aria-expanded={open} onClick={() => setTab(open ? null : k)}
+      <div className="subtabs" role="tablist" aria-label="Setup tabs">
+        {SETUP_TABS.map(([k, label]) => {
+          const s = status.find((x) => x.key === k);
+          const on = tab === k;
+          return (
+            <button key={k} role="tab" id={"tab-" + k} aria-controls="setup-panel" aria-selected={on}
+              ref={on ? activeTabRef : null} className={on ? "on" : ""} onClick={() => setTab(k)}
               aria-label={s.ok ? label : label + " — needs attention: " + s.next}>
-              <span className="secnum">{i + 1}</span>
-              <span><b>{label}</b><small>{caption}</small></span>
-              <span className={"badge" + (s.ok ? "" : " todo")} title={s.ok ? "" : s.next}>{s.ok ? "" : "▲ "}{s.badge}</span>
-              <span className="chev">▼</span>
+              {label}
+              {!s.ok ? <span className="glyph todo" title={s.next}>▲</span> : null}
             </button>
-            {open ? (
-              <div className="secbody panel flat" role="region" aria-label={label}>
-                {k === "structure" && <StructurePanel model={model} set={onModelChange} />}
-                {k === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
-                {k === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
-                {k === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
-                {k === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
-                {k === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      <div role="tabpanel" id="setup-panel" aria-labelledby={"tab-" + tab} data-tab={tab} className="panel flat">
+        <p className="tabnote" data-testid="tab-note">{(SETUP_TABS.find(([k]) => k === tab) || [])[2]}</p>
+        {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
+        {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
+        {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
+        {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
+        {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
+        {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
+      </div>
 
       {onDownloadTemplate || onUploadTemplate ? (
         <div className="importbox">
@@ -176,12 +175,35 @@ function useRevealOnSelect(sel) {
   return ref;
 }
 
+// The option groups inside a tab are drawers — one idiom, used by every tab.
+function Drawer({ title, sub, info, count, defaultOpen, children, testid }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className={"drw" + (open ? " open" : "")} data-testid={testid}>
+      <button className="drwhead" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span><b>{title}</b>{info ? <span className="info" title={info} aria-label={info}>i</span> : null}{sub ? <small>{sub}</small> : null}</span>
+        {count != null ? <span className="count">{count}</span> : null}
+        <span className="chev">▼</span>
+      </button>
+      <div className="drwbody">{children}</div>
+    </div>
+  );
+}
+
 const nameOf = (list, id) => { const e = (list || []).find((x) => x.id === id); return e ? e.name : id; };
 
 // ---- 1 · Structure — the registry: five flat lists, editable (U2) ------------
 // Rename propagates by id (nothing stores names twice); delete is guarded with
 // the dependents summarised (V6). Channels enable from the taxonomy and carry
 // the channel defaults new processes inherit (globals category B).
+const CH_INFO = "The contact channels this estate uses. All four defaults are ready to use; add your own for anything else. Each channel carries the defaults new processes inherit — ASA, abandon, patience, concurrency and SLA.";
+const REG_INFO = {
+  Brands: "The brands you plan for. A request type is assigned to one or more; leaving it unassigned means it applies to every brand.",
+  "Business units": "An independent axis from brands — one BU can serve many brands. Used to scope request types and to give a queue its home.",
+  "Process groups": "A way of reporting on similar processes together. The double-cover warning is scoped to a group: two request types in the same group covering the same brand, BU and channel is flagged.",
+  Products: "Optional. Tag a request type with the product it concerns, for reporting.",
+};
+const KIND_INFO_ORDER = 0;
 const KIND_LABELS = { requestType: ["request type", "request types"], queue: ["queue", "queues"], volumeEntry: ["volume entry", "volume entries"], process: ["process", "processes"] };
 function guardSummary(guard) {
   const byKind = {};
@@ -207,14 +229,20 @@ function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
   );
 }
 
-function RegistryList({ title, list, hint, onAdd, addLabel, row }) {
+function RegistryList({ title, list, hint, info, onAdd, addLabel, row, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <div className="reglist">
-      <div className="reghead"><b>{title}</b><span className="count">{(list || []).length}</span>
-        {onAdd ? <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onAdd}>{addLabel || "+ Add"}</button> : null}
+    <div className={"reglist drw" + (open ? " open" : "")}>
+      <button className="reghead drwhead" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span><b>{title}</b>{info ? <span className="info" title={info} aria-label={info}>i</span> : null}</span>
+        <span className="count">{(list || []).length}</span>
+        <span className="chev">▼</span>
+      </button>
+      <div className="drwbody">
+        {hint ? <p className="hint" style={{ marginBottom: 6 }}>{hint}</p> : null}
+        {(list || []).length === 0 ? <span className="hint">none yet</span> : list.map(row)}
+        {onAdd ? <div style={{ marginTop: 8 }}><button className="btn sm" onClick={onAdd}>{addLabel || "+ Add"}</button></div> : null}
       </div>
-      {hint ? <p className="hint" style={{ marginBottom: 6 }}>{hint}</p> : null}
-      {(list || []).length === 0 ? <span className="hint">none yet</span> : list.map(row)}
     </div>
   );
 }
@@ -283,7 +311,7 @@ function StructurePanel({ model, set }) {
   const enabledKeys = new Set((model.channels || []).map((c) => c.key));
   const offKeys = CHANNELS.filter((k) => !enabledKeys.has(k));
   const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => (
-    <RegistryList key={key} title={title} list={model[key]} onAdd={() => set(add(model, { name: seed }))} addLabel={addLabel}
+    <RegistryList key={key} title={title} list={model[key]} info={REG_INFO[title]} defaultOpen={key === "brands"} onAdd={() => set(add(model, { name: seed }))} addLabel={addLabel}
       row={(e) => (
         <RegRow key={e.id} entity={e} onRename={(name) => set(rename(model, e.id, name))}
           guard={guard(model, e.id)} onDelete={() => set(del(model, e.id))} />
@@ -295,8 +323,26 @@ function StructurePanel({ model, set }) {
       <div className="structgrid">
         {brandsL}
         {busL}
-        <div className="reglist">
-          <div className="reghead"><b>Channels</b><span className="count">{(model.channels || []).length}</span></div>
+        <ChannelList model={model} set={set} />
+        {groupsL}
+        {prodsL}
+      </div>
+    </>
+  );
+}
+
+function ChannelList({ model, set }) {
+  const [open, setOpen] = useState(false);
+  const enabledKeys = new Set((model.channels || []).map((c) => c.key));
+  const offKeys = CHANNELS.filter((k) => !enabledKeys.has(k));
+  return (
+    <div className={"reglist drw" + (open ? " open" : "")}>
+      <button className="reghead drwhead" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span><b>Channels</b><span className="info" aria-label={CH_INFO} title={CH_INFO}>i</span></span>
+        <span className="count">{(model.channels || []).length}</span>
+        <span className="chev">▼</span>
+      </button>
+      <div className="drwbody">
           {(model.channels || []).length === 0 ? <span className="hint">none yet</span> : null}
           {(model.channels || []).map((c) => <ChannelRow key={c.id} model={model} c={c} set={set} />)}
           <div className="regoff">
@@ -307,11 +353,8 @@ function StructurePanel({ model, set }) {
             ))}
             <AddChannel model={model} set={set} />
           </div>
-        </div>
-        {groupsL}
-        {prodsL}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -332,6 +375,14 @@ const n0 = (v) => +v || 0;
 // A KPI family: collapsed by default so the drawer opens as six scannable
 // headings rather than thirty fields. Collapse is CSS-driven (the body stays in
 // the DOM) so nothing re-mounts and in-progress edits survive a toggle.
+const FAM_INFO = {
+  Inputs: "What arrives and what it costs to handle. Volume and effective AHT are derived from the processes that route here — the fallback AHT is only used when a request type does not declare its own.",
+  Performance: "The service promise for this queue. Voice queues answer on ASA and abandon; digital queues answer on a percentage within a time. This is what red and amber are measured against.",
+  Efficiency: "How hard staff can be run. The occupancy ceiling caps sustainable utilisation; the advanced burnout block models what happens when you exceed it — attrition rises and handling slows.",
+  Workforce: "Who staffs this queue and how they arrive. Covers the hiring pipeline (request to start, training, learning curve), shrinkage, attrition, cross-skilling, and the manual hire plan the Manual strategy uses.",
+  Customer: "What a failure here costs commercially — the churn value applied when this queue misses.",
+  Outputs: "The unit costs the plan is priced with.",
+};
 function Fam({ fam, name, children, advanced, defaultOpen }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [adv, setAdv] = useState(false);
@@ -339,6 +390,7 @@ function Fam({ fam, name, children, advanced, defaultOpen }) {
     <section className={"fam-sec" + (open ? " open" : "")}>
       <button className="famhead" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b>
+        {FAM_INFO[name] ? <span className="info" title={FAM_INFO[name]} aria-label={FAM_INFO[name]}>i</span> : null}
         <span className="chev">▼</span>
       </button>
       <div className="fambody">
@@ -799,7 +851,8 @@ function RequestTypesPanel({ model, set, p }) {
         </div>
         <div className="mddetail" data-testid="rt-detail" ref={detailRef} tabIndex={-1}>
           {rt ? <>
-            <h4>Identity</h4>
+            <Drawer title="Identity" defaultOpen
+              info="What this request is and how it is classified. The process group drives double-cover reporting; the AHT override replaces the queue's own handling time wherever this request type is routed.">
             <div className="fields">
               <div className="field"><label>Name</label><input value={rt.name} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value }))} aria-label="Request type name" /></div>
               <div className="field"><label>Activity</label>
@@ -825,7 +878,10 @@ function RequestTypesPanel({ model, set, p }) {
                   onChange={(e) => set(Ops.updateRequestType(model, rt.id, { ahtSec: e.target.value === "" ? undefined : +e.target.value }))} aria-label="AHT override" /></div>
             </div>
 
-            <h4 style={{ marginTop: 14 }}>Assignment</h4>
+            </Drawer>
+
+            <Drawer title="Assignment"
+              info="Which brands and business units this request type applies to. Selecting none means ALL — useful for a request every brand handles the same way. Two request types in the same process group covering the same brand, BU and channel raise a double-cover warning.">
             <p className="hint">None selected = applies to all.</p>
             <ToggleChips label="Brands" options={model.brands || []} selected={rt.brandIds || []} allLabel="no brands defined yet"
               onToggle={(id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...(rt.brandIds || []), id] }))} />
@@ -834,7 +890,10 @@ function RequestTypesPanel({ model, set, p }) {
             <p className="hint applies" data-testid="applies-line"><b>Applies to:</b> {assignLine(rt)}</p>
             {rtWarn(rt).map((w, i) => <p className="warnmsg" key={i}>▲ {w.message}</p>)}
 
-            <h4 style={{ marginTop: 14 }}>Processes — one per channel</h4>
+            </Drawer>
+
+            <Drawer title="Processes — one per channel" defaultOpen
+              info="The journey this request takes, per channel. Each step routes a percentage of what reaches it to a queue; a step marked Ends declares the outcome. A branch under 100% doubles as rework — hover the split to see the multi-round effective rate.">
             {(rt.processes || []).map((pr) => <ProcessEditor key={pr.channelId} model={model} set={set} rt={rt} proc={pr} />)}
             {offChannels.length ? (
               <div className="regoff">
@@ -843,6 +902,8 @@ function RequestTypesPanel({ model, set, p }) {
                 ))}
               </div>
             ) : null}
+
+            </Drawer>
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }}>
               {guard.ok
@@ -1129,8 +1190,25 @@ function MapPanel({ model, p, onJump }) {
 // C workforce policy · D overtime · E cost model · F customer behaviour ·
 // I pattern libraries (applied in Volume). Channel defaults live in
 // Structure; service teams in Queues; risk thresholds read in Results.
-function G({ name, children }) {
-  return <section className="fam-sec"><div className="famhead"><b>{name}</b></div><div className="fields">{children}</div></section>;
+const G_INFO = {
+  "Simulation frame": "How long the simulation runs and what a working day looks like. Changing the horizon or the operating day re-scores every strategy in the decision matrix.",
+  "Workforce policy": "Global hiring limits. The cap is the most heads that can start in any one week across the estate; the buffer is the headroom the sizing strategies aim for above bare requirement.",
+  "Overtime": "How far the estate can push existing staff before hiring. The premium multiplies the hourly rate; the burnout load feeds the attrition model, so heavy overtime costs you people as well as money.",
+  "Cost model": "Costs that are not per-agent. Manager cost and span of control set the overhead layered on top of the agent cost each queue carries.",
+  "Customer behaviour": "What poor service costs you. These drive the churn and lost-value figures on Results — the difference between an SLA miss and a commercial number.",
+  "Pattern libraries": "Reusable shapes. The system seasonality preset is the same library that powers the shape chips on the Volume tab.",
+};
+function G({ name, children, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className={"drw" + (open ? " open" : "")}>
+      <button className="drwhead" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span><b>{name}</b>{G_INFO[name] ? <span className="info" title={G_INFO[name]} aria-label={G_INFO[name]}>i</span> : null}</span>
+        <span className="chev">▼</span>
+      </button>
+      <div className="drwbody"><div className="fields">{children}</div></div>
+    </div>
+  );
 }
 function DefaultsPanel({ model, set }) {
   const ec = model.engineConfig;
@@ -1158,7 +1236,7 @@ function DefaultsPanel({ model, set }) {
   return (
     <>
       <h3>Defaults <small>what every queue inherits</small></h3>
-      <G name="Simulation frame">
+      <G name="Simulation frame" defaultOpen>
         <NumF label="Horizon (weeks)" value={eng.horizonWeeks} onChange={(v) => updEC("engine", { horizonWeeks: n0(v) })} />
         <NumF label="Day start (h)" value={eng.dayStart} onChange={(v) => updEC("engine", { dayStart: n0(v) })} />
         <NumF label="Day end (h)" value={eng.dayEnd} onChange={(v) => updEC("engine", { dayEnd: n0(v) })} />
