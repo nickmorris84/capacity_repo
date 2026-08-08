@@ -192,6 +192,28 @@ await t("channels beyond the taxonomy can be added and behave like the rest", ()
   ok($$(".regrow input", ch()).some((i) => i.value === "WhatsApp Business"), "renames like the rest");
 });
 
+await t("each registry entry is a card, not another line of text", () => {
+  subtab("Structure");
+  const brands = reglist("Brands");
+  const rows = $$(".regrow", brands);
+  ok(rows.length >= 1, "at least one entry");
+  // A card: its own border and fill, separate from its neighbours — the earlier
+  // treatment was a bare input on a dashed rule, which read as running text.
+  const css = $("#capacity-v2-style").textContent;
+  const rule = css.slice(css.indexOf(".regrow{"), css.indexOf("}", css.indexOf(".regrow{")));
+  ok(/border:0\.5px solid/.test(rule), "bordered: " + rule);
+  ok(/border-radius/.test(rule), "rounded");
+  ok(/background/.test(rule), "filled, so it separates from the drawer behind it");
+  ok(!/border-top:0\.5px dashed/.test(rule), "no longer a dashed divider between text rows");
+  // and the name reads as an editable field, not static text
+  const nameRule = css.slice(css.indexOf(".regmain input{"), css.indexOf("}", css.indexOf(".regmain input{")));
+  ok(!/border:0\.5px solid transparent/.test(nameRule), "the name field is visibly a field at rest");
+  // adding another entry adds another card
+  const before = $$(".regrow", reglist("Brands")).length;
+  click($(".btn", reglist("Brands")));
+  eq($$(".regrow", reglist("Brands")).length, before + 1, "a new entry is another card");
+});
+
 await t("zero unexpected console output across the whole run", () => {
   eq(consoleEvents.length, 0, "console noise: " + consoleEvents.join(" | "));
 });

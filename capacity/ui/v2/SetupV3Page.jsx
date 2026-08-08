@@ -612,46 +612,13 @@ function QueueDetail({ model, set, q, d, detailRef, onClosed }) {
   );
 }
 
-function TeamDetail({ model, set, team, detailRef, onClosed }) {
-  const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
-  return (
-    <div className="dbody" data-testid="team-detail" ref={detailRef} tabIndex={-1} aria-label={team.name}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <h4 style={{ marginRight: "auto" }}>Shared capacity</h4>
-        <button className="btn sm danger" onClick={() => { set(Ops.deleteServiceTeam(model, team.id)); onClosed && onClosed(); }}>Delete</button>
-      </div>
-      <p className="hint">Shared capacity — spills into the queues it covers when they run hot.</p>
-      <div className="fields">
-        <div className="field"><label>Name</label><input value={team.name} aria-label="Team name" onChange={(e) => upd({ name: e.target.value })} /></div>
-        <NumF label="Size (FTE)" value={team.size} onChange={(v) => upd({ size: n0(v) })} />
-        <NumF label="Premium (%)" value={Math.round((team.premiumPct || 0) * 100)} onChange={(v) => upd({ premiumPct: n0(v) / 100 })} />
-        <NumF label="Proficiency (%)" value={Math.round((team.proficiency || 0) * 100)} onChange={(v) => upd({ proficiency: n0(v) / 100 })} />
-        <NumF label="Trigger occupancy (%)" value={Math.round((team.triggerOccupancy || 0) * 100)} onChange={(v) => upd({ triggerOccupancy: n0(v) / 100 })} />
-        <NumF label="Max hours (/wk)" value={team.maxHoursPerWeek} onChange={(v) => upd({ maxHoursPerWeek: n0(v) })} />
-        <NumF label="Agent cost (£/yr)" value={team.agentCost} onChange={(v) => upd({ agentCost: n0(v) })} />
-      </div>
-      <div className="field" style={{ marginTop: 8 }}><label>Covers</label>
-        <div className="regoff" style={{ marginTop: 2 }}>
-          {(model.queues || []).map((x) => {
-            const on = (team.coversQueues || []).includes(x.id);
-            return <button key={x.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on}
-              onClick={() => upd({ coversQueues: on ? team.coversQueues.filter((i) => i !== x.id) : [...(team.coversQueues || []), x.id] })}>{x.name}</button>;
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
-  const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
   const [sel, setSel] = useState(null);
   const detailRef = useRevealOnSelect(sel && sel.id);
   const close = () => setSel(null);
   const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
-  const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
-  const open = !!(q || team);
+  const open = !!q;
   // group by home: brand › BU · brand-only · Global
   const groups = [];
   const byKey = new Map();
@@ -676,11 +643,12 @@ function QueuesPanel({ model, set, p }) {
                   const dx = p.queues.get(x.id);
                   const u = queueUsage(model, x.id);
                   const on = sel && sel.kind === "queue" && sel.id === x.id;
+                  const shared = x.type === "shared_capacity";
                   return (
-                    <button key={x.id} role="option" aria-selected={on} className={on ? "on" : ""} onClick={() => setSel({ kind: "queue", id: x.id })}>
+                    <button key={x.id} role="option" aria-selected={on} className={(on ? "on" : "") + (shared ? " shared-cap" : "")} onClick={() => setSel({ kind: "queue", id: x.id })}>
                       <b>{x.name}{x._modified ? <span className="moddot" style={{ marginLeft: 5 }} aria-label="modified" /> : null}</b>
                       <small>{QTYPE_LABELS[x.type] || x.type}{u.processes ? ` · ${u.processes} process${u.processes === 1 ? "" : "es"} · ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " · unused"}</small>
-                      <span className="qstats num">{fmt(dx ? dx.volume : 0)}/day · {fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s{dx && dx.ahtMarker === "weighted" ? " · weighted" : dx && dx.ahtMarker === "svc" ? " · svc" : ""}</span>
+                      <span className="qstats num">{shared ? "lends capacity" : `${fmt(dx ? dx.volume : 0)}/day · ${fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s${dx && dx.ahtMarker === "weighted" ? " · weighted" : dx && dx.ahtMarker === "svc" ? " · svc" : ""}`}</span>
                     </button>
                   );
                 })}
@@ -691,26 +659,6 @@ function QueuesPanel({ model, set, p }) {
             const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
             set(m2); setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
           }}>+ Queue</button>
-          <div className="mdgroup">
-            <p className="mdgrouplab">Shared capacity</p>
-            <div className="mdlist" role="listbox" aria-label="Shared capacity">
-              {teams.map((x) => {
-                const on = sel && sel.kind === "team" && sel.id === x.id;
-                return (
-                  <button key={x.id} role="option" aria-selected={!!on} className={on ? "on" : ""} onClick={() => setSel({ kind: "team", id: x.id })}>
-                    <b>{x.name}</b>
-                    <small>service team · covers {(x.coversQueues || []).length} queue{(x.coversQueues || []).length === 1 ? "" : "s"}</small>
-                    <span className="qstats num">{x.size} FTE</span>
-                  </button>
-                );
-              })}
-            </div>
-            <button className="btn sm" style={{ marginTop: 4 }} disabled={!model.engineConfig}
-              title={model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first — shared teams live in the engine config."} onClick={() => {
-              const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
-              set(m2); setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
-            }}>+ Shared team</button>
-          </div>
         </div>
       </div>
 
@@ -718,18 +666,17 @@ function QueuesPanel({ model, set, p }) {
           a drawer over it. Full-width on a phone, so the editor is never a
           cramped column and never renders below the whole list. */}
       <div className={"scrim" + (open ? " on" : "")} onClick={close} />
-      <aside className={"drawer" + (open ? " on" : "")} aria-label={q ? "Edit queue" : "Edit shared team"} aria-hidden={!open}>
-        {open ? (
+      <aside className={"drawer" + (open ? " on" : "")} aria-label="Edit queue" aria-hidden={!open}>
+        {q ? (
           <>
             <div className="dhead">
               <div>
-                <h3>{q ? q.name : team.name}</h3>
-                <p>{q ? (QTYPE_LABELS[q.type] || q.type) + (q.homeBrandId ? " · " + nameOf(model.brands, q.homeBrandId) : " · no home") : "shared capacity"}</p>
+                <h3>{q.name}</h3>
+                <p>{(QTYPE_LABELS[q.type] || q.type)}{q.homeBrandId ? " · " + nameOf(model.brands, q.homeBrandId) : " · no home"}</p>
               </div>
               <button className="close" onClick={close} aria-label="Close">✕</button>
             </div>
-            {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} onClosed={close} />
-              : <TeamDetail model={model} set={set} team={team} detailRef={detailRef} onClosed={close} />}
+            <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} onClosed={close} />
           </>
         ) : null}
       </aside>

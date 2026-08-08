@@ -63,13 +63,12 @@ function openAdv(name) { const s = famSec(name); const b = $$("button", s).find(
 console.log("Queues tab gate — BUILD-PLAN U4");
 
 async function main() {
-await t("mounts; master list grouped by home + Global + Shared capacity", () => {
+await t("mounts; master list grouped by home + Global", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   subtab("Queues");
   const labs = $$(".mdgrouplab").map((l) => l.textContent);
   ok(labs.includes("Acme › Customer Service"), "home group present: " + labs.join(" | "));
   ok(labs.includes("Global — no home"), "global group present");
-  ok(labs.includes("Shared capacity"), "shared capacity group present");
   ok(/governance · 2 processes · 1 brand/.test(qRow("QA — Governance").textContent), "blast radius on the row: " + qRow("QA — Governance").textContent);
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
@@ -141,17 +140,45 @@ await t("guarded delete: a routed queue shows in-use; a fresh queue deletes; res
   ok(!qRow("Inbound — Billing").querySelector(".moddot"), "reset clears the modified dot");
 });
 
-await t("service teams: add, size, and cover queues from the Shared capacity group", () => {
-  click($$(".btn").find((b) => b.textContent === "+ Shared team"));
-  const row = qRow("Shared team");
-  ok(row, "team listed under Shared capacity");
-  ok(/covers 0 queues/.test(row.textContent), "starts covering nothing");
-  const det = $('[data-testid="team-detail"]');
-  ok(det, "team detail open");
-  setV(byLabel(/^Size/, det), 12);
-  click($$(".chip.off", $('[data-testid="team-detail"]')).find((c) => /Inbound — Billing/.test(c.textContent)));
-  ok(/covers 1 queue/.test(qRow("Shared team").textContent), "cover chip updates the row");
-  ok(/12 FTE/.test(qRow("Shared team").textContent), "size on the row");
+await t("shared capacity is a QUEUE TYPE, not a separate concept", () => {
+  // Several processes routing through one shared-capacity queue is how a single
+  // pool serves many journeys — the job the old service teams did.
+  const Ops2 = require("../model/ops.js");
+  const { domainToEngineConfig } = require("../model/bridge.js");
+  const E2 = require("../engine/engine.js");
+  let m = Ops2.sampleDomainModel();
+  const ec = { ...E2.makeDefaultConfig() }; delete ec.queues; ec.serviceTeams = [];
+  m.engineConfig = ec;
+  m = Ops2.addQueue(m, { id: "q_flex", name: "Flex pool", type: "shared_capacity", fallbackAhtSec: 300 });
+  // BOTH processes route through it — one pool, many journeys.
+  m = Ops2.addProcessStep(m, "proc_billing_voice", { queueId: "q_flex", splitPct: 20 });
+  m = Ops2.addProcessStep(m, "proc_newcard_digital", { queueId: "q_flex", splitPct: 15 });
+  const { processUsage } = Ops2;
+  const cfg = domainToEngineConfig(m);
+  const fq = cfg.queues.find((x) => x.id === "q_flex");
+  ok(fq, "reaches the engine as a queue");
+  eq(fq.resourcing, "leveraged", "and as leveraged resourcing — it lends hours rather than being sized on its own SLA");
+  ok(fq.dailyVolume > 0, "fed by both processes: " + Math.round(fq.dailyVolume));
+  let threw = null;
+  try { E2.simulate(cfg, { strategy: "S1", viewIds: [] }); } catch (e) { threw = e.message; }
+  ok(!threw, "simulates: " + threw);
+});
+
+await t("a shared-capacity queue is marked in the list and offered as a type", () => {
+  const c = document.createElement("div"); document.body.appendChild(c);
+  const Ops2 = require("../model/ops.js");
+  let m = Ops2.addQueue(Ops2.sampleDomainModel(), { id: "q_flex", name: "Flex pool", type: "shared_capacity" });
+  act(() => { mod.exports.mount(c, { model: m }); });
+  subtab("Queues", c);
+  const row = $$(".mdlist button", c).find((r) => /Flex pool/.test(r.textContent));
+  ok(row, "listed among the queues, not in a separate group");
+  ok(row.classList.contains("shared-cap"), "visually distinguished");
+  ok(/lends capacity/.test(row.textContent), "reads as lending, not receiving: " + row.textContent);
+  click(row);
+  const typeSel = $$("select", $('[data-testid="queue-detail"]', c)).find((x) => x.getAttribute("aria-label") === "Queue type");
+  ok([...typeSel.options].some((o) => o.value === "shared_capacity"), "shared capacity is a selectable queue type");
+  eq(typeSel.value, "shared_capacity", "and is the type on this queue");
+  c.remove();
 });
 
 await t("S4 END-TO-END: hires authored in the domain model reach the engine and raise staffing", () => {

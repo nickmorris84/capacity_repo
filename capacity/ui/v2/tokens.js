@@ -373,15 +373,14 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .reghead .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
 .regchips{display:flex; gap:6px; flex-wrap:wrap}
 .regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
-.regrow{border-top:0.5px dashed var(--line); padding:4px 0}
-.regrow:first-of-type{border-top:none}
+.regrow{border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:8px 10px; margin-bottom:6px}
+.regrow:hover{border-color:var(--blue-line)}
 .regmain{display:flex; align-items:center; gap:8px; flex-wrap:wrap; row-gap:4px}
-.regmain input{flex:0 1 260px; min-width:0; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
-.regmain input:hover{border-color:var(--line); background:#fff}
+.regmain input{flex:1 1 200px; min-width:0; border:0.5px solid var(--line); border-radius:7px; padding:5px 8px; font:inherit; font-size:12.5px; background:#fff}
+.regmain input:hover{border-color:var(--blue-line)}
 .regmain input:focus{border-color:var(--blue); background:#fff; outline:none}
 /* Touch has no hover, so the rename field would be invisible on the very
    layout the owner flagged — reveal it where hover cannot. */
-@media(hover:none){ .regmain input{border-color:var(--line); background:#fff} }
 .regdel{margin-left:auto; border:none; background:none; color:var(--ink-3); font:inherit; font-size:12px; cursor:pointer; padding:2px 6px; border-radius:6px}
 .regdel:hover{color:var(--red-ink); background:var(--red-bg)}
 .blocked{margin-left:auto; min-width:0; color:var(--amber-ink)}
@@ -503,6 +502,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mdlist button .qstats{grid-row:1/3; align-self:center; font-size:11px; color:var(--ink-2)}
 .mdlist button.on{border-color:var(--blue); background:var(--blue-tint)}
 .mdlist button.on small{color:var(--ink-2)}
+.mdlist button.shared-cap{border-left:3px solid var(--teal)}
 /* :not(.on) — a bare hover rule has the same specificity as .mdlist button.on
    and, placed after it, would silently clobber the selected row's blue border. */
 .mdlist button:not(.on):hover{border-color:var(--blue-line)}

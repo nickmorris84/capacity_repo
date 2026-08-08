@@ -20,6 +20,12 @@ function engineTypeOf(q) {
   return { type: "digital" };
 }
 
+// A shared-capacity queue is the engine's "leveraged" resourcing: it holds
+// headcount and lends hours to whatever routes through it, rather than being
+// sized against its own SLA. This is the representation the engine itself moved
+// to (§21 converts legacy service teams into exactly this).
+const isSharedCapacity = (q) => q.type === "shared_capacity";
+
 // Same defaults the old adapter fills — every engine-required field, so a
 // Setup-authored queue (compact staffing) simulates without dereferencing
 // undefined. Migrated queues carry full v1 staffing and override these exactly.
@@ -65,10 +71,11 @@ function domainToEngineConfig(model) {
       weeklyVolumes: hasShape ? d.weekly.slice() : null,
     };
     if (et.subtype != null) eq.subtype = et.subtype;
+    if (isSharedCapacity(q) && !st.resourcing) eq.resourcing = "leveraged";
     return eq;
   });
 
   return { ...base, queues };
 }
 
-module.exports = { domainToEngineConfig, engineTypeOf, engineQueueDefaults };
+module.exports = { domainToEngineConfig, engineTypeOf, engineQueueDefaults, isSharedCapacity };

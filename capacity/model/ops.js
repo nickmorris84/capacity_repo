@@ -114,10 +114,13 @@ const DEFAULT_STAFFING = {
 function addQueue(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
   const m = clone(model);
   m.queues = m.queues || [];
+  const t = type || "inbound_call";
   const q = {
     id: id || uid("q"), name: name || `Queue ${m.queues.length + 1}`,
-    type: type || "inbound_call", fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
-    staffing: { ...DEFAULT_STAFFING },
+    type: t, fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
+    // A shared-capacity queue lends hours to whatever routes through it rather
+    // than being sized against its own SLA — that is "leveraged" to the engine.
+    staffing: { ...DEFAULT_STAFFING, ...(t === "shared_capacity" ? { resourcing: "leveraged" } : {}) },
   };
   if (homeBrandId) q.homeBrandId = homeBrandId;
   if (homeBuId) q.homeBuId = homeBuId;
@@ -127,7 +130,13 @@ function addQueue(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec
 function updateQueue(model, queueId, patch) {
   const m = clone(model);
   const q = (m.queues || []).find((x) => x.id === queueId);
-  if (q) applyPatch(q, patch);
+  if (q) {
+    applyPatch(q, patch);
+    // Switching a queue to shared capacity flips its resourcing, unless the
+    // planner has already chosen something other than the default.
+    if (patch.type === "shared_capacity" && q.staffing && q.staffing.resourcing === "dedicated")
+      q.staffing.resourcing = "leveraged";
+  }
   return m;
 }
 function updateQueueStaffing(model, queueId, patch) {

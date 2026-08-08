@@ -2324,7 +2324,7 @@ var require_taxonomy = __commonJS({
     var CHANNELS3 = ["voice", "third_party", "digital", "customer_management"];
     var ACTIVITIES2 = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
     var PRODUCT_REQUESTS = ["new", "existing"];
-    var QUEUE_TYPES2 = ["inbound_call", "outbound_call", "case_processing", "governance"];
+    var QUEUE_TYPES2 = ["inbound_call", "outbound_call", "case_processing", "governance", "shared_capacity"];
     module.exports = { CHANNELS: CHANNELS3, ACTIVITIES: ACTIVITIES2, PRODUCT_REQUESTS, QUEUE_TYPES: QUEUE_TYPES2 };
   }
 });
@@ -2339,6 +2339,7 @@ var require_bridge = __commonJS({
       if (q.type === "inbound_call" || q.type === "outbound_call") return { type: "voice" };
       return { type: "digital" };
     }
+    var isSharedCapacity = (q) => q.type === "shared_capacity";
     function engineQueueDefaults2(brandId, channel) {
       return {
         brandId,
@@ -2388,11 +2389,12 @@ var require_bridge = __commonJS({
           weeklyVolumes: hasShape ? d.weekly.slice() : null
         };
         if (et.subtype != null) eq.subtype = et.subtype;
+        if (isSharedCapacity(q) && !st.resourcing) eq.resourcing = "leveraged";
         return eq;
       });
       return { ...base, queues };
     }
-    module.exports = { domainToEngineConfig: domainToEngineConfig2, engineTypeOf: engineTypeOf2, engineQueueDefaults: engineQueueDefaults2 };
+    module.exports = { domainToEngineConfig: domainToEngineConfig2, engineTypeOf: engineTypeOf2, engineQueueDefaults: engineQueueDefaults2, isSharedCapacity };
   }
 });
 
@@ -2508,12 +2510,15 @@ var require_ops = __commonJS({
     function addQueue2(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
       const m = clone2(model);
       m.queues = m.queues || [];
+      const t = type || "inbound_call";
       const q = {
         id: id || uid("q"),
         name: name || `Queue ${m.queues.length + 1}`,
-        type: type || "inbound_call",
+        type: t,
         fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
-        staffing: { ...DEFAULT_STAFFING }
+        // A shared-capacity queue lends hours to whatever routes through it rather
+        // than being sized against its own SLA — that is "leveraged" to the engine.
+        staffing: { ...DEFAULT_STAFFING, ...t === "shared_capacity" ? { resourcing: "leveraged" } : {} }
       };
       if (homeBrandId) q.homeBrandId = homeBrandId;
       if (homeBuId) q.homeBuId = homeBuId;
@@ -2523,7 +2528,11 @@ var require_ops = __commonJS({
     function updateQueue2(model, queueId, patch) {
       const m = clone2(model);
       const q = (m.queues || []).find((x) => x.id === queueId);
-      if (q) applyPatch(q, patch);
+      if (q) {
+        applyPatch(q, patch);
+        if (patch.type === "shared_capacity" && q.staffing && q.staffing.resourcing === "dedicated")
+          q.staffing.resourcing = "leveraged";
+      }
       return m;
     }
     function updateQueueStaffing2(model, queueId, patch) {
@@ -2546,7 +2555,7 @@ var require_ops = __commonJS({
       return m;
     }
     var deleteQueue2 = deleteFromList("queues", canDeleteQueue3);
-    function addServiceTeam2(model, team = {}) {
+    function addServiceTeam(model, team = {}) {
       const m = clone2(model);
       m.engineConfig = m.engineConfig || {};
       m.engineConfig.serviceTeams = m.engineConfig.serviceTeams || [];
@@ -2564,13 +2573,13 @@ var require_ops = __commonJS({
       });
       return m;
     }
-    function updateServiceTeam2(model, teamId, patch) {
+    function updateServiceTeam(model, teamId, patch) {
       const m = clone2(model);
       const t = ((m.engineConfig || {}).serviceTeams || []).find((x) => x.id === teamId);
       if (t) applyPatch(t, patch);
       return m;
     }
-    function deleteServiceTeam2(model, teamId) {
+    function deleteServiceTeam(model, teamId) {
       const m = clone2(model);
       if (m.engineConfig && m.engineConfig.serviceTeams)
         m.engineConfig.serviceTeams = m.engineConfig.serviceTeams.filter((x) => x.id !== teamId);
@@ -2898,9 +2907,9 @@ var require_ops = __commonJS({
       updateQueueStaffing: updateQueueStaffing2,
       resetQueueStaffing: resetQueueStaffing2,
       deleteQueue: deleteQueue2,
-      addServiceTeam: addServiceTeam2,
-      updateServiceTeam: updateServiceTeam2,
-      deleteServiceTeam: deleteServiceTeam2,
+      addServiceTeam,
+      updateServiceTeam,
+      deleteServiceTeam,
       addRequestType: addRequestType2,
       updateRequestType: updateRequestType2,
       setAssignment: setAssignment2,
@@ -3746,7 +3755,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 var import_derive = __toESM(require_derive());
 var import_taxonomy = __toESM(require_taxonomy());
 var ACTIVITIES = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
-var QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance"];
+var QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance", "shared_capacity"];
 var ACTIVITY_LABELS = {
   service_request: "Service request",
   lead: "Lead",
@@ -3756,7 +3765,7 @@ var ACTIVITY_LABELS = {
   maintenance: "Maintenance"
 };
 var CHANNEL_LABELS = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
-var QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance" };
+var QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance", shared_capacity: "shared capacity" };
 var clone = (m) => JSON.parse(JSON.stringify(m));
 function setHiringBuffer(model, pct3) {
   const m = clone(model);
@@ -4167,15 +4176,14 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .reghead .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
 .regchips{display:flex; gap:6px; flex-wrap:wrap}
 .regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
-.regrow{border-top:0.5px dashed var(--line); padding:4px 0}
-.regrow:first-of-type{border-top:none}
+.regrow{border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:8px 10px; margin-bottom:6px}
+.regrow:hover{border-color:var(--blue-line)}
 .regmain{display:flex; align-items:center; gap:8px; flex-wrap:wrap; row-gap:4px}
-.regmain input{flex:0 1 260px; min-width:0; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
-.regmain input:hover{border-color:var(--line); background:#fff}
+.regmain input{flex:1 1 200px; min-width:0; border:0.5px solid var(--line); border-radius:7px; padding:5px 8px; font:inherit; font-size:12.5px; background:#fff}
+.regmain input:hover{border-color:var(--blue-line)}
 .regmain input:focus{border-color:var(--blue); background:#fff; outline:none}
 /* Touch has no hover, so the rename field would be invisible on the very
    layout the owner flagged \u2014 reveal it where hover cannot. */
-@media(hover:none){ .regmain input{border-color:var(--line); background:#fff} }
 .regdel{margin-left:auto; border:none; background:none; color:var(--ink-3); font:inherit; font-size:12px; cursor:pointer; padding:2px 6px; border-radius:6px}
 .regdel:hover{color:var(--red-ink); background:var(--red-bg)}
 .blocked{margin-left:auto; min-width:0; color:var(--amber-ink)}
@@ -4297,6 +4305,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mdlist button .qstats{grid-row:1/3; align-self:center; font-size:11px; color:var(--ink-2)}
 .mdlist button.on{border-color:var(--blue); background:var(--blue-tint)}
 .mdlist button.on small{color:var(--ink-2)}
+.mdlist button.shared-cap{border-left:3px solid var(--teal)}
 /* :not(.on) \u2014 a bare hover rule has the same specificity as .mdlist button.on
    and, placed after it, would silently clobber the selected row's blue border. */
 .mdlist button:not(.on):hover{border-color:var(--blue-line)}
@@ -5084,56 +5093,13 @@ function QueueDetail({ model, set, q, d, detailRef, onClosed }) {
     /* @__PURE__ */ jsx(Fam, { fam: "outputs", name: "Outputs", children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
   ] });
 }
-function TeamDetail({ model, set, team, detailRef, onClosed }) {
-  const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
-  return /* @__PURE__ */ jsxs("div", { className: "dbody", "data-testid": "team-detail", ref: detailRef, tabIndex: -1, "aria-label": team.name, children: [
-    /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }, children: [
-      /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: "Shared capacity" }),
-      /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => {
-        set(Ops.deleteServiceTeam(model, team.id));
-        onClosed && onClosed();
-      }, children: "Delete" })
-    ] }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
-    /* @__PURE__ */ jsxs("div", { className: "fields", children: [
-      /* @__PURE__ */ jsxs("div", { className: "field", children: [
-        /* @__PURE__ */ jsx("label", { children: "Name" }),
-        /* @__PURE__ */ jsx("input", { value: team.name, "aria-label": "Team name", onChange: (e) => upd({ name: e.target.value }) })
-      ] }),
-      /* @__PURE__ */ jsx(NumF, { label: "Size (FTE)", value: team.size, onChange: (v) => upd({ size: n0(v) }) }),
-      /* @__PURE__ */ jsx(NumF, { label: "Premium (%)", value: Math.round((team.premiumPct || 0) * 100), onChange: (v) => upd({ premiumPct: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx(NumF, { label: "Proficiency (%)", value: Math.round((team.proficiency || 0) * 100), onChange: (v) => upd({ proficiency: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx(NumF, { label: "Trigger occupancy (%)", value: Math.round((team.triggerOccupancy || 0) * 100), onChange: (v) => upd({ triggerOccupancy: n0(v) / 100 }) }),
-      /* @__PURE__ */ jsx(NumF, { label: "Max hours (/wk)", value: team.maxHoursPerWeek, onChange: (v) => upd({ maxHoursPerWeek: n0(v) }) }),
-      /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: team.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) })
-    ] }),
-    /* @__PURE__ */ jsxs("div", { className: "field", style: { marginTop: 8 }, children: [
-      /* @__PURE__ */ jsx("label", { children: "Covers" }),
-      /* @__PURE__ */ jsx("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).map((x) => {
-        const on = (team.coversQueues || []).includes(x.id);
-        return /* @__PURE__ */ jsx(
-          "button",
-          {
-            className: "chip" + (on ? " on-toggle" : " off"),
-            "aria-pressed": on,
-            onClick: () => upd({ coversQueues: on ? team.coversQueues.filter((i) => i !== x.id) : [...team.coversQueues || [], x.id] }),
-            children: x.name
-          },
-          x.id
-        );
-      }) })
-    ] })
-  ] });
-}
 function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
-  const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
   const [sel, setSel] = useState(null);
   const detailRef = useRevealOnSelect(sel && sel.id);
   const close = () => setSel(null);
   const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
-  const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
-  const open = !!(q || team);
+  const open = !!q;
   const groups = [];
   const byKey = /* @__PURE__ */ new Map();
   for (const x of queues) {
@@ -5157,7 +5123,8 @@ function QueuesPanel({ model, set, p }) {
           const dx = p.queues.get(x.id);
           const u = (0, import_domain.queueUsage)(model, x.id);
           const on = sel && sel.kind === "queue" && sel.id === x.id;
-          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
+          const shared = x.type === "shared_capacity";
+          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: (on ? "on" : "") + (shared ? " shared-cap" : ""), onClick: () => setSel({ kind: "queue", id: x.id }), children: [
             /* @__PURE__ */ jsxs("b", { children: [
               x.name,
               x._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
@@ -5166,13 +5133,7 @@ function QueuesPanel({ model, set, p }) {
               QTYPE_LABELS[x.type] || x.type,
               u.processes ? ` \xB7 ${u.processes} process${u.processes === 1 ? "" : "es"} \xB7 ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " \xB7 unused"
             ] }),
-            /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
-              fmt(dx ? dx.volume : 0),
-              "/day \xB7 ",
-              fmt(dx ? dx.effectiveAht : x.fallbackAhtSec),
-              " s",
-              dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
-            ] })
+            /* @__PURE__ */ jsx("span", { className: "qstats num", children: shared ? "lends capacity" : `${fmt(dx ? dx.volume : 0)}/day \xB7 ${fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s${dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""}` })
           ] }, x.id);
         }) })
       ] }, label)),
@@ -5180,52 +5141,21 @@ function QueuesPanel({ model, set, p }) {
         const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
         set(m2);
         setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
-      }, children: "+ Queue" }),
-      /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
-        /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: "Shared capacity" }),
-        /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
-          const on = sel && sel.kind === "team" && sel.id === x.id;
-          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": !!on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
-            /* @__PURE__ */ jsx("b", { children: x.name }),
-            /* @__PURE__ */ jsxs("small", { children: [
-              "service team \xB7 covers ",
-              (x.coversQueues || []).length,
-              " queue",
-              (x.coversQueues || []).length === 1 ? "" : "s"
-            ] }),
-            /* @__PURE__ */ jsxs("span", { className: "qstats num", children: [
-              x.size,
-              " FTE"
-            ] })
-          ] }, x.id);
-        }) }),
-        /* @__PURE__ */ jsx(
-          "button",
-          {
-            className: "btn sm",
-            style: { marginTop: 4 },
-            disabled: !model.engineConfig,
-            title: model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first \u2014 shared teams live in the engine config.",
-            onClick: () => {
-              const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
-              set(m2);
-              setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
-            },
-            children: "+ Shared team"
-          }
-        )
-      ] })
+      }, children: "+ Queue" })
     ] }) }),
     /* @__PURE__ */ jsx("div", { className: "scrim" + (open ? " on" : ""), onClick: close }),
-    /* @__PURE__ */ jsx("aside", { className: "drawer" + (open ? " on" : ""), "aria-label": q ? "Edit queue" : "Edit shared team", "aria-hidden": !open, children: open ? /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsx("aside", { className: "drawer" + (open ? " on" : ""), "aria-label": "Edit queue", "aria-hidden": !open, children: q ? /* @__PURE__ */ jsxs(Fragment, { children: [
       /* @__PURE__ */ jsxs("div", { className: "dhead", children: [
         /* @__PURE__ */ jsxs("div", { children: [
-          /* @__PURE__ */ jsx("h3", { children: q ? q.name : team.name }),
-          /* @__PURE__ */ jsx("p", { children: q ? (QTYPE_LABELS[q.type] || q.type) + (q.homeBrandId ? " \xB7 " + nameOf(model.brands, q.homeBrandId) : " \xB7 no home") : "shared capacity" })
+          /* @__PURE__ */ jsx("h3", { children: q.name }),
+          /* @__PURE__ */ jsxs("p", { children: [
+            QTYPE_LABELS[q.type] || q.type,
+            q.homeBrandId ? " \xB7 " + nameOf(model.brands, q.homeBrandId) : " \xB7 no home"
+          ] })
         ] }),
         /* @__PURE__ */ jsx("button", { className: "close", onClick: close, "aria-label": "Close", children: "\u2715" })
       ] }),
-      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id), detailRef, onClosed: close }) : /* @__PURE__ */ jsx(TeamDetail, { model, set, team, detailRef, onClosed: close })
+      /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id), detailRef, onClosed: close })
     ] }) : null })
   ] });
 }

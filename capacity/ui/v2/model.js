@@ -14,13 +14,13 @@ export function uid(prefix = "id") { _seq += 1; return `${prefix}_${_seq}_${Math
 // ---- taxonomy (fixed enumerations, mirrored from model/taxonomy.js) ---------
 export const ACTIVITIES = ["service_request", "lead", "decision", "collections", "upsell_xsell", "maintenance"];
 export const PRODUCT_REQUESTS = ["new", "existing"];
-export const QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance"];
+export const QUEUE_TYPES = ["inbound_call", "outbound_call", "case_processing", "governance", "shared_capacity"];
 export const ACTIVITY_LABELS = {
   service_request: "Service request", lead: "Lead", decision: "Decision",
   collections: "Collections", upsell_xsell: "Up-sell / x-sell", maintenance: "Maintenance",
 };
 export const CHANNEL_LABELS = { voice: "Voice", third_party: "Third party", digital: "Digital", customer_management: "Customer management" };
-export const QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance" };
+export const QTYPE_LABELS = { inbound_call: "inbound call", outbound_call: "outbound call", case_processing: "case processing", governance: "governance", shared_capacity: "shared capacity" };
 
 // ---- derived-state helper ----------------------------------------------------
 export function deriveModel(model) { return derive(model); }
