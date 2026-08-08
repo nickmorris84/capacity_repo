@@ -384,7 +384,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
 .volrow.lvl0 .volname{font-weight:600}
 .volrow.lvl3 .volname{font-weight:500}
-.volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  padding-left:calc(var(--lvl,0) * 18px)}
 .volrow input{width:100%}
 .prov{font-size:10.5px; border-radius:999px; padding:1px 8px; text-align:center; white-space:nowrap}
 .prov.entered{background:var(--blue-tint); color:var(--blue-deep); font-weight:600}
@@ -407,26 +408,20 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .medge text{font-size:9px; fill:var(--ink-3); text-anchor:middle}
 .medge.cap text{fill:var(--purple)}
 
-/* ---- phone layout ---- */
-@media(max-width:640px){
-  .shell{padding:0 10px 44px}
-  header.top{flex-wrap:wrap; row-gap:6px}
-  .tabs{overflow-x:auto; max-width:100%}
-  .v3banner{flex-direction:column; align-items:stretch; gap:8px}
-  .v3banner .btn{margin-left:0}
-  .pstrip{flex-wrap:wrap}
-  .pstrip .btn{margin-left:0}
-  .structgrid{grid-template-columns:1fr}
-  .regmain input{flex:1 1 120px; min-width:0}
-  .blocked{white-space:normal}
-  .steps{overflow-x:auto; padding-bottom:4px}
-  .steprow{min-width:520px}
-  .mdlist button{grid-template-columns:1fr}
-  .mdlist button .qstats{grid-row:auto; grid-column:1}
-  .mddetail{padding:12px}
-}
+/* Focus rings for every control the six-tab Setup introduced. Grouped so a new
+   control cannot ship without one — keyboard users get the same visible focus
+   the v2.4 surfaces already had. */
+.linkbtn:focus-visible,.chip:focus-visible,.regdel:focus-visible,.chipx:focus-visible,
+.mdlist button:focus-visible,.shapecell:focus-visible,.outin:focus-visible,
+.volrow input:focus-visible,.steprow input:focus-visible,.steprow select:focus-visible,
+.regmain input:focus-visible,.shapebox textarea:focus-visible,.famhead button:focus-visible{
+  outline:2px solid var(--blue); outline-offset:2px; border-radius:6px}
+.mnode:focus-visible{outline:none}
+.mnode:focus-visible rect{stroke:var(--blue); stroke-width:2}
+.mnode rect{transition:stroke 0.12s}
+.mnode:hover rect{stroke:var(--blue-mid)}
+
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
-@media(max-width:640px){.md{grid-template-columns:1fr}}
 .mdlist{display:flex; flex-direction:column; gap:4px}
 .mdlist button{display:grid; grid-template-columns:1fr auto; gap:1px 8px; text-align:left; border:0.5px solid var(--line);
   background:#fff; border-radius:10px; padding:8px 11px; font:inherit; cursor:pointer}
@@ -452,4 +447,50 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .valpanel{border:0.5px solid var(--line); border-radius:10px; background:#fff; padding:10px 12px; margin-top:10px}
 .okmsg{font-size:12.5px; color:var(--green-ink)}
 .errmsg{font-size:12.5px; color:var(--red-ink)}
+
+/* ==== phone layout ===========================================================
+   MUST stay last in this stylesheet: these are max-width overrides with the
+   same specificity as the base rules, so source order decides. (An earlier
+   pass placed this block mid-file, where the later base rules silently beat
+   half of it — the master–detail rows never actually restacked.) */
+@media(max-width:640px){
+  .shell{padding:0 12px 44px}
+  header.top{flex-wrap:wrap; row-gap:6px; padding:10px 0; margin-bottom:12px}
+  .tabs{overflow-x:auto; max-width:100%}
+  h2{font-size:18px}
+  .v3banner{flex-direction:column; align-items:stretch; gap:8px}
+  .v3banner .btn{margin-left:0}
+  .pstrip{flex-wrap:wrap}
+  .pstrip .btn{margin-left:0}
+  .subtabs{gap:0; margin-bottom:14px}
+  .subtabs button{padding:9px 10px; font-size:12.5px}
+  .structgrid{grid-template-columns:1fr}
+  .regmain input{flex:1 1 auto; min-width:0}
+  .blocked{white-space:normal; margin-left:0; flex:1 1 100%}
+  .md{grid-template-columns:1fr}
+  .mdlist button{grid-template-columns:1fr}
+  .mdlist button .qstats{grid-row:auto; grid-column:1; margin-top:1px}
+  .mddetail{padding:12px}
+  .steps{overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
+  .steprow{min-width:520px}
+  .volgrid{min-width:0}
+  .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape shape"; gap:6px 8px; padding:6px 0}
+  .volrow>.volname{grid-area:name}
+  .volrow>input{grid-area:val}
+  .volrow>.prov{grid-area:prov}
+  .volrow>.shapecell{grid-area:shape; padding-left:0}
+  .volrow.head{display:none}
+  .volname{padding-left:calc(var(--lvl,0) * 9px)}
+  .fam-sec{padding:8px 0 10px}
+  .mapsvg{max-width:none}
+  /* Comfortable touch targets without changing the desktop look. */
+  .regdel,.chipx{min-width:32px; min-height:32px; display:inline-flex; align-items:center; justify-content:center}
+  .chip,.btn.sm{padding:7px 11px}
+  .linkbtn{padding:4px 0; display:inline-block}
+}
+@media(max-width:400px){
+  /* One field per row: two 150px columns inside a padded card is unreadable
+     once labels are as long as "Cross-skill proficiency (%)". */
+  .fields{grid-template-columns:1fr}
+}
 `;

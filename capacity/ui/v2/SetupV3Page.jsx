@@ -815,8 +815,8 @@ function VolRow({ model, set, level, name, scope, node, hasOwnShape, inheritsSha
   const shown = total ? Math.round(total * 10) / 10 : (prov === "entered" ? 0 : "");
   return (
     <>
-      <div className={"volrow lvl" + level} data-key={keyOf(scope)}>
-        <span className="volname" style={{ paddingLeft: level * 18 }}>{name}</span>
+      <div className={"volrow lvl" + level} data-key={keyOf(scope)} style={{ "--lvl": level }}>
+        <span className="volname">{name}</span>
         <input className="num" value={shown === "" ? "" : shown} placeholder="—" aria-label={"Volume at " + name}
           onChange={(e) => {
             const v = e.target.value.trim();
