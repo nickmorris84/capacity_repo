@@ -20,7 +20,7 @@
  * engineConfig), asserted structurally by the M4 gate.
  */
 
-const SHEET_NAMES = ["Registry", "Queues", "Request types", "Steps", "Volume entries"];
+const SHEET_NAMES = ["Registry", "Queues", "Request types", "Processes", "Steps", "Volume entries"];
 const WEEKS = 52;
 
 const blank = (v) => (v === undefined || v === null ? "" : v);
@@ -34,6 +34,7 @@ function modelToDomainSheets(model) {
   const Registry = [];
   const reg = (kind, e) => Registry.push({
     Kind: kind, Id: e.id, Name: blank(e.name), Key: blank(e.key),
+    BrandId: blank(e.brandId), // products may belong to one brand, or all when blank
     DefaultsJson: e.defaults ? JSON.stringify(e.defaults) : "",
   });
   for (const b of model.brands || []) reg("brand", b);
@@ -53,18 +54,23 @@ function modelToDomainSheets(model) {
     RequestTypeId: rt.id, Name: rt.name, Activity: rt.activity, ProductRequest: rt.productRequest,
     GroupId: rt.groupId, ProductId: blank(rt.productId), AhtSec: blank(rt.ahtSec),
     BrandIds: joinIds(rt.brandIds), BuIds: joinIds(rt.buIds),
+    ProcessIds: joinIds(rt.processIds),
+  }));
+
+  const Processes = (model.processes || []).map((p) => ({
+    ProcessId: p.id, Name: blank(p.name), ChannelId: p.channelId,
+    GroupId: blank(p.groupId), Outcomes: joinIds(p.outcomes),
   }));
 
   const Steps = [];
-  for (const rt of model.requestTypes || [])
-    for (const p of rt.processes || []) {
-      const head = { RequestTypeId: rt.id, ChannelId: p.channelId, ProcessOutcomes: joinIds(p.outcomes) };
-      if (!(p.steps || []).length) { Steps.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "", Terminal: "", Outcome: "" }); continue; }
-      p.steps.forEach((s, i) => Steps.push({
-        ...head, StepOrder: i + 1, QueueId: s.queueId, SplitPct: s.splitPct,
-        SamplingPct: blank(s.samplingPct), Terminal: s.terminal ? "yes" : "", Outcome: blank(s.outcome),
-      }));
-    }
+  for (const p of model.processes || []) {
+    const head = { ProcessId: p.id };
+    if (!(p.steps || []).length) { Steps.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "", Terminal: "", Outcome: "" }); continue; }
+    p.steps.forEach((s, i) => Steps.push({
+      ...head, StepOrder: i + 1, QueueId: s.queueId, SplitPct: s.splitPct,
+      SamplingPct: blank(s.samplingPct), Terminal: s.terminal ? "yes" : "", Outcome: blank(s.outcome),
+    }));
+  }
 
   const Volume = (model.volumeEntries || []).map((e) => {
     const row = {
@@ -77,12 +83,12 @@ function modelToDomainSheets(model) {
     return row;
   });
 
-  return { Registry, Queues, "Request types": RT, Steps, "Volume entries": Volume };
+  return { Registry, Queues, "Request types": RT, Processes, Steps, "Volume entries": Volume };
 }
 
 // ---- sheets → model ----------------------------------------------------------
 function domainSheetsToModel(sheets) {
-  const model = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+  const model = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], processes: [], queues: [], requestTypes: [], volumeEntries: [] };
   const listOf = { brand: "brands", businessUnit: "businessUnits", channel: "channels", processGroup: "processGroups", product: "products" };
 
   for (const r of sheets.Registry || []) {
@@ -90,6 +96,7 @@ function domainSheetsToModel(sheets) {
     if (!list) continue;
     const e = { id: r.Id, name: r.Name };
     if (r.Key !== "" && r.Key != null) e.key = r.Key;
+    const rb = strOrU(r.BrandId); if (rb) e.brandId = rb;
     if (r.DefaultsJson) e.defaults = JSON.parse(r.DefaultsJson);
     list.push(e);
   }
@@ -107,7 +114,8 @@ function domainSheetsToModel(sheets) {
   for (const r of sheets["Request types"] || []) {
     const rt = {
       id: r.RequestTypeId, name: r.Name, activity: r.Activity, productRequest: r.ProductRequest,
-      groupId: r.GroupId, brandIds: splitIds(r.BrandIds), buIds: splitIds(r.BuIds), processes: [],
+      groupId: r.GroupId, brandIds: splitIds(r.BrandIds), buIds: splitIds(r.BuIds),
+      processIds: splitIds(r.ProcessIds),
     };
     const pid = strOrU(r.ProductId); if (pid) rt.productId = pid;
     const aht = numOrU(r.AhtSec); if (aht !== undefined) rt.ahtSec = aht;
@@ -115,17 +123,16 @@ function domainSheetsToModel(sheets) {
     model.requestTypes.push(rt);
   }
 
-  const procKey = (a, b) => a + "|" + b;
   const procs = new Map();
+  for (const r of sheets.Processes || []) {
+    const p = { id: r.ProcessId, name: r.Name, channelId: r.ChannelId, outcomes: splitIds(r.Outcomes), steps: [] };
+    const g = strOrU(r.GroupId); if (g) p.groupId = g;
+    procs.set(p.id, p);
+    model.processes.push(p);
+  }
   for (const r of sheets.Steps || []) {
-    const rt = rtById.get(r.RequestTypeId);
-    if (!rt) continue;
-    let p = procs.get(procKey(r.RequestTypeId, r.ChannelId));
-    if (!p) {
-      p = { channelId: r.ChannelId, outcomes: splitIds(r.ProcessOutcomes), steps: [] };
-      procs.set(procKey(r.RequestTypeId, r.ChannelId), p);
-      rt.processes.push(p);
-    }
+    const p = procs.get(r.ProcessId);
+    if (!p) continue;
     if (r.StepOrder !== "" && r.StepOrder != null && r.QueueId) {
       const s = { queueId: r.QueueId, splitPct: +r.SplitPct };
       const samp = numOrU(r.SamplingPct); if (samp !== undefined) s.samplingPct = samp;

@@ -8,7 +8,7 @@
  */
 const {
   canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup,
-  canDeleteProduct, canDeleteQueue, canDeleteRequestType, keyOf,
+  canDeleteProduct, canDeleteQueue, canDeleteRequestType, keyOf, processesOf,
 } = require("./domain.js");
 const { CHANNELS } = require("./taxonomy.js");
 const { propagateDomain } = require("./propagate.js");
@@ -64,7 +64,14 @@ const addProcessGroup = addToList("processGroups", "pg");
 const renameProcessGroup = renameInList("processGroups");
 const deleteProcessGroup = deleteFromList("processGroups", canDeleteGroup);
 
-const addProduct = addToList("products", "prod");
+// A product belongs to a brand, or to all of them when brandId is unset.
+const addProduct = (model, item = {}) => addToList("products", "prod")(model, item);
+function setProductBrand(model, productId, brandId) {
+  const m = clone(model);
+  const pr = (m.products || []).find((x) => x.id === productId);
+  if (pr) { if (brandId) pr.brandId = brandId; else delete pr.brandId; }
+  return m;
+}
 const renameProduct = renameInList("products");
 const deleteProduct = deleteFromList("products", canDeleteProduct);
 
@@ -169,7 +176,7 @@ function addRequestType(model, { id, name, groupId, activity, productRequest, pr
   const rt = {
     id: id || uid("rt"), name: name || "New request type",
     activity: activity || "service_request", productRequest: productRequest || "existing",
-    groupId, brandIds: [], buIds: [], processes: [],
+    groupId, brandIds: [], buIds: [], processIds: [],
   };
   if (productId != null) rt.productId = productId;
   m.requestTypes.push(rt);
@@ -192,25 +199,89 @@ function setAssignment(model, rtId, { brandIds, buIds } = {}) {
 }
 const deleteRequestType = deleteFromList("requestTypes", canDeleteRequestType);
 
+// A process is a first-class, REUSABLE entity: defined once (in the Processes
+// tab) and attached to any number of request types. Everything below addresses
+// a process by its own id; `procOf` resolves the (requestType, channel) pair
+// the UI still thinks in, whichever shape the model is stored in.
 const procOf = (m, rtId, channelId) => {
   const rt = (m.requestTypes || []).find((x) => x.id === rtId);
-  return rt ? { rt, p: (rt.processes || []).find((x) => x.channelId === channelId) } : { rt: null, p: null };
+  return rt ? { rt, p: processesOf(m, rt).find((x) => x.channelId === channelId) } : { rt: null, p: null };
 };
-// One process per channel per request type — a second add is a no-op.
+
+// Create a process in the registry. Not attached to anything until you say so.
+function createProcess(model, { id, name, channelId, groupId, outcomes } = {}) {
+  const m = clone(model);
+  m.processes = m.processes || [];
+  m.processes.push({
+    id: id || uid("proc"), name: name || "New process", channelId,
+    ...(groupId ? { groupId } : {}),
+    outcomes: outcomes ? [...outcomes] : ["completed"], steps: [],
+  });
+  return m;
+}
+function updateProcessMeta(model, processId, patch) {
+  const m = clone(model);
+  const pr = (m.processes || []).find((x) => x.id === processId);
+  if (pr) applyPatch(pr, patch);
+  return m;
+}
+// Deleting a process detaches it from every request type that used it.
+function deleteProcessById(model, processId) {
+  const m = clone(model);
+  m.processes = (m.processes || []).filter((x) => x.id !== processId);
+  for (const rt of m.requestTypes || [])
+    if (Array.isArray(rt.processIds)) rt.processIds = rt.processIds.filter((id) => id !== processId);
+  return m;
+}
+// Which request types use a process — the reuse the owner asked for, made visible.
+function processUsage(model, processId) {
+  const rts = (model.requestTypes || []).filter((rt) => (rt.processIds || []).includes(processId));
+  const brands = new Set();
+  for (const rt of rts) for (const b of rt.brandIds || []) brands.add(b);
+  return { requestTypes: rts.length, brands: brands.size, names: rts.map((r) => r.name) };
+}
+// Attach an existing process. Still one process per channel per request type,
+// so the volume cascade stays unambiguous.
+function attachProcess(model, rtId, processId) {
+  const m = clone(model);
+  const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+  const pr = (m.processes || []).find((x) => x.id === processId);
+  if (!rt || !pr) return model;
+  rt.processIds = rt.processIds || [];
+  if (rt.processIds.includes(processId)) return model;
+  const taken = processesOf(m, rt).some((x) => x.channelId === pr.channelId);
+  if (taken) return model;
+  rt.processIds.push(processId);
+  return m;
+}
+function detachProcess(model, rtId, processId) {
+  const m = clone(model);
+  const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+  if (!rt || !Array.isArray(rt.processIds)) return model;
+  rt.processIds = rt.processIds.filter((id) => id !== processId);
+  return m;
+}
+
+// Create a process AND attach it — the one-click path from a request type.
 function addProcess(model, rtId, channelId) {
   const { rt, p } = procOf(model, rtId, channelId);
   if (!rt || p) return model;
-  const m = clone(model);
-  const rt2 = m.requestTypes.find((x) => x.id === rtId);
-  rt2.processes.push({ channelId, outcomes: ["completed"], steps: [] });
-  return m;
+  const rtName = rt.name || "Process";
+  const chName = ((model.channels || []).find((c) => c.id === channelId) || {}).name || channelId;
+  let m = createProcess(model, { name: `${rtName} — ${chName}`, channelId, groupId: rt.groupId });
+  const created = m.processes[m.processes.length - 1];
+  return attachProcess(m, rtId, created.id);
 }
+// Detach from this request type; the process itself survives for others.
 function deleteProcess(model, rtId, channelId) {
   const { p } = procOf(model, rtId, channelId);
   if (!p) return model;
+  return p.id ? detachProcess(model, rtId, p.id) : legacyDropProcess(model, rtId, channelId);
+}
+function legacyDropProcess(model, rtId, channelId) {
   const m = clone(model);
   const rt2 = m.requestTypes.find((x) => x.id === rtId);
-  rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
+  if (rt2 && rt2.processes) rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
   return m;
 }
 function addStep(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
@@ -239,6 +310,40 @@ function removeStep(model, rtId, channelId, index) {
   procOf(m, rtId, channelId).p.steps.splice(index, 1);
   return m;
 }
+// ---- editing a process directly (the Processes tab addresses by id) ----
+const byProcId = (m, processId) => (m.processes || []).find((x) => x.id === processId);
+function addProcessStep(model, processId, { queueId, splitPct, samplingPct } = {}) {
+  const m = clone(model);
+  const pr = byProcId(m, processId);
+  if (!pr) return model;
+  const step = { queueId, splitPct: splitPct != null ? splitPct : 100 };
+  if (samplingPct != null) step.samplingPct = samplingPct;
+  pr.steps.push(step);
+  return m;
+}
+function updateProcessStep(model, processId, index, patch) {
+  const m = clone(model);
+  const pr = byProcId(m, processId);
+  if (!pr || !pr.steps[index]) return model;
+  applyPatch(pr.steps[index], patch);
+  if (patch.terminal === false) { delete pr.steps[index].terminal; delete pr.steps[index].outcome; }
+  return m;
+}
+function removeProcessStep(model, processId, index) {
+  const m = clone(model);
+  const pr = byProcId(m, processId);
+  if (!pr || !pr.steps[index]) return model;
+  pr.steps.splice(index, 1);
+  return m;
+}
+function setProcessOutcomes(model, processId, outcomes) {
+  const m = clone(model);
+  const pr = byProcId(m, processId);
+  if (!pr) return model;
+  pr.outcomes = [...outcomes];
+  return m;
+}
+
 function setOutcomes(model, rtId, channelId, outcomes) {
   const { p } = procOf(model, rtId, channelId);
   if (!p) return model;
@@ -267,7 +372,7 @@ function clearVolumeEntry(model, scope) {
 
 // ----------------------------------------------------------------- fixtures
 function blankDomainModel(engineConfig) {
-  const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+  const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], processes: [], queues: [], requestTypes: [], volumeEntries: [] };
   if (engineConfig) m.engineConfig = engineConfig;
   return withDefaultChannels(m);
 }
@@ -280,7 +385,21 @@ function sampleDomainModel() {
     businessUnits: [{ id: "bu_cs", name: "Customer Service" }],
     channels: [{ id: "ch_voice", key: "voice", name: "Voice" }, { id: "ch_digital", key: "digital", name: "Digital" }],
     processGroups: [{ id: "pg_billing", name: "Billing" }, { id: "pg_cards", name: "Cards" }],
-    products: [{ id: "prod_cards", name: "Credit cards" }],
+    products: [{ id: "prod_cards", name: "Credit cards", brandId: "b_acme" }],
+    // Processes are defined once and referenced; q_qa is reached from both.
+    processes: [
+      { id: "proc_billing_voice", name: "Billing enquiry — Voice", channelId: "ch_voice", groupId: "pg_billing",
+        outcomes: ["completed"], steps: [
+          { queueId: "q_inbound", splitPct: 100 },
+          { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" },
+        ] },
+      { id: "proc_newcard_digital", name: "New card — Digital", channelId: "ch_digital", groupId: "pg_cards",
+        outcomes: ["completed", "rejected"], steps: [
+          { queueId: "q_apps", splitPct: 100 },
+          { queueId: "q_verify", splitPct: 60 },
+          { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" },
+        ] },
+    ],
     queues: [
       { id: "q_inbound", name: "Inbound — Billing", type: "inbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 300, staffing: { ...DEFAULT_STAFFING } },
       { id: "q_verify", name: "Outbound — Verification", type: "outbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 240, staffing: { ...DEFAULT_STAFFING } },
@@ -289,18 +408,10 @@ function sampleDomainModel() {
     ],
     requestTypes: [
       { id: "rt_billing", name: "Billing enquiry", activity: "service_request", productRequest: "existing",
-        groupId: "pg_billing", brandIds: ["b_acme"], buIds: ["bu_cs"],
-        processes: [{ channelId: "ch_voice", outcomes: ["completed"], steps: [
-          { queueId: "q_inbound", splitPct: 100 },
-          { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" },
-        ] }] },
+        groupId: "pg_billing", brandIds: ["b_acme"], buIds: ["bu_cs"], processIds: ["proc_billing_voice"] },
       { id: "rt_newcard", name: "New card application", activity: "service_request", productRequest: "new",
         groupId: "pg_cards", productId: "prod_cards", ahtSec: 540, brandIds: ["b_acme"], buIds: ["bu_cs"],
-        processes: [{ channelId: "ch_digital", outcomes: ["completed", "rejected"], steps: [
-          { queueId: "q_apps", splitPct: 100 },
-          { queueId: "q_verify", splitPct: 60 },
-          { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" },
-        ] }] },
+        processIds: ["proc_newcard_digital"] },
     ],
     volumeEntries: [
       { id: "ve_billing", scope: { brandId: "b_acme", buId: "bu_cs", requestTypeId: "rt_billing" }, daily: 2398 },
@@ -336,6 +447,9 @@ module.exports = {
   addProcessGroup, renameProcessGroup, deleteProcessGroup,
   addProduct, renameProduct, deleteProduct,
   addChannel, renameChannel, deleteChannel, setChannelDefaults, withDefaultChannels, CHANNEL_NAMES,
+  setProductBrand,
+  createProcess, updateProcessMeta, deleteProcessById, processUsage, attachProcess, detachProcess,
+  addProcessStep, updateProcessStep, removeProcessStep, setProcessOutcomes,
   addQueue, updateQueue, updateQueueStaffing, resetQueueStaffing, deleteQueue,
   addServiceTeam, updateServiceTeam, deleteServiceTeam,
   addRequestType, updateRequestType, setAssignment, deleteRequestType,

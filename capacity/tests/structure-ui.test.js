@@ -57,8 +57,8 @@ async function main() {
 await t("mounts on Structure with five editable lists and add buttons", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   subtab("Structure"); // segments are drawers — open it first
-  eq($$(".reglist").length, 5, "five lists");
-  ok(reglist("Brands") && reglist("Business units") && reglist("Channels") && reglist("Process groups") && reglist("Products"), "all five titled");
+  eq($$(".reglist").length, 4, "four lists — process groups moved to the Processes tab");
+  ok(reglist("Brands") && reglist("Business units") && reglist("Channels") && reglist("Products"), "all four titled");
   ok($(".btn", reglist("Brands")), "Brands has an add button");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
@@ -130,14 +130,33 @@ await t("channel defaults edit and persist: set Voice ASA to 20, reopen, still 2
   eq($$(".field", again).find((f) => /SLA target/.test(f.textContent)).querySelector("input").value, "80", "SLA % persisted (stored as a fraction)");
 });
 
-await t("business units / groups / products add and rename like brands", () => {
-  click($(".btn", reglist("Process groups")));
-  ok($$(".regrow input", reglist("Process groups")).some((i) => i.value === "New group"), "group added");
-  const g = $$(".regrow input", reglist("Process groups")).find((i) => i.value === "New group");
-  setV(g, "Disputes");
-  ok($$(".regrow input", reglist("Process groups")).some((i) => i.value === "Disputes"), "group renamed");
+await t("business units / products add and rename like brands", () => {
+  click($(".btn", reglist("Products")));
+  ok($$(".regrow input", reglist("Products")).some((i) => i.value === "New product"), "product added");
+  const g = $$(".regrow input", reglist("Products")).find((i) => i.value === "New product");
+  setV(g, "Savings");
+  ok($$(".regrow input", reglist("Products")).some((i) => i.value === "Savings"), "product renamed");
   const bu = reglist("Business units");
   ok(/in use/.test($$(".regrow", bu)[0].textContent), "sample BU referenced → blocked");
+});
+
+await t("Structure shows what each entity is USED FOR, and products link to a brand", () => {
+  // usage view: the brand row names the request types that rely on it
+  const acme = $$(".regrow", reglist("Brands")).find((r) => $("input", r).value === "Acme Bank");
+  ok(/2 request types/.test(acme.textContent), "brand usage shown: " + acme.textContent.slice(-70));
+  ok(/Billing enquiry/.test(acme.textContent), "and names them");
+  const ch = $$(".regrow", reglist("Channels")).find((r) => $("input", r).value === "Voice");
+  ok(/1 request type/.test(ch.textContent), "channel usage shown");
+  const unused = $$(".regrow", reglist("Channels")).find((r) => $("input", r).value === "Third party");
+  if (unused) ok(/not used yet/.test(unused.textContent), "an unused channel says so");
+  // a product belongs to one brand, or to all
+  const prodRow = $$(".regrow", reglist("Products")).find((r) => $("input", r).value === "Credit cards");
+  const sel = $(".prodbrand", prodRow);
+  ok(sel, "product carries a brand selector");
+  eq(sel.value, "b_acme", "sample product is linked to Acme");
+  ok([...sel.options].some((o) => o.value === "" && /All brands/.test(o.textContent)), "and can be set to all brands");
+  setV(sel, "");
+  eq($(".prodbrand", $$(".regrow", reglist("Products")).find((r) => $("input", r).value === "Credit cards")).value, "", "switched to all brands");
 });
 
 await t("a new estate carries every default channel, ready to use", () => {

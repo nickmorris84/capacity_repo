@@ -12,7 +12,7 @@
  */
 import { useState, useMemo, useRef, useEffect } from "react";
 import { propagateDomain } from "../../model/propagate.js";
-import { queueUsage, keyOf, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
+import { queueUsage, keyOf, processesOf, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
 import { SEASONAL_PRESETS } from "../../engine/engine.js";
 import { CHANNELS } from "../../model/taxonomy.js";
 import { engineTypeOf, engineQueueDefaults } from "../../model/bridge.js";
@@ -24,8 +24,9 @@ const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 
 export const SETUP_TABS = [
-  ["structure", "Structure", "Set up the vocabulary of the estate — the brands, business units, channels, groups and products that everything else refers to. Nothing is wired together here; that happens in Request types."],
+  ["structure", "Structure", "The vocabulary of the estate — brands, business units, channels and products. Each shows what it is used for, so you can see the shape of the estate at a glance. Products belong to a brand, or to all of them."],
   ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes — they are never entered here. Tap a queue to open its editor."],
+  ["processes", "Processes", "The journeys work can take, defined once and reused. A process is a channel-specific route through your queues, ending in a declared outcome — attach the same one to as many request types as need it. Process groups are managed here."],
   ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together — one process per channel, ending in a declared outcome."],
   ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
   ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here — it redraws from the model, and lists anything that does not hang together."],
@@ -38,6 +39,10 @@ export function computeStatus(model, p) {
     nChans = (model.channels || []).length, nQ = (model.queues || []).length,
     nRt = (model.requestTypes || []).length, nVe = (model.volumeEntries || []).length;
   const errs = p.validation.errors, warns = p.validation.warnings;
+  const nProc = (model.processes || []).length;
+  // A process is incomplete until it routes somewhere and declares an end.
+  const procBad = (model.processes || []).filter(
+    (pr) => !(pr.steps || []).length || !(pr.steps || []).some((st) => st.terminal)).length;
   const structOk = nBrands > 0 && nBus > 0 && nChans > 0;
   const rtErrs = errs.length; // V3/dangling all live on the wiring
   const uncovered = warns.filter((w) => w.kind === "uncovered_volume").length;
@@ -46,6 +51,9 @@ export function computeStatus(model, p) {
       next: "Add your first brand, business unit and channel in Structure." },
     { key: "queues", ok: nQ > 0, badge: `${nQ} queue${nQ === 1 ? "" : "s"}`,
       next: "Add the queues work actually lands on." },
+    { key: "processes", ok: nProc > 0 && procBad === 0,
+      badge: procBad ? `${procBad} incomplete` : `${nProc} process${nProc === 1 ? "" : "es"}`,
+      next: nProc === 0 ? "Define the journeys work can take." : "Finish the processes that do not reach an end point." },
     { key: "requestTypes", ok: nRt > 0 && rtErrs === 0,
       badge: rtErrs ? `${rtErrs} error${rtErrs === 1 ? "" : "s"}` : `${nRt} type${nRt === 1 ? "" : "s"}`,
       next: nRt === 0 ? "Define a request type and wire its process." : "Fix the process errors flagged in Request types." },
@@ -142,6 +150,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         <p className="tabnote" data-testid="tab-note">{(SETUP_TABS.find(([k]) => k === tab) || [])[2]}</p>
         {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
         {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
+        {tab === "processes" && <ProcessesPanel model={model} set={onModelChange} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
         {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
         {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
@@ -214,6 +223,28 @@ function guardSummary(guard) {
   }).join(" · ");
 }
 
+// What a registry entity is actually used for — the view the owner asked for on
+// this tab, so the estate's shape is readable without opening Request types.
+function usageOf(model, kind, id) {
+  const rts = (model.requestTypes || []).filter((rt) => {
+    if (kind === "brand") return (rt.brandIds || []).length ? rt.brandIds.includes(id) : true;
+    if (kind === "bu") return (rt.buIds || []).length ? rt.buIds.includes(id) : true;
+    if (kind === "channel") return processesOf(model, rt).some((pr) => pr.channelId === id);
+    if (kind === "product") return rt.productId === id;
+    return false;
+  });
+  return rts.map((rt) => rt.name);
+}
+function UsageNote({ names, none }) {
+  if (!names.length) return <span className="hint usage-none">{none}</span>;
+  const shown = names.slice(0, 3).join(", ");
+  return (
+    <span className="hint usagenote" title={names.join(", ")}>
+      {names.length} request type{names.length === 1 ? "" : "s"}: {shown}{names.length > 3 ? ` +${names.length - 3}` : ""}
+    </span>
+  );
+}
+
 function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
   return (
     <div className="regrow">
@@ -264,6 +295,7 @@ function ChannelRow({ model, c, set }) {
       guard={canDeleteChannel(model, c.id)} onDelete={() => set(Ops.deleteChannel(model, c.id))}
       extra={<>
         <span className="tax">{CHANNEL_LABELS[c.key] || "custom"}</span>
+        <UsageNote names={usageOf(model, "channel", c.id)} none="not used yet" />
         <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}<span className="chev">▼</span></button>
       </>}>
       {open ? (
@@ -305,16 +337,29 @@ function StructurePanel({ model, set }) {
   const plain = [
     ["Brands", "brands", Ops.addBrand, Ops.renameBrand, Ops.deleteBrand, canDeleteBrand, "New brand", "+ Brand"],
     ["Business units", "businessUnits", Ops.addBusinessUnit, Ops.renameBusinessUnit, Ops.deleteBusinessUnit, canDeleteBU, "New business unit", "+ Business unit"],
-    ["Process groups", "processGroups", Ops.addProcessGroup, Ops.renameProcessGroup, Ops.deleteProcessGroup, canDeleteGroup, "New group", "+ Group"],
     ["Products", "products", Ops.addProduct, Ops.renameProduct, Ops.deleteProduct, canDeleteProduct, "New product", "+ Product"],
   ];
+  const USAGE_KIND = { brands: "brand", businessUnits: "bu", products: "product" };
+  const extraFor = (key, e) => {
+    const bits = [];
+    if (key === "products") {
+      bits.push(
+        <select key="brand" className="prodbrand" value={e.brandId || ""} aria-label={"Brand for " + e.name}
+          onChange={(ev) => set(Ops.setProductBrand(model, e.id, ev.target.value))}>
+          <option value="">All brands</option>
+          {(model.brands || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>);
+    }
+    if (USAGE_KIND[key]) bits.push(<UsageNote key="u" names={usageOf(model, USAGE_KIND[key], e.id)} none="not used yet" />);
+    return bits;
+  };
   const enabledKeys = new Set((model.channels || []).map((c) => c.key));
   const offKeys = CHANNELS.filter((k) => !enabledKeys.has(k));
-  const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => (
+  const [brandsL, busL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => (
     <RegistryList key={key} title={title} list={model[key]} info={REG_INFO[title]} defaultOpen={key === "brands"} onAdd={() => set(add(model, { name: seed }))} addLabel={addLabel}
       row={(e) => (
         <RegRow key={e.id} entity={e} onRename={(name) => set(rename(model, e.id, name))}
-          guard={guard(model, e.id)} onDelete={() => set(del(model, e.id))} />
+          guard={guard(model, e.id)} onDelete={() => set(del(model, e.id))} extra={extraFor(key, e)} />
       )} />
   ));
   return (
@@ -324,7 +369,6 @@ function StructurePanel({ model, set }) {
         {brandsL}
         {busL}
         <ChannelList model={model} set={set} />
-        {groupsL}
         {prodsL}
       </div>
     </>
@@ -693,6 +737,98 @@ function QueuesPanel({ model, set, p }) {
   );
 }
 
+// ---- 3 · Processes — journeys defined once and reused (v1.3) ---------------
+// A process belongs to a channel and routes through queues to a declared
+// outcome. It is NOT owned by a request type: attach the same process to as
+// many as need it, and an edit here is felt by all of them.
+function ProcessesPanel({ model, set, p }) {
+  const procs = model.processes || [];
+  const [sel, setSel] = useState(null);
+  const proc = sel ? procs.find((x) => x.id === sel) : null;
+  const close = () => setSel(null);
+  const detailRef = useRevealOnSelect(sel);
+  const groups = model.processGroups || [];
+  return (
+    <>
+      <h3>Processes <small>defined once, attached to any request type</small></h3>
+
+      <Drawer title="Process groups" count={groups.length} defaultOpen={false}
+        info="A way of reporting on similar processes together. The double-cover warning is scoped to a group: two request types in the same group covering the same brand, BU and channel is flagged.">
+        {groups.length === 0 ? <span className="hint">none yet</span> : groups.map((g) => (
+          <RegRow key={g.id} entity={g} onRename={(name) => set(Ops.renameProcessGroup(model, g.id, name))}
+            guard={canDeleteGroup(model, g.id)} onDelete={() => set(Ops.deleteProcessGroup(model, g.id))} />
+        ))}
+        <div style={{ marginTop: 8 }}><button className="btn sm" onClick={() => set(Ops.addProcessGroup(model, { name: "New group" }))}>+ Group</button></div>
+      </Drawer>
+
+      <Drawer title="Processes" count={procs.length} defaultOpen
+        info="Each process is one specific journey on one channel. Steps route a percentage of what reaches them to a queue; the step marked Ends declares the outcome. Reuse is the point — the same process can serve many request types.">
+        {procs.length === 0 ? <p className="hint">No processes yet — add one, then attach it to a request type.</p> : null}
+        <div className="mdlist" role="listbox" aria-label="Processes">
+          {procs.map((x) => {
+            const u = Ops.processUsage(model, x.id);
+            const bad = !(x.steps || []).length || !(x.steps || []).some((st) => st.terminal);
+            return (
+              <button key={x.id} role="option" aria-selected={sel === x.id} className={sel === x.id ? "on" : ""} onClick={() => setSel(x.id)}>
+                <b>{x.name} <span className={"glyph " + (bad ? "err" : "ok")}>{bad ? "✕" : "●"}</span></b>
+                <small>{nameOf(model.channels, x.channelId)}{x.groupId ? " · " + nameOf(groups, x.groupId) : ""} · {(x.steps || []).length} step{(x.steps || []).length === 1 ? "" : "s"}</small>
+                <span className="qstats">{u.requestTypes ? `used by ${u.requestTypes} request type${u.requestTypes === 1 ? "" : "s"}` : "not attached yet"}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <button className="btn sm" disabled={!(model.channels || []).length} onClick={() => {
+            const m2 = Ops.createProcess(model, { name: "New process", channelId: model.channels[0].id });
+            set(m2); setSel(m2.processes[m2.processes.length - 1].id);
+          }}>+ Process</button>
+        </div>
+      </Drawer>
+
+      <div className={"scrim" + (proc ? " on" : "")} onClick={close} />
+      <aside className={"drawer" + (proc ? " on" : "")} aria-label="Edit process" aria-hidden={!proc}>
+        {proc ? <ProcessDetail model={model} set={set} proc={proc} detailRef={detailRef} onClosed={close} /> : null}
+      </aside>
+    </>
+  );
+}
+
+function ProcessDetail({ model, set, proc, detailRef, onClosed }) {
+  const u = Ops.processUsage(model, proc.id);
+  return (
+    <>
+      <div className="dhead">
+        <div><h3>{proc.name}</h3><p>{nameOf(model.channels, proc.channelId)} · {u.requestTypes ? `used by ${u.names.join(", ")}` : "not attached to any request type"}</p></div>
+        <button className="close" onClick={onClosed} aria-label="Close">✕</button>
+      </div>
+      <div className="dbody" data-testid="process-detail" ref={detailRef} tabIndex={-1}>
+        {u.requestTypes > 1 ? (
+          <p className="warnmsg">▲ Shared by {u.requestTypes} request types — an edit here changes all of them.</p>
+        ) : null}
+        <div className="fields">
+          <div className="field"><label>Name</label>
+            <input value={proc.name} aria-label="Process name" onChange={(e) => set(Ops.updateProcessMeta(model, proc.id, { name: e.target.value }))} /></div>
+          <div className="field"><label>Channel</label>
+            <select value={proc.channelId} aria-label="Process channel" onChange={(e) => set(Ops.updateProcessMeta(model, proc.id, { channelId: e.target.value }))}>
+              {(model.channels || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></div>
+          <div className="field"><label>Process group</label>
+            <select value={proc.groupId || ""} aria-label="Process group" onChange={(e) => set(Ops.updateProcessMeta(model, proc.id, { groupId: e.target.value || undefined }))}>
+              <option value="">— none</option>
+              {(model.processGroups || []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select></div>
+        </div>
+        <ProcessSteps model={model} set={set} proc={proc} />
+        <div style={{ marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }}>
+          <button className="btn sm danger" onClick={() => { set(Ops.deleteProcessById(model, proc.id)); onClosed && onClosed(); }}>
+            Delete process{u.requestTypes ? ` (detaches from ${u.requestTypes})` : ""}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ---- 3 · Request types — the heart: the only linking surface (U3) ------------
 // Master–detail. Identity · assignment (empty ⇒ All, spelled out; V2 inline) ·
 // AHT override · one process per enabled channel (entry step, splits, sampling
@@ -722,33 +858,16 @@ function ToggleChips({ label, options, selected, onToggle, allLabel }) {
   );
 }
 
-function ProcessEditor({ model, set, rt, proc }) {
+// The step grid, addressed by PROCESS id — so editing from the Processes tab or
+// from a request type edits the same shared definition.
+function ProcessSteps({ model, set, proc }) {
   const [newOutcome, setNewOutcome] = useState("");
-  const [armed, setArmed] = useState(false);
-  const chName = nameOf(model.channels, proc.channelId);
-  const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
+  const upd = (i, patch) => set(Ops.updateProcessStep(model, proc.id, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
   const hasGov = (proc.steps || []).some((s) => { const q = (model.queues || []).find((x) => x.id === s.queueId); return q && q.type === "governance"; });
-  // Removing a process destroys every step, split, sampling % and outcome in
-  // one grey ✕ identical to the one that removes a single row — and there is no
-  // undo anywhere in the product. Arm it once it has anything to lose; an empty
-  // process stays a single click. (Outcomes can't gate this: addProcess always
-  // seeds one, so the guard would never disarm.)
-  const remove = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
-  const needsConfirm = (proc.steps || []).length > 0;
+  const pid = proc.id;
   return (
-    <div className="proc" data-testid={"process-" + rt.id + "-" + proc.channelId}>
-      <div className="prochead">
-        <span className="chip on-toggle">{chName}</span>
-        {armed ? (
-          <button className="btn sm danger" style={{ marginLeft: "auto" }} aria-label={"Remove " + chName + " process"}
-            onBlur={() => setArmed(false)} onKeyDown={(e) => { if (e.key === "Escape") setArmed(false); }}
-            onClick={remove}>Remove {(proc.steps || []).length} step{(proc.steps || []).length === 1 ? "" : "s"}?</button>
-        ) : (
-          <button className="regdel" aria-label={"Remove " + chName + " process"}
-            onClick={() => (needsConfirm ? setArmed(true) : remove())}>✕</button>
-        )}
-      </div>
+    <>
       {(proc.steps || []).length === 0 ? <p className="hint" style={{ margin: "4px 0" }}>No steps yet — this process is inert until it routes somewhere.</p> : (
         <div className={"steps" + (hasGov ? " with-sample" : "")}>
           <div className="steprow head"><span>Step</span><span>Queue</span><span>Split %</span>{hasGov ? <span>Sample %</span> : null}<span>Ends</span><span>Outcome</span><span /></div>
@@ -762,22 +881,22 @@ function ProcessEditor({ model, set, rt, proc }) {
             return (
               <div className="steprow" key={i}>
                 <span className="stepno">{i === 0 ? "entry" : i + 1}</span>
-                <select value={s.queueId} onChange={(e) => upd(i, { queueId: e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} queue`}>
+                <select value={s.queueId} onChange={(e) => upd(i, { queueId: e.target.value })} aria-label={`${pid} step ${i + 1} queue`}>
                   {(model.queues || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                 </select>
-                <input className="num" value={s.splitPct} title={reworkTitle} onChange={(e) => upd(i, { splitPct: +e.target.value || 0 })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} split percent`} />
+                <input className="num" value={s.splitPct} title={reworkTitle} onChange={(e) => upd(i, { splitPct: +e.target.value || 0 })} aria-label={`${pid} step ${i + 1} split percent`} />
                 {hasGov ? (gov
                   ? <input className="num" value={s.samplingPct != null ? s.samplingPct : ""} placeholder="—"
-                      onChange={(e) => upd(i, { samplingPct: e.target.value === "" ? undefined : +e.target.value })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} sampling percent`} />
+                      onChange={(e) => upd(i, { samplingPct: e.target.value === "" ? undefined : +e.target.value })} aria-label={`${pid} step ${i + 1} sampling percent`} />
                   : <span className="stepdash">—</span>) : null}
-                <input type="checkbox" checked={!!s.terminal} onChange={(e) => upd(i, { terminal: e.target.checked ? true : false })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} terminal`} />
+                <input type="checkbox" checked={!!s.terminal} onChange={(e) => upd(i, { terminal: e.target.checked ? true : false })} aria-label={`${pid} step ${i + 1} terminal`} />
                 {s.terminal ? (
-                  <select value={s.outcome || ""} onChange={(e) => upd(i, { outcome: e.target.value || undefined })} aria-label={`${rt.id} ${proc.channelId} step ${i + 1} outcome`}>
+                  <select value={s.outcome || ""} onChange={(e) => upd(i, { outcome: e.target.value || undefined })} aria-label={`${pid} step ${i + 1} outcome`}>
                     <option value="">outcome…</option>
                     {(proc.outcomes || []).map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 ) : <span className="stepdash">—</span>}
-                <button className="regdel" onClick={() => set(Ops.removeStep(model, rt.id, proc.channelId, i))} aria-label={`${rt.id} ${proc.channelId} remove step ${i + 1}`}>✕</button>
+                <button className="regdel" onClick={() => set(Ops.removeProcessStep(model, proc.id, i))} aria-label={`${pid} remove step ${i + 1}`}>✕</button>
               </div>
             );
           })}
@@ -786,24 +905,86 @@ function ProcessEditor({ model, set, rt, proc }) {
       {noTerminal ? <p className="errmsg">✕ No terminal step — the process leads nowhere. Mark the final step "ends" and pick its outcome.</p> : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
         <button className="btn sm" disabled={!(model.queues || []).length}
-          onClick={() => set(Ops.addStep(model, rt.id, proc.channelId, { queueId: model.queues[0].id }))}>+ Step</button>
+          onClick={() => set(Ops.addProcessStep(model, proc.id, { queueId: model.queues[0].id }))}>+ Step</button>
         <span className="hint" style={{ marginLeft: 8 }}>outcomes:</span>
         {(proc.outcomes || []).map((o) => {
           const used = (proc.steps || []).some((s) => s.outcome === o);
           return (
             <span className="chip" key={o}>{o}{used
               ? <small title="Referenced by a terminal step"> ·in use</small>
-              : <button className="chipx" onClick={() => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o)))} aria-label={"Remove outcome " + o}>✕</button>}
+              : <button className="chipx" onClick={() => set(Ops.setProcessOutcomes(model, proc.id, proc.outcomes.filter((x) => x !== o)))} aria-label={"Remove outcome " + o}>✕</button>}
             </span>
           );
         })}
-        <input className="outin" placeholder="add outcome…" value={newOutcome} onChange={(e) => setNewOutcome(e.target.value)} aria-label={`${rt.id} ${proc.channelId} new outcome`} />
+        <input className="outin" placeholder="add outcome…" value={newOutcome} onChange={(e) => setNewOutcome(e.target.value)} aria-label={`${pid} new outcome`} />
         <button className="btn sm" disabled={!newOutcome.trim()} onClick={() => {
           const o = newOutcome.trim();
-          if (o && !(proc.outcomes || []).includes(o)) set(Ops.setOutcomes(model, rt.id, proc.channelId, [...(proc.outcomes || []), o]));
+          if (o && !(proc.outcomes || []).includes(o)) set(Ops.setProcessOutcomes(model, proc.id, [...(proc.outcomes || []), o]));
           setNewOutcome("");
         }}>Add</button>
       </div>
+    </>
+  );
+}
+
+// A process as seen FROM a request type: the same shared definition, with the
+// attachment (not the definition) removable here.
+function ProcessEditor({ model, set, rt, proc }) {
+  const [armed, setArmed] = useState(false);
+  const chName = nameOf(model.channels, proc.channelId);
+  const usage = proc.id ? Ops.processUsage(model, proc.id) : { requestTypes: 1 };
+  const detach = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
+  const needsConfirm = (proc.steps || []).length > 0;
+  return (
+    <div className="proc" data-testid={"process-" + rt.id + "-" + proc.channelId}>
+      <div className="prochead">
+        <span className="chip on-toggle">{chName}</span>
+        <span className="hint">{proc.name}{usage.requestTypes > 1 ? ` · shared with ${usage.requestTypes - 1} other request type${usage.requestTypes === 2 ? "" : "s"}` : ""}</span>
+        {armed ? (
+          <button className="btn sm danger" style={{ marginLeft: "auto" }} aria-label={"Remove " + chName + " process"}
+            onBlur={() => setArmed(false)} onKeyDown={(e) => { if (e.key === "Escape") setArmed(false); }}
+            onClick={detach}>Remove {(proc.steps || []).length} step{(proc.steps || []).length === 1 ? "" : "s"}?</button>
+        ) : (
+          <button className="regdel" aria-label={"Remove " + chName + " process"}
+            onClick={() => (needsConfirm ? setArmed(true) : detach())}>✕</button>
+        )}
+      </div>
+      {usage.requestTypes > 1 ? <p className="hint" style={{ marginBottom: 4 }}>Editing these steps changes every request type that uses this process.</p> : null}
+      <ProcessSteps model={model} set={set} proc={proc} />
+    </div>
+  );
+}
+
+// Attaching is the primary action now: pick a process that already exists (the
+// same one can serve many request types), or create a fresh one for a channel
+// that has none.
+function AttachProcess({ model, set, rt, offChannels }) {
+  const taken = new Set(processesOf(model, rt).map((x) => x.channelId));
+  const available = (model.processes || []).filter(
+    (x) => !(rt.processIds || []).includes(x.id) && !taken.has(x.channelId));
+  const [pick, setPick] = useState("");
+  return (
+    <div style={{ marginTop: 8 }}>
+      {available.length ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <span className="hint">Reuse an existing process:</span>
+          <select value={pick} aria-label="Attach an existing process" onChange={(e) => setPick(e.target.value)}>
+            <option value="">choose…</option>
+            {available.map((x) => (
+              <option key={x.id} value={x.id}>{x.name} — {nameOf(model.channels, x.channelId)}</option>
+            ))}
+          </select>
+          <button className="btn sm" disabled={!pick} onClick={() => { set(Ops.attachProcess(model, rt.id, pick)); setPick(""); }}>Attach</button>
+        </div>
+      ) : null}
+      {offChannels.length ? (
+        <div className="regoff">
+          <span className="hint" style={{ alignSelf: "center" }}>or start a new one:</span>
+          {offChannels.map((c) => (
+            <button key={c.id} className="chip off" onClick={() => set(Ops.addProcess(model, rt.id, c.id))} aria-label={"Add " + c.name + " process"}>+ {c.name}</button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -820,7 +1001,7 @@ function RequestTypesPanel({ model, set, p }) {
     const u = (x.buIds || []).length ? x.buIds.map((i) => nameOf(model.businessUnits, i)).join(", ") : "all BUs";
     return b + " · " + u;
   };
-  const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
+  const offChannels = rt ? (model.channels || []).filter((c) => !processesOf(model, rt).some((pr) => pr.channelId === c.id)) : [];
   const guard = rt ? canDeleteRequestType(model, rt.id) : { ok: true, blockedBy: [] };
   return (
     <>
@@ -839,7 +1020,7 @@ function RequestTypesPanel({ model, set, p }) {
               <button key={x.id} role="option" aria-selected={!!(rt && rt.id === x.id)} className={"rtrow" + (rt && rt.id === x.id ? " on" : "")} onClick={() => setSel(x.id)}>
                 <b>{x.name} <span className={"glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok")}>{errs.length ? "✕" : warns.length ? "▲" : "●"}</span></b>
                 <small>{nameOf(model.processGroups, x.groupId) || "no group"}{x.productId ? " · " + nameOf(model.products, x.productId) : ""} · {assignLine(x)}</small>
-                <small>{(x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</small>
+                <small>{processesOf(model, x).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</small>
               </button>
             );
           })}
@@ -894,14 +1075,8 @@ function RequestTypesPanel({ model, set, p }) {
 
             <Drawer title="Processes — one per channel" defaultOpen
               info="The journey this request takes, per channel. Each step routes a percentage of what reaches it to a queue; a step marked Ends declares the outcome. A branch under 100% doubles as rework — hover the split to see the multi-round effective rate.">
-            {(rt.processes || []).map((pr) => <ProcessEditor key={pr.channelId} model={model} set={set} rt={rt} proc={pr} />)}
-            {offChannels.length ? (
-              <div className="regoff">
-                {offChannels.map((c) => (
-                  <button key={c.id} className="chip off" onClick={() => set(Ops.addProcess(model, rt.id, c.id))} aria-label={"Add " + c.name + " process"}>+ {c.name}</button>
-                ))}
-              </div>
-            ) : null}
+            {processesOf(model, rt).map((pr) => <ProcessEditor key={pr.id || pr.channelId} model={model} set={set} rt={rt} proc={pr} />)}
+            <AttachProcess model={model} set={set} rt={rt} offChannels={offChannels} />
 
             </Drawer>
 
@@ -1058,7 +1233,7 @@ const trunc = (s, n = 22) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 function buildMap(model, p) {
   const depth = new Map();
   for (const rt of model.requestTypes || [])
-    for (const proc of rt.processes || [])
+    for (const proc of processesOf(model, rt))
       proc.steps.forEach((s, i) => {
         if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
       });
@@ -1076,7 +1251,7 @@ function buildMap(model, p) {
 
   const flow = [], seenF = new Set();
   for (const rt of model.requestTypes || [])
-    for (const proc of rt.processes || [])
+    for (const proc of processesOf(model, rt))
       for (let i = 0; i + 1 < proc.steps.length; i++) {
         const s = proc.steps[i + 1];
         const label = s.splitPct + "%" + (s.samplingPct != null ? " · sample " + s.samplingPct + "%" : "");

@@ -7,6 +7,9 @@
  * upsert semantics, service teams, fixtures and the import report.
  */
 const Ops = require("../model/ops.js");
+const { processesOf } = require("../model/domain.js");
+// v1.3: processes are shared entities referenced by id, so resolve rather than index.
+const procOf = (m, rtId, i = 0) => processesOf(m, m.requestTypes.find((r) => r.id === rtId))[i];
 const D = require("../model/domain.js");
 const { propagateDomain } = require("../model/propagate.js");
 
@@ -97,19 +100,44 @@ t("process lifecycle: one per channel; steps add/update/remove; V3 transitions",
   m = run(Ops.updateStep, m, "rt_x", "ch_voice", 0, { terminal: true, outcome: "completed" });
   ok(!D.validateDomain(m).errors.some((e) => e.kind === "endpoint_missing" && e.requestTypeId === "rt_x"), "endpoint satisfied");
   m = run(Ops.updateStep, m, "rt_x", "ch_voice", 0, { splitPct: 80, samplingPct: 10 });
-  eq(m.requestTypes.find((r) => r.id === "rt_x").processes[0].steps[0].splitPct, 80, 1e-9, "split updated");
+  eq(procOf(m, "rt_x").steps[0].splitPct, 80, 1e-9, "split updated");
   m = run(Ops.updateStep, m, "rt_x", "ch_voice", 0, { samplingPct: undefined });
-  ok(!("samplingPct" in m.requestTypes.find((r) => r.id === "rt_x").processes[0].steps[0]), "sampling cleared");
+  ok(!("samplingPct" in procOf(m, "rt_x").steps[0]), "sampling cleared");
   m = run(Ops.removeStep, m, "rt_x", "ch_voice", 0);
-  eq(m.requestTypes.find((r) => r.id === "rt_x").processes[0].steps.length, 0, 1e-9, "step removed");
+  eq(procOf(m, "rt_x").steps.length, 0, 1e-9, "step removed");
   m = run(Ops.deleteProcess, m, "rt_x", "ch_voice");
-  eq(m.requestTypes.find((r) => r.id === "rt_x").processes.length, 0, 1e-9, "process removed");
+  eq(processesOf(m, m.requestTypes.find((r) => r.id === "rt_x")).length, 0, 1e-9, "detached from the request type");
+});
+
+t("v1.3: a process is shared — one definition, many request types", () => {
+  let m = Ops.sampleDomainModel();
+  // A second request type reuses the EXISTING billing voice process.
+  m = run(Ops.addRequestType, m, { id: "rt_dispute", name: "Billing dispute", groupId: "pg_cards" });
+  m = run(Ops.setAssignment, m, "rt_dispute", { brandIds: ["b_acme"], buIds: ["bu_cs"] });
+  m = run(Ops.attachProcess, m, "rt_dispute", "proc_billing_voice");
+  eq(m.processes.length, 2, 1e-9, "no new process was created — it is the same definition");
+  const usage = Ops.processUsage(m, "proc_billing_voice");
+  eq(usage.requestTypes, 2, 1e-9, "used by both request types");
+  // Editing the shared process is felt by every user of it.
+  m = run(Ops.updateProcessStep, m, "proc_billing_voice", 0, { splitPct: 55 });
+  for (const id of ["rt_billing", "rt_dispute"])
+    eq(processesOf(m, m.requestTypes.find((r) => r.id === id)).steps ? 0 : processesOf(m, m.requestTypes.find((r) => r.id === id))[0].steps[0].splitPct, 55, 1e-9, "edit visible from " + id);
+  // Still one process per channel per request type.
+  ok(run(Ops.attachProcess, m, "rt_dispute", "proc_billing_voice") === m, "attaching twice is a no-op");
+  // Detaching from one leaves the other untouched.
+  m = run(Ops.detachProcess, m, "rt_dispute", "proc_billing_voice");
+  eq(Ops.processUsage(m, "proc_billing_voice").requestTypes, 1, 1e-9, "detach is per request type");
+  eq(m.processes.length, 2, 1e-9, "the definition survives");
+  // Deleting the definition detaches it everywhere.
+  m = run(Ops.deleteProcessById, m, "proc_billing_voice");
+  eq(m.processes.length, 1, 1e-9, "definition gone");
+  eq(processesOf(m, m.requestTypes.find((r) => r.id === "rt_billing")).length, 0, 1e-9, "and detached from its users");
 });
 
 t("clearing a terminal flag also drops its outcome", () => {
   let m = Ops.sampleDomainModel();
   m = run(Ops.updateStep, m, "rt_billing", "ch_voice", 1, { terminal: false });
-  const step = m.requestTypes.find((r) => r.id === "rt_billing").processes[0].steps[1];
+  const step = procOf(m, "rt_billing").steps[1];
   ok(!("terminal" in step) && !("outcome" in step), "terminal + outcome removed");
 });
 

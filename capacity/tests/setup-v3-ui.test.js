@@ -55,11 +55,11 @@ function subtab(label, r) {
 console.log("Setup shell gate — BUILD-PLAN U1");
 
 async function main() {
-await t("mounts with zero console noise; six tabs in dependency order", () => {
+await t("mounts with zero console noise; seven tabs in dependency order", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   ok(document.getElementById("root").children.length > 0, "rendered");
   const labels = $$(".subtabs button").map((b) => b.textContent.replace(/[●▲✕]/g, "").trim());
-  eq(labels.join(" | "), "Structure | Queues | Request types | Volume | Map | Defaults", "tab order");
+  eq(labels.join(" | "), "Structure | Queues | Processes | Request types | Volume | Map | Defaults", "tab order");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
@@ -80,10 +80,11 @@ await t("the sample model is complete: no attention markers, no progress strip",
 await t("the options WITHIN a tab are drawers, each with an information hover", () => {
   subtab("Structure");
   const lists = $$(".reglist.drw");
-  eq(lists.length, 5, "all five registry lists are drawers");
+  // Process groups moved to the Processes tab, so Structure holds four lists.
+  eq(lists.length, 4, "the registry lists are drawers");
   eq(lists.filter((l) => l.classList.contains("open")).length, 1, "one open by default, the rest shut");
   const infos = $$(".reglist.drw .info");
-  eq(infos.length, 5, "an info affordance on each");
+  eq(infos.length, 4, "an info affordance on each");
   ok(infos.every((i) => (i.getAttribute("title") || "").length > 40), "each carries a real explanation");
   ok(infos.every((i) => i.getAttribute("aria-label") === i.getAttribute("title")), "and it is reachable non-visually");
   const products = lists.find((l) => $(".drwhead b", l).textContent === "Products");
@@ -105,7 +106,7 @@ await t("Defaults groups are drawers with hovers too", () => {
 await t("tab navigation switches panels (Structure → Queues → Map)", () => {
   subtab("Structure");
   eq($('[role="tabpanel"]').getAttribute("data-tab"), "structure", "starts on Structure");
-  ok($$(".reglist").length === 5, "five flat registry lists");
+  ok($$(".reglist").length === 4, "the registry lists");
   subtab("Queues");
   eq($('[role="tabpanel"]').getAttribute("data-tab"), "queues", "Queues panel shown");
   ok(subtab("Queues").getAttribute("aria-selected") === "true", "aria-selected moves");

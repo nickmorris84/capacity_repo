@@ -67,15 +67,15 @@ t("real .xlsx bytes: write → read → import reproduces the migrated model", (
 t("export → edit a cell → import reflects exactly that edit", () => {
   const m = Ops.sampleDomainModel();
   const sheets = throughXlsx(T.modelToDomainSheets(m));
-  const row = sheets.Steps.find((r) => r.RequestTypeId === "rt_newcard" && r.QueueId === "q_verify");
+  // v1.3: steps hang off the shared process, not off the request type.
+  const row = sheets.Steps.find((r) => r.ProcessId === "proc_newcard_digital" && r.QueueId === "q_verify");
   ok(row && +row.SplitPct === 60, "expected the 60% verify step");
   row.SplitPct = 45;
   const { model } = T.domainSheetsToModel(sheets);
-  const rt = model.requestTypes.find((r) => r.id === "rt_newcard");
-  const step = rt.processes[0].steps.find((s) => s.queueId === "q_verify");
-  ok(step.splitPct === 45, "edit not applied");
-  const expect = Ops.updateStep(m, "rt_newcard", "ch_digital",
-    rt.processes[0].steps.findIndex((s) => s.queueId === "q_verify"), { splitPct: 45 });
+  const proc = model.processes.find((x) => x.id === "proc_newcard_digital");
+  const idx = proc.steps.findIndex((s) => s.queueId === "q_verify");
+  ok(proc.steps[idx].splitPct === 45, "edit not applied");
+  const expect = Ops.updateProcessStep(m, "proc_newcard_digital", idx, { splitPct: 45 });
   ok(canon(model) === canon(expect), "something besides the edited cell changed");
 });
 

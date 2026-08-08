@@ -50,6 +50,7 @@ function migrateV2ToDomain(v2) {
   });
 
   const processGroups = [];
+  const processes = [];
   const requestTypes = [];
   const volumeEntries = [];
 
@@ -73,10 +74,14 @@ function migrateV2ToDomain(v2) {
       if (i === arr.length - 1) { step.terminal = true; step.outcome = "completed"; }
       return step;
     });
+    // v1.3: the journey becomes a process in the registry, referenced by id.
+    // One process per migrated service (no automatic de-duplication — sharing
+    // is a deliberate act the owner performs in the Processes tab).
+    const procId = "proc_" + s.id;
+    processes.push({ id: procId, name: s.name, channelId: chIdOf(chKey), groupId: gId, outcomes: ["completed"], steps });
     const rt = {
       id: rtId, name: s.name, activity: s.activity, productRequest: s.productRequest,
-      groupId: gId, brandIds, buIds,
-      processes: [{ channelId: chIdOf(chKey), outcomes: ["completed"], steps }],
+      groupId: gId, brandIds, buIds, processIds: [procId],
     };
     if (s.ahtSec != null) rt.ahtSec = s.ahtSec;
     requestTypes.push(rt);
@@ -90,7 +95,7 @@ function migrateV2ToDomain(v2) {
     }
   }
 
-  const out = { brands, businessUnits, channels, processGroups, products, queues, requestTypes, volumeEntries };
+  const out = { brands, businessUnits, channels, processGroups, products, processes, queues, requestTypes, volumeEntries };
   if (v2.engineConfig) out.engineConfig = v2.engineConfig;
   return out;
 }

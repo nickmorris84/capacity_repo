@@ -26,6 +26,16 @@
  * }
  */
 
+// v1.3: a process is a SHARED entity — request types reference processes by id,
+// and the same process can serve several request types. v1.2 embedded them in
+// the request type; resolve both shapes so stored models keep working.
+function processesOf(model, rt) {
+  if (!rt) return [];
+  if (Array.isArray(rt.processIds))
+    return rt.processIds.map((id) => (model.processes || []).find((x) => x.id === id)).filter(Boolean);
+  return rt.processes || [];
+}
+
 const LEVELS = ["brandId", "buId", "requestTypeId", "channelId"];
 
 const assignedBrands = (rt, model) =>
@@ -40,7 +50,7 @@ function leaves(model) {
   for (const rt of model.requestTypes || [])
     for (const brandId of assignedBrands(rt, model))
       for (const buId of assignedBUs(rt, model))
-        for (const p of rt.processes || [])
+        for (const p of processesOf(model, rt))
           out.push({ brandId, buId, requestTypeId: rt.id, channelId: p.channelId, rt, process: p });
   return out;
 }
@@ -67,7 +77,7 @@ function validateDomain(model) {
       errors.push({ kind: "dangling_brand", requestTypeId: rt.id, message: `Request type "${rt.name}" is assigned to a missing brand.` });
     for (const b of rt.buIds || []) if (!buIds.has(b))
       errors.push({ kind: "dangling_bu", requestTypeId: rt.id, message: `Request type "${rt.name}" is assigned to a missing business unit.` });
-    for (const p of rt.processes || []) {
+    for (const p of processesOf(model, rt)) {
       if (!chIds.has(p.channelId))
         errors.push({ kind: "dangling_channel", requestTypeId: rt.id, message: `Request type "${rt.name}" has a process on a missing channel.` });
       for (const s of p.steps || []) if (!qIds.has(s.queueId))
@@ -115,7 +125,8 @@ function canDeleteBU(model, id) {
 }
 function canDeleteChannel(model, id) {
   const b = [];
-  for (const rt of model.requestTypes || []) if ((rt.processes || []).some((p) => p.channelId === id)) b.push({ kind: "requestType", id: rt.id });
+  for (const rt of model.requestTypes || []) if (processesOf(model, rt).some((p) => p.channelId === id)) b.push({ kind: "requestType", id: rt.id });
+  for (const pr of model.processes || []) if (pr.channelId === id) b.push({ kind: "process", id: pr.id });
   for (const e of model.volumeEntries || []) if ((e.scope || {}).channelId === id) b.push({ kind: "volumeEntry", id: e.id });
   return guard(b);
 }
@@ -128,7 +139,7 @@ function canDeleteProduct(model, id) {
 function canDeleteQueue(model, id) {
   const b = [];
   for (const rt of model.requestTypes || [])
-    for (const p of rt.processes || [])
+    for (const p of processesOf(model, rt))
       if ((p.steps || []).some((s) => s.queueId === id)) b.push({ kind: "requestType", id: rt.id, channelId: p.channelId });
   return guard(b);
 }
@@ -141,7 +152,7 @@ function queueUsage(model, queueId) {
   let processes = 0;
   const brands = new Set();
   for (const rt of model.requestTypes || [])
-    for (const p of rt.processes || [])
+    for (const p of processesOf(model, rt))
       if ((p.steps || []).some((s) => s.queueId === queueId)) {
         processes++;
         for (const b of assignedBrands(rt, model)) brands.add(b);
@@ -150,6 +161,7 @@ function queueUsage(model, queueId) {
 }
 
 module.exports = {
+  processesOf,
   LEVELS, keyOf, leaves, assignedBrands, assignedBUs, validateDomain,
   canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup,
   canDeleteProduct, canDeleteQueue, canDeleteRequestType, queueUsage,

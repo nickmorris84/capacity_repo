@@ -354,6 +354,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   border:0.5px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap}
 .drwhead .chev{font-size:8px; color:var(--ink-3); transition:transform 0.12s}
 .drw.open>.drwhead .chev{transform:rotate(180deg)}
+.usagenote{cursor:help; border-bottom:0.5px dotted var(--line)}
+.usage-none{opacity:0.75; font-style:italic}
+.prodbrand{font-size:11.5px; padding:3px 7px; border:0.5px solid var(--line); border-radius:7px; background:#fff; font-family:inherit}
 .info{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none;
   border-radius:50%; border:0.5px solid var(--line); background:var(--canvas); color:var(--ink-3);
   font-size:9.5px; font-weight:700; cursor:help; margin-left:6px; vertical-align:1px}

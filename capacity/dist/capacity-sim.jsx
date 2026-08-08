@@ -44,6 +44,12 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // model/domain.js
 var require_domain = __commonJS({
   "model/domain.js"(exports, module) {
+    function processesOf2(model, rt) {
+      if (!rt) return [];
+      if (Array.isArray(rt.processIds))
+        return rt.processIds.map((id) => (model.processes || []).find((x) => x.id === id)).filter(Boolean);
+      return rt.processes || [];
+    }
     var LEVELS = ["brandId", "buId", "requestTypeId", "channelId"];
     var assignedBrands = (rt, model) => rt.brandIds && rt.brandIds.length ? rt.brandIds : (model.brands || []).map((b) => b.id);
     var assignedBUs = (rt, model) => rt.buIds && rt.buIds.length ? rt.buIds : (model.businessUnits || []).map((b) => b.id);
@@ -52,7 +58,7 @@ var require_domain = __commonJS({
       for (const rt of model.requestTypes || [])
         for (const brandId of assignedBrands(rt, model))
           for (const buId of assignedBUs(rt, model))
-            for (const p of rt.processes || [])
+            for (const p of processesOf2(model, rt))
               out.push({ brandId, buId, requestTypeId: rt.id, channelId: p.channelId, rt, process: p });
       return out;
     }
@@ -72,7 +78,7 @@ var require_domain = __commonJS({
           errors.push({ kind: "dangling_brand", requestTypeId: rt.id, message: `Request type "${rt.name}" is assigned to a missing brand.` });
         for (const b of rt.buIds || []) if (!buIds.has(b))
           errors.push({ kind: "dangling_bu", requestTypeId: rt.id, message: `Request type "${rt.name}" is assigned to a missing business unit.` });
-        for (const p of rt.processes || []) {
+        for (const p of processesOf2(model, rt)) {
           if (!chIds.has(p.channelId))
             errors.push({ kind: "dangling_channel", requestTypeId: rt.id, message: `Request type "${rt.name}" has a process on a missing channel.` });
           for (const s of p.steps || []) if (!qIds.has(s.queueId))
@@ -120,7 +126,8 @@ var require_domain = __commonJS({
     }
     function canDeleteChannel2(model, id) {
       const b = [];
-      for (const rt of model.requestTypes || []) if ((rt.processes || []).some((p) => p.channelId === id)) b.push({ kind: "requestType", id: rt.id });
+      for (const rt of model.requestTypes || []) if (processesOf2(model, rt).some((p) => p.channelId === id)) b.push({ kind: "requestType", id: rt.id });
+      for (const pr of model.processes || []) if (pr.channelId === id) b.push({ kind: "process", id: pr.id });
       for (const e of model.volumeEntries || []) if ((e.scope || {}).channelId === id) b.push({ kind: "volumeEntry", id: e.id });
       return guard(b);
     }
@@ -133,7 +140,7 @@ var require_domain = __commonJS({
     function canDeleteQueue3(model, id) {
       const b = [];
       for (const rt of model.requestTypes || [])
-        for (const p of rt.processes || [])
+        for (const p of processesOf2(model, rt))
           if ((p.steps || []).some((s) => s.queueId === id)) b.push({ kind: "requestType", id: rt.id, channelId: p.channelId });
       return guard(b);
     }
@@ -144,7 +151,7 @@ var require_domain = __commonJS({
       let processes = 0;
       const brands = /* @__PURE__ */ new Set();
       for (const rt of model.requestTypes || [])
-        for (const p of rt.processes || [])
+        for (const p of processesOf2(model, rt))
           if ((p.steps || []).some((s) => s.queueId === queueId)) {
             processes++;
             for (const b of assignedBrands(rt, model)) brands.add(b);
@@ -152,6 +159,7 @@ var require_domain = __commonJS({
       return { processes, brands: brands.size };
     }
     module.exports = {
+      processesOf: processesOf2,
       LEVELS,
       keyOf: keyOf2,
       leaves,
@@ -2399,7 +2407,8 @@ var require_ops = __commonJS({
       canDeleteProduct: canDeleteProduct2,
       canDeleteQueue: canDeleteQueue3,
       canDeleteRequestType: canDeleteRequestType2,
-      keyOf: keyOf2
+      keyOf: keyOf2,
+      processesOf: processesOf2
     } = require_domain();
     var { CHANNELS: CHANNELS3 } = require_taxonomy();
     var { propagateDomain: propagateDomain2 } = require_propagate();
@@ -2445,7 +2454,16 @@ var require_ops = __commonJS({
     var addProcessGroup2 = addToList("processGroups", "pg");
     var renameProcessGroup2 = renameInList("processGroups");
     var deleteProcessGroup2 = deleteFromList("processGroups", canDeleteGroup2);
-    var addProduct2 = addToList("products", "prod");
+    var addProduct2 = (model, item = {}) => addToList("products", "prod")(model, item);
+    function setProductBrand2(model, productId, brandId) {
+      const m = clone2(model);
+      const pr = (m.products || []).find((x) => x.id === productId);
+      if (pr) {
+        if (brandId) pr.brandId = brandId;
+        else delete pr.brandId;
+      }
+      return m;
+    }
     var renameProduct2 = renameInList("products");
     var deleteProduct2 = deleteFromList("products", canDeleteProduct2);
     function addChannel2(model, { key, id, name, defaults } = {}) {
@@ -2569,7 +2587,7 @@ var require_ops = __commonJS({
         groupId,
         brandIds: [],
         buIds: [],
-        processes: []
+        processIds: []
       };
       if (productId != null) rt.productId = productId;
       m.requestTypes.push(rt);
@@ -2593,25 +2611,80 @@ var require_ops = __commonJS({
     var deleteRequestType2 = deleteFromList("requestTypes", canDeleteRequestType2);
     var procOf = (m, rtId, channelId) => {
       const rt = (m.requestTypes || []).find((x) => x.id === rtId);
-      return rt ? { rt, p: (rt.processes || []).find((x) => x.channelId === channelId) } : { rt: null, p: null };
+      return rt ? { rt, p: processesOf2(m, rt).find((x) => x.channelId === channelId) } : { rt: null, p: null };
     };
+    function createProcess2(model, { id, name, channelId, groupId, outcomes } = {}) {
+      const m = clone2(model);
+      m.processes = m.processes || [];
+      m.processes.push({
+        id: id || uid("proc"),
+        name: name || "New process",
+        channelId,
+        ...groupId ? { groupId } : {},
+        outcomes: outcomes ? [...outcomes] : ["completed"],
+        steps: []
+      });
+      return m;
+    }
+    function updateProcessMeta2(model, processId, patch) {
+      const m = clone2(model);
+      const pr = (m.processes || []).find((x) => x.id === processId);
+      if (pr) applyPatch(pr, patch);
+      return m;
+    }
+    function deleteProcessById2(model, processId) {
+      const m = clone2(model);
+      m.processes = (m.processes || []).filter((x) => x.id !== processId);
+      for (const rt of m.requestTypes || [])
+        if (Array.isArray(rt.processIds)) rt.processIds = rt.processIds.filter((id) => id !== processId);
+      return m;
+    }
+    function processUsage2(model, processId) {
+      const rts = (model.requestTypes || []).filter((rt) => (rt.processIds || []).includes(processId));
+      const brands = /* @__PURE__ */ new Set();
+      for (const rt of rts) for (const b of rt.brandIds || []) brands.add(b);
+      return { requestTypes: rts.length, brands: brands.size, names: rts.map((r) => r.name) };
+    }
+    function attachProcess2(model, rtId, processId) {
+      const m = clone2(model);
+      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+      const pr = (m.processes || []).find((x) => x.id === processId);
+      if (!rt || !pr) return model;
+      rt.processIds = rt.processIds || [];
+      if (rt.processIds.includes(processId)) return model;
+      const taken = processesOf2(m, rt).some((x) => x.channelId === pr.channelId);
+      if (taken) return model;
+      rt.processIds.push(processId);
+      return m;
+    }
+    function detachProcess(model, rtId, processId) {
+      const m = clone2(model);
+      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+      if (!rt || !Array.isArray(rt.processIds)) return model;
+      rt.processIds = rt.processIds.filter((id) => id !== processId);
+      return m;
+    }
     function addProcess2(model, rtId, channelId) {
       const { rt, p } = procOf(model, rtId, channelId);
       if (!rt || p) return model;
-      const m = clone2(model);
-      const rt2 = m.requestTypes.find((x) => x.id === rtId);
-      rt2.processes.push({ channelId, outcomes: ["completed"], steps: [] });
-      return m;
+      const rtName = rt.name || "Process";
+      const chName = ((model.channels || []).find((c) => c.id === channelId) || {}).name || channelId;
+      let m = createProcess2(model, { name: `${rtName} \u2014 ${chName}`, channelId, groupId: rt.groupId });
+      const created = m.processes[m.processes.length - 1];
+      return attachProcess2(m, rtId, created.id);
     }
     function deleteProcess2(model, rtId, channelId) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
+      return p.id ? detachProcess(model, rtId, p.id) : legacyDropProcess(model, rtId, channelId);
+    }
+    function legacyDropProcess(model, rtId, channelId) {
       const m = clone2(model);
       const rt2 = m.requestTypes.find((x) => x.id === rtId);
-      rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
+      if (rt2 && rt2.processes) rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
       return m;
     }
-    function addStep2(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
+    function addStep(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
       const m = clone2(model);
@@ -2621,7 +2694,7 @@ var require_ops = __commonJS({
       p2.steps.push(step);
       return m;
     }
-    function updateStep2(model, rtId, channelId, index, patch) {
+    function updateStep(model, rtId, channelId, index, patch) {
       const { p } = procOf(model, rtId, channelId);
       if (!p || !p.steps[index]) return model;
       const m = clone2(model);
@@ -2633,14 +2706,49 @@ var require_ops = __commonJS({
       }
       return m;
     }
-    function removeStep2(model, rtId, channelId, index) {
+    function removeStep(model, rtId, channelId, index) {
       const { p } = procOf(model, rtId, channelId);
       if (!p || !p.steps[index]) return model;
       const m = clone2(model);
       procOf(m, rtId, channelId).p.steps.splice(index, 1);
       return m;
     }
-    function setOutcomes2(model, rtId, channelId, outcomes) {
+    var byProcId = (m, processId) => (m.processes || []).find((x) => x.id === processId);
+    function addProcessStep2(model, processId, { queueId, splitPct, samplingPct } = {}) {
+      const m = clone2(model);
+      const pr = byProcId(m, processId);
+      if (!pr) return model;
+      const step = { queueId, splitPct: splitPct != null ? splitPct : 100 };
+      if (samplingPct != null) step.samplingPct = samplingPct;
+      pr.steps.push(step);
+      return m;
+    }
+    function updateProcessStep2(model, processId, index, patch) {
+      const m = clone2(model);
+      const pr = byProcId(m, processId);
+      if (!pr || !pr.steps[index]) return model;
+      applyPatch(pr.steps[index], patch);
+      if (patch.terminal === false) {
+        delete pr.steps[index].terminal;
+        delete pr.steps[index].outcome;
+      }
+      return m;
+    }
+    function removeProcessStep2(model, processId, index) {
+      const m = clone2(model);
+      const pr = byProcId(m, processId);
+      if (!pr || !pr.steps[index]) return model;
+      pr.steps.splice(index, 1);
+      return m;
+    }
+    function setProcessOutcomes2(model, processId, outcomes) {
+      const m = clone2(model);
+      const pr = byProcId(m, processId);
+      if (!pr) return model;
+      pr.outcomes = [...outcomes];
+      return m;
+    }
+    function setOutcomes(model, rtId, channelId, outcomes) {
       const { p } = procOf(model, rtId, channelId);
       if (!p) return model;
       const m = clone2(model);
@@ -2662,7 +2770,7 @@ var require_ops = __commonJS({
       return m;
     }
     function blankDomainModel2(engineConfig) {
-      const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+      const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], processes: [], queues: [], requestTypes: [], volumeEntries: [] };
       if (engineConfig) m.engineConfig = engineConfig;
       return withDefaultChannels(m);
     }
@@ -2672,7 +2780,33 @@ var require_ops = __commonJS({
         businessUnits: [{ id: "bu_cs", name: "Customer Service" }],
         channels: [{ id: "ch_voice", key: "voice", name: "Voice" }, { id: "ch_digital", key: "digital", name: "Digital" }],
         processGroups: [{ id: "pg_billing", name: "Billing" }, { id: "pg_cards", name: "Cards" }],
-        products: [{ id: "prod_cards", name: "Credit cards" }],
+        products: [{ id: "prod_cards", name: "Credit cards", brandId: "b_acme" }],
+        // Processes are defined once and referenced; q_qa is reached from both.
+        processes: [
+          {
+            id: "proc_billing_voice",
+            name: "Billing enquiry \u2014 Voice",
+            channelId: "ch_voice",
+            groupId: "pg_billing",
+            outcomes: ["completed"],
+            steps: [
+              { queueId: "q_inbound", splitPct: 100 },
+              { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" }
+            ]
+          },
+          {
+            id: "proc_newcard_digital",
+            name: "New card \u2014 Digital",
+            channelId: "ch_digital",
+            groupId: "pg_cards",
+            outcomes: ["completed", "rejected"],
+            steps: [
+              { queueId: "q_apps", splitPct: 100 },
+              { queueId: "q_verify", splitPct: 60 },
+              { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" }
+            ]
+          }
+        ],
         queues: [
           { id: "q_inbound", name: "Inbound \u2014 Billing", type: "inbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 300, staffing: { ...DEFAULT_STAFFING } },
           { id: "q_verify", name: "Outbound \u2014 Verification", type: "outbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 240, staffing: { ...DEFAULT_STAFFING } },
@@ -2688,10 +2822,7 @@ var require_ops = __commonJS({
             groupId: "pg_billing",
             brandIds: ["b_acme"],
             buIds: ["bu_cs"],
-            processes: [{ channelId: "ch_voice", outcomes: ["completed"], steps: [
-              { queueId: "q_inbound", splitPct: 100 },
-              { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" }
-            ] }]
+            processIds: ["proc_billing_voice"]
           },
           {
             id: "rt_newcard",
@@ -2703,11 +2834,7 @@ var require_ops = __commonJS({
             ahtSec: 540,
             brandIds: ["b_acme"],
             buIds: ["bu_cs"],
-            processes: [{ channelId: "ch_digital", outcomes: ["completed", "rejected"], steps: [
-              { queueId: "q_apps", splitPct: 100 },
-              { queueId: "q_verify", splitPct: 60 },
-              { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" }
-            ] }]
+            processIds: ["proc_newcard_digital"]
           }
         ],
         volumeEntries: [
@@ -2755,6 +2882,17 @@ var require_ops = __commonJS({
       setChannelDefaults: setChannelDefaults2,
       withDefaultChannels,
       CHANNEL_NAMES,
+      setProductBrand: setProductBrand2,
+      createProcess: createProcess2,
+      updateProcessMeta: updateProcessMeta2,
+      deleteProcessById: deleteProcessById2,
+      processUsage: processUsage2,
+      attachProcess: attachProcess2,
+      detachProcess,
+      addProcessStep: addProcessStep2,
+      updateProcessStep: updateProcessStep2,
+      removeProcessStep: removeProcessStep2,
+      setProcessOutcomes: setProcessOutcomes2,
       addQueue: addQueue2,
       updateQueue: updateQueue2,
       updateQueueStaffing: updateQueueStaffing2,
@@ -2769,10 +2907,10 @@ var require_ops = __commonJS({
       deleteRequestType: deleteRequestType2,
       addProcess: addProcess2,
       deleteProcess: deleteProcess2,
-      addStep: addStep2,
-      updateStep: updateStep2,
-      removeStep: removeStep2,
-      setOutcomes: setOutcomes2,
+      addStep,
+      updateStep,
+      removeStep,
+      setOutcomes,
       setVolumeEntry: setVolumeEntry2,
       clearVolumeEntry: clearVolumeEntry2,
       blankDomainModel: blankDomainModel2,
@@ -3269,6 +3407,7 @@ var require_migrate_domain = __commonJS({
         return out2;
       });
       const processGroups = [];
+      const processes = [];
       const requestTypes = [];
       const volumeEntries = [];
       for (const s of v2.services || []) {
@@ -3290,6 +3429,8 @@ var require_migrate_domain = __commonJS({
           }
           return step;
         });
+        const procId = "proc_" + s.id;
+        processes.push({ id: procId, name: s.name, channelId: chIdOf(chKey), groupId: gId, outcomes: ["completed"], steps });
         const rt = {
           id: rtId,
           name: s.name,
@@ -3298,7 +3439,7 @@ var require_migrate_domain = __commonJS({
           groupId: gId,
           brandIds,
           buIds,
-          processes: [{ channelId: chIdOf(chKey), outcomes: ["completed"], steps }]
+          processIds: [procId]
         };
         if (s.ahtSec != null) rt.ahtSec = s.ahtSec;
         requestTypes.push(rt);
@@ -3310,7 +3451,7 @@ var require_migrate_domain = __commonJS({
           volumeEntries.push({ id: "ve_" + src.profileId + "_" + s.id, scope, daily: src.volume });
         }
       }
-      const out = { brands, businessUnits, channels, processGroups, products, queues, requestTypes, volumeEntries };
+      const out = { brands, businessUnits, channels, processGroups, products, processes, queues, requestTypes, volumeEntries };
       if (v2.engineConfig) out.engineConfig = v2.engineConfig;
       return out;
     }
@@ -3365,7 +3506,7 @@ var require_store_domain = __commonJS({
 // model/template-domain.js
 var require_template_domain = __commonJS({
   "model/template-domain.js"(exports, module) {
-    var SHEET_NAMES2 = ["Registry", "Queues", "Request types", "Steps", "Volume entries"];
+    var SHEET_NAMES2 = ["Registry", "Queues", "Request types", "Processes", "Steps", "Volume entries"];
     var WEEKS = 52;
     var blank = (v) => v === void 0 || v === null ? "" : v;
     var numOrU = (v) => v === "" || v == null ? void 0 : +v;
@@ -3379,6 +3520,8 @@ var require_template_domain = __commonJS({
         Id: e.id,
         Name: blank(e.name),
         Key: blank(e.key),
+        BrandId: blank(e.brandId),
+        // products may belong to one brand, or all when blank
         DefaultsJson: e.defaults ? JSON.stringify(e.defaults) : ""
       });
       for (const b of model.brands || []) reg("brand", b);
@@ -3405,26 +3548,33 @@ var require_template_domain = __commonJS({
         ProductId: blank(rt.productId),
         AhtSec: blank(rt.ahtSec),
         BrandIds: joinIds(rt.brandIds),
-        BuIds: joinIds(rt.buIds)
+        BuIds: joinIds(rt.buIds),
+        ProcessIds: joinIds(rt.processIds)
+      }));
+      const Processes = (model.processes || []).map((p) => ({
+        ProcessId: p.id,
+        Name: blank(p.name),
+        ChannelId: p.channelId,
+        GroupId: blank(p.groupId),
+        Outcomes: joinIds(p.outcomes)
       }));
       const Steps = [];
-      for (const rt of model.requestTypes || [])
-        for (const p of rt.processes || []) {
-          const head = { RequestTypeId: rt.id, ChannelId: p.channelId, ProcessOutcomes: joinIds(p.outcomes) };
-          if (!(p.steps || []).length) {
-            Steps.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "", Terminal: "", Outcome: "" });
-            continue;
-          }
-          p.steps.forEach((s, i) => Steps.push({
-            ...head,
-            StepOrder: i + 1,
-            QueueId: s.queueId,
-            SplitPct: s.splitPct,
-            SamplingPct: blank(s.samplingPct),
-            Terminal: s.terminal ? "yes" : "",
-            Outcome: blank(s.outcome)
-          }));
+      for (const p of model.processes || []) {
+        const head = { ProcessId: p.id };
+        if (!(p.steps || []).length) {
+          Steps.push({ ...head, StepOrder: "", QueueId: "", SplitPct: "", SamplingPct: "", Terminal: "", Outcome: "" });
+          continue;
         }
+        p.steps.forEach((s, i) => Steps.push({
+          ...head,
+          StepOrder: i + 1,
+          QueueId: s.queueId,
+          SplitPct: s.splitPct,
+          SamplingPct: blank(s.samplingPct),
+          Terminal: s.terminal ? "yes" : "",
+          Outcome: blank(s.outcome)
+        }));
+      }
       const Volume = (model.volumeEntries || []).map((e) => {
         const row = {
           EntryId: blank(e.id),
@@ -3437,16 +3587,18 @@ var require_template_domain = __commonJS({
         for (let w = 0; w < WEEKS; w++) row["W" + (w + 1)] = e.weekly ? blank(e.weekly[w]) : "";
         return row;
       });
-      return { Registry, Queues, "Request types": RT, Steps, "Volume entries": Volume };
+      return { Registry, Queues, "Request types": RT, Processes, Steps, "Volume entries": Volume };
     }
     function domainSheetsToModel2(sheets) {
-      const model = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+      const model = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], processes: [], queues: [], requestTypes: [], volumeEntries: [] };
       const listOf = { brand: "brands", businessUnit: "businessUnits", channel: "channels", processGroup: "processGroups", product: "products" };
       for (const r of sheets.Registry || []) {
         const list = model[listOf[r.Kind]];
         if (!list) continue;
         const e = { id: r.Id, name: r.Name };
         if (r.Key !== "" && r.Key != null) e.key = r.Key;
+        const rb = strOrU(r.BrandId);
+        if (rb) e.brandId = rb;
         if (r.DefaultsJson) e.defaults = JSON.parse(r.DefaultsJson);
         list.push(e);
       }
@@ -3470,7 +3622,7 @@ var require_template_domain = __commonJS({
           groupId: r.GroupId,
           brandIds: splitIds(r.BrandIds),
           buIds: splitIds(r.BuIds),
-          processes: []
+          processIds: splitIds(r.ProcessIds)
         };
         const pid = strOrU(r.ProductId);
         if (pid) rt.productId = pid;
@@ -3479,17 +3631,17 @@ var require_template_domain = __commonJS({
         rtById.set(rt.id, rt);
         model.requestTypes.push(rt);
       }
-      const procKey = (a, b) => a + "|" + b;
       const procs = /* @__PURE__ */ new Map();
+      for (const r of sheets.Processes || []) {
+        const p = { id: r.ProcessId, name: r.Name, channelId: r.ChannelId, outcomes: splitIds(r.Outcomes), steps: [] };
+        const g = strOrU(r.GroupId);
+        if (g) p.groupId = g;
+        procs.set(p.id, p);
+        model.processes.push(p);
+      }
       for (const r of sheets.Steps || []) {
-        const rt = rtById.get(r.RequestTypeId);
-        if (!rt) continue;
-        let p = procs.get(procKey(r.RequestTypeId, r.ChannelId));
-        if (!p) {
-          p = { channelId: r.ChannelId, outcomes: splitIds(r.ProcessOutcomes), steps: [] };
-          procs.set(procKey(r.RequestTypeId, r.ChannelId), p);
-          rt.processes.push(p);
-        }
+        const p = procs.get(r.ProcessId);
+        if (!p) continue;
         if (r.StepOrder !== "" && r.StepOrder != null && r.QueueId) {
           const s = { queueId: r.QueueId, splitPct: +r.SplitPct };
           const samp = numOrU(r.SamplingPct);
@@ -3996,6 +4148,9 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   border:0.5px solid var(--line); border-radius:999px; padding:1px 8px; white-space:nowrap}
 .drwhead .chev{font-size:8px; color:var(--ink-3); transition:transform 0.12s}
 .drw.open>.drwhead .chev{transform:rotate(180deg)}
+.usagenote{cursor:help; border-bottom:0.5px dotted var(--line)}
+.usage-none{opacity:0.75; font-style:italic}
+.prodbrand{font-size:11.5px; padding:3px 7px; border:0.5px solid var(--line); border-radius:7px; background:#fff; font-family:inherit}
 .info{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none;
   border-radius:50%; border:0.5px solid var(--line); background:var(--canvas); color:var(--ink-3);
   font-size:9.5px; font-weight:700; cursor:help; margin-left:6px; vertical-align:1px}
@@ -4232,8 +4387,9 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var fmt = (n) => n == null || isNaN(n) ? "\u2014" : Math.round(n).toLocaleString("en-GB");
 var NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
 var SETUP_TABS = [
-  ["structure", "Structure", "Set up the vocabulary of the estate \u2014 the brands, business units, channels, groups and products that everything else refers to. Nothing is wired together here; that happens in Request types."],
+  ["structure", "Structure", "The vocabulary of the estate \u2014 brands, business units, channels and products. Each shows what it is used for, so you can see the shape of the estate at a glance. Products belong to a brand, or to all of them."],
   ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes \u2014 they are never entered here. Tap a queue to open its editor."],
+  ["processes", "Processes", "The journeys work can take, defined once and reused. A process is a channel-specific route through your queues, ending in a declared outcome \u2014 attach the same one to as many request types as need it. Process groups are managed here."],
   ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together \u2014 one process per channel, ending in a declared outcome."],
   ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
   ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here \u2014 it redraws from the model, and lists anything that does not hang together."],
@@ -4242,6 +4398,10 @@ var SETUP_TABS = [
 function computeStatus(model, p) {
   const nBrands = (model.brands || []).length, nBus = (model.businessUnits || []).length, nChans = (model.channels || []).length, nQ = (model.queues || []).length, nRt = (model.requestTypes || []).length, nVe = (model.volumeEntries || []).length;
   const errs = p.validation.errors, warns = p.validation.warnings;
+  const nProc = (model.processes || []).length;
+  const procBad = (model.processes || []).filter(
+    (pr) => !(pr.steps || []).length || !(pr.steps || []).some((st) => st.terminal)
+  ).length;
   const structOk = nBrands > 0 && nBus > 0 && nChans > 0;
   const rtErrs = errs.length;
   const uncovered = warns.filter((w) => w.kind === "uncovered_volume").length;
@@ -4257,6 +4417,12 @@ function computeStatus(model, p) {
       ok: nQ > 0,
       badge: `${nQ} queue${nQ === 1 ? "" : "s"}`,
       next: "Add the queues work actually lands on."
+    },
+    {
+      key: "processes",
+      ok: nProc > 0 && procBad === 0,
+      badge: procBad ? `${procBad} incomplete` : `${nProc} process${nProc === 1 ? "" : "es"}`,
+      next: nProc === 0 ? "Define the journeys work can take." : "Finish the processes that do not reach an end point."
     },
     {
       key: "requestTypes",
@@ -4390,6 +4556,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       /* @__PURE__ */ jsx("p", { className: "tabnote", "data-testid": "tab-note", children: (SETUP_TABS.find(([k]) => k === tab) || [])[2] }),
       tab === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
       tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
+      tab === "processes" && /* @__PURE__ */ jsx(ProcessesPanel, { model, set: onModelChange, p }),
       tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
       tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
       tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
@@ -4451,6 +4618,28 @@ function guardSummary(guard) {
     return `${n} ${n === 1 ? one : many}`;
   }).join(" \xB7 ");
 }
+function usageOf(model, kind, id) {
+  const rts = (model.requestTypes || []).filter((rt) => {
+    if (kind === "brand") return (rt.brandIds || []).length ? rt.brandIds.includes(id) : true;
+    if (kind === "bu") return (rt.buIds || []).length ? rt.buIds.includes(id) : true;
+    if (kind === "channel") return (0, import_domain.processesOf)(model, rt).some((pr) => pr.channelId === id);
+    if (kind === "product") return rt.productId === id;
+    return false;
+  });
+  return rts.map((rt) => rt.name);
+}
+function UsageNote({ names, none }) {
+  if (!names.length) return /* @__PURE__ */ jsx("span", { className: "hint usage-none", children: none });
+  const shown = names.slice(0, 3).join(", ");
+  return /* @__PURE__ */ jsxs("span", { className: "hint usagenote", title: names.join(", "), children: [
+    names.length,
+    " request type",
+    names.length === 1 ? "" : "s",
+    ": ",
+    shown,
+    names.length > 3 ? ` +${names.length - 3}` : ""
+  ] });
+}
 function RegRow({ entity, onRename, guard, onDelete, extra, children }) {
   return /* @__PURE__ */ jsxs("div", { className: "regrow", children: [
     /* @__PURE__ */ jsxs("div", { className: "regmain", children: [
@@ -4502,6 +4691,7 @@ function ChannelRow({ model, c, set }) {
       onDelete: () => set(Ops.deleteChannel(model, c.id)),
       extra: /* @__PURE__ */ jsxs(Fragment, { children: [
         /* @__PURE__ */ jsx("span", { className: "tax", children: CHANNEL_LABELS[c.key] || "custom" }),
+        /* @__PURE__ */ jsx(UsageNote, { names: usageOf(model, "channel", c.id), none: "not used yet" }),
         /* @__PURE__ */ jsxs("button", { className: "linkbtn", onClick: () => setOpen(!open), "aria-expanded": open, children: [
           "defaults",
           Object.keys(d).length ? " \u25CF" : "",
@@ -4555,12 +4745,35 @@ function StructurePanel({ model, set }) {
   const plain = [
     ["Brands", "brands", Ops.addBrand, Ops.renameBrand, Ops.deleteBrand, import_domain.canDeleteBrand, "New brand", "+ Brand"],
     ["Business units", "businessUnits", Ops.addBusinessUnit, Ops.renameBusinessUnit, Ops.deleteBusinessUnit, import_domain.canDeleteBU, "New business unit", "+ Business unit"],
-    ["Process groups", "processGroups", Ops.addProcessGroup, Ops.renameProcessGroup, Ops.deleteProcessGroup, import_domain.canDeleteGroup, "New group", "+ Group"],
     ["Products", "products", Ops.addProduct, Ops.renameProduct, Ops.deleteProduct, import_domain.canDeleteProduct, "New product", "+ Product"]
   ];
+  const USAGE_KIND = { brands: "brand", businessUnits: "bu", products: "product" };
+  const extraFor = (key, e) => {
+    const bits = [];
+    if (key === "products") {
+      bits.push(
+        /* @__PURE__ */ jsxs(
+          "select",
+          {
+            className: "prodbrand",
+            value: e.brandId || "",
+            "aria-label": "Brand for " + e.name,
+            onChange: (ev) => set(Ops.setProductBrand(model, e.id, ev.target.value)),
+            children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "All brands" }),
+              (model.brands || []).map((b) => /* @__PURE__ */ jsx("option", { value: b.id, children: b.name }, b.id))
+            ]
+          },
+          "brand"
+        )
+      );
+    }
+    if (USAGE_KIND[key]) bits.push(/* @__PURE__ */ jsx(UsageNote, { names: usageOf(model, USAGE_KIND[key], e.id), none: "not used yet" }, "u"));
+    return bits;
+  };
   const enabledKeys = new Set((model.channels || []).map((c) => c.key));
   const offKeys = import_taxonomy2.CHANNELS.filter((k) => !enabledKeys.has(k));
-  const [brandsL, busL, groupsL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => /* @__PURE__ */ jsx(
+  const [brandsL, busL, prodsL] = plain.map(([title, key, add, rename, del, guard, seed, addLabel]) => /* @__PURE__ */ jsx(
     RegistryList,
     {
       title,
@@ -4575,7 +4788,8 @@ function StructurePanel({ model, set }) {
           entity: e,
           onRename: (name) => set(rename(model, e.id, name)),
           guard: guard(model, e.id),
-          onDelete: () => set(del(model, e.id))
+          onDelete: () => set(del(model, e.id)),
+          extra: extraFor(key, e)
         },
         e.id
       )
@@ -4591,7 +4805,6 @@ function StructurePanel({ model, set }) {
       brandsL,
       busL,
       /* @__PURE__ */ jsx(ChannelList, { model, set }),
-      groupsL,
       prodsL
     ] })
   ] });
@@ -5017,6 +5230,129 @@ function QueuesPanel({ model, set, p }) {
     ] }) : null })
   ] });
 }
+function ProcessesPanel({ model, set, p }) {
+  const procs = model.processes || [];
+  const [sel, setSel] = useState(null);
+  const proc = sel ? procs.find((x) => x.id === sel) : null;
+  const close = () => setSel(null);
+  const detailRef = useRevealOnSelect(sel);
+  const groups = model.processGroups || [];
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Processes ",
+      /* @__PURE__ */ jsx("small", { children: "defined once, attached to any request type" })
+    ] }),
+    /* @__PURE__ */ jsxs(
+      Drawer,
+      {
+        title: "Process groups",
+        count: groups.length,
+        defaultOpen: false,
+        info: "A way of reporting on similar processes together. The double-cover warning is scoped to a group: two request types in the same group covering the same brand, BU and channel is flagged.",
+        children: [
+          groups.length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "none yet" }) : groups.map((g) => /* @__PURE__ */ jsx(
+            RegRow,
+            {
+              entity: g,
+              onRename: (name) => set(Ops.renameProcessGroup(model, g.id, name)),
+              guard: (0, import_domain.canDeleteGroup)(model, g.id),
+              onDelete: () => set(Ops.deleteProcessGroup(model, g.id))
+            },
+            g.id
+          )),
+          /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(Ops.addProcessGroup(model, { name: "New group" })), children: "+ Group" }) })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxs(
+      Drawer,
+      {
+        title: "Processes",
+        count: procs.length,
+        defaultOpen: true,
+        info: "Each process is one specific journey on one channel. Steps route a percentage of what reaches them to a queue; the step marked Ends declares the outcome. Reuse is the point \u2014 the same process can serve many request types.",
+        children: [
+          procs.length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "No processes yet \u2014 add one, then attach it to a request type." }) : null,
+          /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Processes", children: procs.map((x) => {
+            const u = Ops.processUsage(model, x.id);
+            const bad = !(x.steps || []).length || !(x.steps || []).some((st) => st.terminal);
+            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": sel === x.id, className: sel === x.id ? "on" : "", onClick: () => setSel(x.id), children: [
+              /* @__PURE__ */ jsxs("b", { children: [
+                x.name,
+                " ",
+                /* @__PURE__ */ jsx("span", { className: "glyph " + (bad ? "err" : "ok"), children: bad ? "\u2715" : "\u25CF" })
+              ] }),
+              /* @__PURE__ */ jsxs("small", { children: [
+                nameOf(model.channels, x.channelId),
+                x.groupId ? " \xB7 " + nameOf(groups, x.groupId) : "",
+                " \xB7 ",
+                (x.steps || []).length,
+                " step",
+                (x.steps || []).length === 1 ? "" : "s"
+              ] }),
+              /* @__PURE__ */ jsx("span", { className: "qstats", children: u.requestTypes ? `used by ${u.requestTypes} request type${u.requestTypes === 1 ? "" : "s"}` : "not attached yet" })
+            ] }, x.id);
+          }) }),
+          /* @__PURE__ */ jsx("div", { style: { marginTop: 8 }, children: /* @__PURE__ */ jsx("button", { className: "btn sm", disabled: !(model.channels || []).length, onClick: () => {
+            const m2 = Ops.createProcess(model, { name: "New process", channelId: model.channels[0].id });
+            set(m2);
+            setSel(m2.processes[m2.processes.length - 1].id);
+          }, children: "+ Process" }) })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsx("div", { className: "scrim" + (proc ? " on" : ""), onClick: close }),
+    /* @__PURE__ */ jsx("aside", { className: "drawer" + (proc ? " on" : ""), "aria-label": "Edit process", "aria-hidden": !proc, children: proc ? /* @__PURE__ */ jsx(ProcessDetail, { model, set, proc, detailRef, onClosed: close }) : null })
+  ] });
+}
+function ProcessDetail({ model, set, proc, detailRef, onClosed }) {
+  const u = Ops.processUsage(model, proc.id);
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsxs("div", { className: "dhead", children: [
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("h3", { children: proc.name }),
+        /* @__PURE__ */ jsxs("p", { children: [
+          nameOf(model.channels, proc.channelId),
+          " \xB7 ",
+          u.requestTypes ? `used by ${u.names.join(", ")}` : "not attached to any request type"
+        ] })
+      ] }),
+      /* @__PURE__ */ jsx("button", { className: "close", onClick: onClosed, "aria-label": "Close", children: "\u2715" })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "dbody", "data-testid": "process-detail", ref: detailRef, tabIndex: -1, children: [
+      u.requestTypes > 1 ? /* @__PURE__ */ jsxs("p", { className: "warnmsg", children: [
+        "\u25B2 Shared by ",
+        u.requestTypes,
+        " request types \u2014 an edit here changes all of them."
+      ] }) : null,
+      /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+        /* @__PURE__ */ jsxs("div", { className: "field", children: [
+          /* @__PURE__ */ jsx("label", { children: "Name" }),
+          /* @__PURE__ */ jsx("input", { value: proc.name, "aria-label": "Process name", onChange: (e) => set(Ops.updateProcessMeta(model, proc.id, { name: e.target.value })) })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "field", children: [
+          /* @__PURE__ */ jsx("label", { children: "Channel" }),
+          /* @__PURE__ */ jsx("select", { value: proc.channelId, "aria-label": "Process channel", onChange: (e) => set(Ops.updateProcessMeta(model, proc.id, { channelId: e.target.value })), children: (model.channels || []).map((c) => /* @__PURE__ */ jsx("option", { value: c.id, children: c.name }, c.id)) })
+        ] }),
+        /* @__PURE__ */ jsxs("div", { className: "field", children: [
+          /* @__PURE__ */ jsx("label", { children: "Process group" }),
+          /* @__PURE__ */ jsxs("select", { value: proc.groupId || "", "aria-label": "Process group", onChange: (e) => set(Ops.updateProcessMeta(model, proc.id, { groupId: e.target.value || void 0 })), children: [
+            /* @__PURE__ */ jsx("option", { value: "", children: "\u2014 none" }),
+            (model.processGroups || []).map((g) => /* @__PURE__ */ jsx("option", { value: g.id, children: g.name }, g.id))
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsx(ProcessSteps, { model, set, proc }),
+      /* @__PURE__ */ jsx("div", { style: { marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: /* @__PURE__ */ jsxs("button", { className: "btn sm danger", onClick: () => {
+        set(Ops.deleteProcessById(model, proc.id));
+        onClosed && onClosed();
+      }, children: [
+        "Delete process",
+        u.requestTypes ? ` (detaches from ${u.requestTypes})` : ""
+      ] }) })
+    ] })
+  ] });
+}
 var fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
 function ToggleChips({ label, options, selected, onToggle, allLabel }) {
   return /* @__PURE__ */ jsxs("div", { className: "field", children: [
@@ -5039,50 +5375,16 @@ function ToggleChips({ label, options, selected, onToggle, allLabel }) {
     ] })
   ] });
 }
-function ProcessEditor({ model, set, rt, proc }) {
+function ProcessSteps({ model, set, proc }) {
   const [newOutcome, setNewOutcome] = useState("");
-  const [armed, setArmed] = useState(false);
-  const chName = nameOf(model.channels, proc.channelId);
-  const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
+  const upd = (i, patch) => set(Ops.updateProcessStep(model, proc.id, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
   const hasGov = (proc.steps || []).some((s) => {
     const q = (model.queues || []).find((x) => x.id === s.queueId);
     return q && q.type === "governance";
   });
-  const remove = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
-  const needsConfirm = (proc.steps || []).length > 0;
-  return /* @__PURE__ */ jsxs("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
-    /* @__PURE__ */ jsxs("div", { className: "prochead", children: [
-      /* @__PURE__ */ jsx("span", { className: "chip on-toggle", children: chName }),
-      armed ? /* @__PURE__ */ jsxs(
-        "button",
-        {
-          className: "btn sm danger",
-          style: { marginLeft: "auto" },
-          "aria-label": "Remove " + chName + " process",
-          onBlur: () => setArmed(false),
-          onKeyDown: (e) => {
-            if (e.key === "Escape") setArmed(false);
-          },
-          onClick: remove,
-          children: [
-            "Remove ",
-            (proc.steps || []).length,
-            " step",
-            (proc.steps || []).length === 1 ? "" : "s",
-            "?"
-          ]
-        }
-      ) : /* @__PURE__ */ jsx(
-        "button",
-        {
-          className: "regdel",
-          "aria-label": "Remove " + chName + " process",
-          onClick: () => needsConfirm ? setArmed(true) : remove(),
-          children: "\u2715"
-        }
-      )
-    ] }),
+  const pid = proc.id;
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
     (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : /* @__PURE__ */ jsxs("div", { className: "steps" + (hasGov ? " with-sample" : ""), children: [
       /* @__PURE__ */ jsxs("div", { className: "steprow head", children: [
         /* @__PURE__ */ jsx("span", { children: "Step" }),
@@ -5100,8 +5402,8 @@ function ProcessEditor({ model, set, rt, proc }) {
         const reworkTitle = p01 > 0 && p01 < 1 ? `Routes ${s.splitPct}% of what reaches it. If this branch is rework, repeated rounds compound to an effective ${fmtPct(p01 / (1 - p01) * 100)}%.` : void 0;
         return /* @__PURE__ */ jsxs("div", { className: "steprow", children: [
           /* @__PURE__ */ jsx("span", { className: "stepno", children: i === 0 ? "entry" : i + 1 }),
-          /* @__PURE__ */ jsx("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx("option", { value: x.id, children: x.name }, x.id)) }),
-          /* @__PURE__ */ jsx("input", { className: "num", value: s.splitPct, title: reworkTitle, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} split percent` }),
+          /* @__PURE__ */ jsx("select", { value: s.queueId, onChange: (e) => upd(i, { queueId: e.target.value }), "aria-label": `${pid} step ${i + 1} queue`, children: (model.queues || []).map((x) => /* @__PURE__ */ jsx("option", { value: x.id, children: x.name }, x.id)) }),
+          /* @__PURE__ */ jsx("input", { className: "num", value: s.splitPct, title: reworkTitle, onChange: (e) => upd(i, { splitPct: +e.target.value || 0 }), "aria-label": `${pid} step ${i + 1} split percent` }),
           hasGov ? gov ? /* @__PURE__ */ jsx(
             "input",
             {
@@ -5109,15 +5411,15 @@ function ProcessEditor({ model, set, rt, proc }) {
               value: s.samplingPct != null ? s.samplingPct : "",
               placeholder: "\u2014",
               onChange: (e) => upd(i, { samplingPct: e.target.value === "" ? void 0 : +e.target.value }),
-              "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} sampling percent`
+              "aria-label": `${pid} step ${i + 1} sampling percent`
             }
           ) : /* @__PURE__ */ jsx("span", { className: "stepdash", children: "\u2014" }) : null,
-          /* @__PURE__ */ jsx("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} terminal` }),
-          s.terminal ? /* @__PURE__ */ jsxs("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${rt.id} ${proc.channelId} step ${i + 1} outcome`, children: [
+          /* @__PURE__ */ jsx("input", { type: "checkbox", checked: !!s.terminal, onChange: (e) => upd(i, { terminal: e.target.checked ? true : false }), "aria-label": `${pid} step ${i + 1} terminal` }),
+          s.terminal ? /* @__PURE__ */ jsxs("select", { value: s.outcome || "", onChange: (e) => upd(i, { outcome: e.target.value || void 0 }), "aria-label": `${pid} step ${i + 1} outcome`, children: [
             /* @__PURE__ */ jsx("option", { value: "", children: "outcome\u2026" }),
             (proc.outcomes || []).map((o) => /* @__PURE__ */ jsx("option", { value: o, children: o }, o))
           ] }) : /* @__PURE__ */ jsx("span", { className: "stepdash", children: "\u2014" }),
-          /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => set(Ops.removeStep(model, rt.id, proc.channelId, i)), "aria-label": `${rt.id} ${proc.channelId} remove step ${i + 1}`, children: "\u2715" })
+          /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => set(Ops.removeProcessStep(model, proc.id, i)), "aria-label": `${pid} remove step ${i + 1}`, children: "\u2715" })
         ] }, i);
       })
     ] }),
@@ -5128,7 +5430,7 @@ function ProcessEditor({ model, set, rt, proc }) {
         {
           className: "btn sm",
           disabled: !(model.queues || []).length,
-          onClick: () => set(Ops.addStep(model, rt.id, proc.channelId, { queueId: model.queues[0].id })),
+          onClick: () => set(Ops.addProcessStep(model, proc.id, { queueId: model.queues[0].id })),
           children: "+ Step"
         }
       ),
@@ -5137,16 +5439,93 @@ function ProcessEditor({ model, set, rt, proc }) {
         const used = (proc.steps || []).some((s) => s.outcome === o);
         return /* @__PURE__ */ jsxs("span", { className: "chip", children: [
           o,
-          used ? /* @__PURE__ */ jsx("small", { title: "Referenced by a terminal step", children: " \xB7in use" }) : /* @__PURE__ */ jsx("button", { className: "chipx", onClick: () => set(Ops.setOutcomes(model, rt.id, proc.channelId, proc.outcomes.filter((x) => x !== o))), "aria-label": "Remove outcome " + o, children: "\u2715" })
+          used ? /* @__PURE__ */ jsx("small", { title: "Referenced by a terminal step", children: " \xB7in use" }) : /* @__PURE__ */ jsx("button", { className: "chipx", onClick: () => set(Ops.setProcessOutcomes(model, proc.id, proc.outcomes.filter((x) => x !== o))), "aria-label": "Remove outcome " + o, children: "\u2715" })
         ] }, o);
       }),
-      /* @__PURE__ */ jsx("input", { className: "outin", placeholder: "add outcome\u2026", value: newOutcome, onChange: (e) => setNewOutcome(e.target.value), "aria-label": `${rt.id} ${proc.channelId} new outcome` }),
+      /* @__PURE__ */ jsx("input", { className: "outin", placeholder: "add outcome\u2026", value: newOutcome, onChange: (e) => setNewOutcome(e.target.value), "aria-label": `${pid} new outcome` }),
       /* @__PURE__ */ jsx("button", { className: "btn sm", disabled: !newOutcome.trim(), onClick: () => {
         const o = newOutcome.trim();
-        if (o && !(proc.outcomes || []).includes(o)) set(Ops.setOutcomes(model, rt.id, proc.channelId, [...proc.outcomes || [], o]));
+        if (o && !(proc.outcomes || []).includes(o)) set(Ops.setProcessOutcomes(model, proc.id, [...proc.outcomes || [], o]));
         setNewOutcome("");
       }, children: "Add" })
     ] })
+  ] });
+}
+function ProcessEditor({ model, set, rt, proc }) {
+  const [armed, setArmed] = useState(false);
+  const chName = nameOf(model.channels, proc.channelId);
+  const usage = proc.id ? Ops.processUsage(model, proc.id) : { requestTypes: 1 };
+  const detach = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
+  const needsConfirm = (proc.steps || []).length > 0;
+  return /* @__PURE__ */ jsxs("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
+    /* @__PURE__ */ jsxs("div", { className: "prochead", children: [
+      /* @__PURE__ */ jsx("span", { className: "chip on-toggle", children: chName }),
+      /* @__PURE__ */ jsxs("span", { className: "hint", children: [
+        proc.name,
+        usage.requestTypes > 1 ? ` \xB7 shared with ${usage.requestTypes - 1} other request type${usage.requestTypes === 2 ? "" : "s"}` : ""
+      ] }),
+      armed ? /* @__PURE__ */ jsxs(
+        "button",
+        {
+          className: "btn sm danger",
+          style: { marginLeft: "auto" },
+          "aria-label": "Remove " + chName + " process",
+          onBlur: () => setArmed(false),
+          onKeyDown: (e) => {
+            if (e.key === "Escape") setArmed(false);
+          },
+          onClick: detach,
+          children: [
+            "Remove ",
+            (proc.steps || []).length,
+            " step",
+            (proc.steps || []).length === 1 ? "" : "s",
+            "?"
+          ]
+        }
+      ) : /* @__PURE__ */ jsx(
+        "button",
+        {
+          className: "regdel",
+          "aria-label": "Remove " + chName + " process",
+          onClick: () => needsConfirm ? setArmed(true) : detach(),
+          children: "\u2715"
+        }
+      )
+    ] }),
+    usage.requestTypes > 1 ? /* @__PURE__ */ jsx("p", { className: "hint", style: { marginBottom: 4 }, children: "Editing these steps changes every request type that uses this process." }) : null,
+    /* @__PURE__ */ jsx(ProcessSteps, { model, set, proc })
+  ] });
+}
+function AttachProcess({ model, set, rt, offChannels }) {
+  const taken = new Set((0, import_domain.processesOf)(model, rt).map((x) => x.channelId));
+  const available = (model.processes || []).filter(
+    (x) => !(rt.processIds || []).includes(x.id) && !taken.has(x.channelId)
+  );
+  const [pick, setPick] = useState("");
+  return /* @__PURE__ */ jsxs("div", { style: { marginTop: 8 }, children: [
+    available.length ? /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }, children: [
+      /* @__PURE__ */ jsx("span", { className: "hint", children: "Reuse an existing process:" }),
+      /* @__PURE__ */ jsxs("select", { value: pick, "aria-label": "Attach an existing process", onChange: (e) => setPick(e.target.value), children: [
+        /* @__PURE__ */ jsx("option", { value: "", children: "choose\u2026" }),
+        available.map((x) => /* @__PURE__ */ jsxs("option", { value: x.id, children: [
+          x.name,
+          " \u2014 ",
+          nameOf(model.channels, x.channelId)
+        ] }, x.id))
+      ] }),
+      /* @__PURE__ */ jsx("button", { className: "btn sm", disabled: !pick, onClick: () => {
+        set(Ops.attachProcess(model, rt.id, pick));
+        setPick("");
+      }, children: "Attach" })
+    ] }) : null,
+    offChannels.length ? /* @__PURE__ */ jsxs("div", { className: "regoff", children: [
+      /* @__PURE__ */ jsx("span", { className: "hint", style: { alignSelf: "center" }, children: "or start a new one:" }),
+      offChannels.map((c) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
+        "+ ",
+        c.name
+      ] }, c.id))
+    ] }) : null
   ] });
 }
 function RequestTypesPanel({ model, set, p }) {
@@ -5161,7 +5540,7 @@ function RequestTypesPanel({ model, set, p }) {
     const u = (x.buIds || []).length ? x.buIds.map((i) => nameOf(model.businessUnits, i)).join(", ") : "all BUs";
     return b + " \xB7 " + u;
   };
-  const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
+  const offChannels = rt ? (model.channels || []).filter((c) => !(0, import_domain.processesOf)(model, rt).some((pr) => pr.channelId === c.id)) : [];
   const guard = rt ? (0, import_domain.canDeleteRequestType)(model, rt.id) : { ok: true, blockedBy: [] };
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs("h3", { children: [
@@ -5185,7 +5564,7 @@ function RequestTypesPanel({ model, set, p }) {
               " \xB7 ",
               assignLine(x)
             ] }),
-            /* @__PURE__ */ jsx("small", { children: (x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
+            /* @__PURE__ */ jsx("small", { children: (0, import_domain.processesOf)(model, x).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
           ] }, x.id);
         }) }),
         /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginTop: 4 }, onClick: () => {
@@ -5293,11 +5672,8 @@ function RequestTypesPanel({ model, set, p }) {
             defaultOpen: true,
             info: "The journey this request takes, per channel. Each step routes a percentage of what reaches it to a queue; a step marked Ends declares the outcome. A branch under 100% doubles as rework \u2014 hover the split to see the multi-round effective rate.",
             children: [
-              (rt.processes || []).map((pr) => /* @__PURE__ */ jsx(ProcessEditor, { model, set, rt, proc: pr }, pr.channelId)),
-              offChannels.length ? /* @__PURE__ */ jsx("div", { className: "regoff", children: offChannels.map((c) => /* @__PURE__ */ jsxs("button", { className: "chip off", onClick: () => set(Ops.addProcess(model, rt.id, c.id)), "aria-label": "Add " + c.name + " process", children: [
-                "+ ",
-                c.name
-              ] }, c.id)) }) : null
+              (0, import_domain.processesOf)(model, rt).map((pr) => /* @__PURE__ */ jsx(ProcessEditor, { model, set, rt, proc: pr }, pr.id || pr.channelId)),
+              /* @__PURE__ */ jsx(AttachProcess, { model, set, rt, offChannels })
             ]
           }
         ),
@@ -5493,7 +5869,7 @@ var trunc = (s, n = 22) => s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 function buildMap(model, p) {
   const depth = /* @__PURE__ */ new Map();
   for (const rt of model.requestTypes || [])
-    for (const proc of rt.processes || [])
+    for (const proc of (0, import_domain.processesOf)(model, rt))
       proc.steps.forEach((s, i) => {
         if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
       });
@@ -5510,7 +5886,7 @@ function buildMap(model, p) {
   teams.forEach((tm, i) => pos.set("team:" + tm.id, { x: 20 + i * COL_W, y: teamY }));
   const flow = [], seenF = /* @__PURE__ */ new Set();
   for (const rt of model.requestTypes || [])
-    for (const proc of rt.processes || [])
+    for (const proc of (0, import_domain.processesOf)(model, rt))
       for (let i = 0; i + 1 < proc.steps.length; i++) {
         const s = proc.steps[i + 1];
         const label = s.splitPct + "%" + (s.samplingPct != null ? " \xB7 sample " + s.samplingPct + "%" : "");

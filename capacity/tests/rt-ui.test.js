@@ -131,28 +131,28 @@ await t("the p/(1−p) multi-round rework figure rides the split field's tooltip
 
 await t("terminal + outcome: unticking 'ends' flags V3 live; reticking clears it", () => {
   click(rtRow("Billing enquiry"));
-  const ends = byLabel(/rt_billing ch_voice step 2 terminal/);
+  const ends = byLabel(/proc_billing_voice step 2 terminal/);
   toggle(ends); // off
   ok(/leads nowhere/.test(detail().textContent), "inline V3 error");
   ok(/✕/.test(rtRow("Billing enquiry").textContent), "error glyph in the master list");
   ok(subtab("Request types").textContent.includes("▲"), "tab marker shows the error");
-  toggle(byLabel(/rt_billing ch_voice step 2 terminal/)); // on again
-  setV(byLabel(/rt_billing ch_voice step 2 outcome/), "completed");
+  toggle(byLabel(/proc_billing_voice step 2 terminal/)); // on again
+  setV(byLabel(/proc_billing_voice step 2 outcome/), "completed");
   ok(!/leads nowhere/.test(detail().textContent), "V3 clears");
   ok(/●/.test(rtRow("Billing enquiry").textContent), "row back to valid");
 });
 
 await t("outcome chips: add one, use it on a terminal step, removal then blocks", () => {
   click(rtRow("New card application"));
-  setV(byLabel(/rt_newcard ch_digital new outcome/), "escalated");
+  setV(byLabel(/proc_newcard_digital new outcome/), "escalated");
   click($$(".btn", detail()).find((b) => b.textContent === "Add"));
-  const outSel = byLabel(/rt_newcard ch_digital step 3 outcome/);
+  const outSel = byLabel(/proc_newcard_digital step 3 outcome/);
   ok([...outSel.options].some((o) => o.value === "escalated"), "new outcome offered on terminal steps");
   ok($$(".chip", detail()).some((c) => /escalated/.test(c.textContent) && c.querySelector(".chipx")), "unused outcome removable");
   setV(outSel, "escalated");
   const chip = $$(".chip", detail()).find((c) => /escalated/.test(c.textContent));
   ok(!chip.querySelector(".chipx") && /in use/.test(chip.textContent), "outcome in use is not removable");
-  setV(byLabel(/rt_newcard ch_digital step 3 outcome/), "completed");
+  setV(byLabel(/proc_newcard_digital step 3 outcome/), "completed");
 });
 
 await t("channel picker: adding a Voice process to the card journey, then removing it", () => {

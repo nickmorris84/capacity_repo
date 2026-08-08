@@ -190,6 +190,10 @@ not vocabulary.
 | — | Volume | cascade of §6 |
 | **v1.1** | **Registry shape** | **flat — five independent lists, no interlinks; the request type is the only linking surface.** Supersedes P1/P2 (v1.0 had groups under BUs, products under brands); a group may now span BUs — the double-cover check is unaffected. |
 | v1.1 | Queue setup surface | own tab (weight + cadence), conceptually part of the registry |
+| **v1.3** | **Processes are SHARED entities** | **a process is defined once in its own registry (`model.processes`) and referenced by request types (`rt.processIds`); the same process can serve many request types.** Supersedes v1.0–v1.2, where a process was embedded inside its request type. A process still belongs to exactly one channel, and a request type still has at most one process per channel — so the cascade spine (brand → BU → request type → channel) is unchanged, and editing a shared process moves the derived volume for every request type that uses it |
+| v1.3 | Process groups | move to the Processes tab (they classify processes, not request types) |
+| v1.3 | Products | gain an optional `brandId` — a product belongs to one brand, or to all when unset. The first deliberate interlink in the registry |
+| v1.3 | Structure tab | becomes a usage view: each brand, BU, channel and product names the request types that rely on it |
 | **v1.2** | **Interactions** | **live in processes** — contact flow incl. knock-ons (rework, converts-to, redial, spill) is routing, expressed as process steps; no separate interaction entity. Capacity-sharing (supports/pools) stays queue staffing physics |
 | v1.2 | Map | a **pure derived artefact** — generated from processes + staffing links; nothing authored on it |
 
