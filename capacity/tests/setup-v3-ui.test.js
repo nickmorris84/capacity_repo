@@ -70,21 +70,23 @@ await t("tab navigation switches panels (Structure → Queues → Map)", () => {
   ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "Map validation clean for the sample");
 });
 
-await t("Queues is a master–detail scaffold with DERIVED volume/AHT and blast radius", () => {
+await t("Queues master–detail: grouped rows with DERIVED stats and a six-family editor", () => {
   click(subtab("Queues"));
   const rows = $$(".mdlist button");
-  eq(rows.length, 4, "four sample queues listed");
+  ok(rows.length >= 4, "queue rows listed (plus any shared teams)");
   const inbound = rows.find((r) => /Inbound — Billing/.test(r.textContent));
   ok(/2,398\/day/.test(inbound.textContent.replace(/\s+/g, " ")), "derived 2,398/day on the row: " + inbound.textContent);
   click(inbound);
   const det = $('[data-testid="queue-detail"]');
   ok(/Inbound — Billing/.test($("h4", det).textContent), "detail shows the selected queue");
-  ok(/2,398/.test(det.textContent), "derived volume in detail");
-  ok(/Used in 1 process across 1 brand/.test(det.textContent), "blast radius line: " + det.textContent.slice(-160));
+  ok(/2,398\/day/.test(det.textContent), "derived strip in detail");
+  ok(/used in 1 process across 1 brand/.test(det.textContent), "blast radius line");
+  ok(!$$("input", det).some((i) => /2,?398/.test(i.value)), "derived volume is never an input");
+  const fams = $$(".famhead b", det).map((b) => b.textContent);
+  eq(fams.join("|"), "Inputs|Performance|Efficiency|Workforce|Customer|Outputs", "six KPI families");
   const apps = rows.find((r) => /Case — Applications/.test(r.textContent));
   click(apps);
   ok(/Case — Applications/.test($("h4", $('[data-testid="queue-detail"]')).textContent), "selection moves the detail pane");
-  eq($$(".mddetail input").length, 0, "read-only scaffold — no inputs");
 });
 
 await t("Request types is a master–detail editor: rows, assignment, step wiring", () => {

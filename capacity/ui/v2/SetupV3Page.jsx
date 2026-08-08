@@ -12,10 +12,12 @@
  */
 import { useState, useMemo } from "react";
 import { propagateDomain } from "../../model/propagate.js";
-import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType } from "../../model/domain.js";
+import { queueUsage, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
 import { CHANNELS } from "../../model/taxonomy.js";
+import { engineTypeOf, engineQueueDefaults } from "../../model/bridge.js";
 import * as Ops from "../../model/ops.js";
-import { QTYPE_LABELS, CHANNEL_LABELS, ACTIVITIES, ACTIVITY_LABELS } from "./model.js";
+import { QTYPE_LABELS, CHANNEL_LABELS, ACTIVITIES, ACTIVITY_LABELS, QUEUE_TYPES } from "./model.js";
+import { FAMILY_COLORS } from "./tokens.js";
 
 const fmt = (n) => (n == null || isNaN(n) ? "—" : Math.round(n).toLocaleString("en-GB"));
 const NAV = [["home", "Home"], ["setup", "Setup"], ["levers", "Levers"], ["results", "Results"]];
@@ -101,7 +103,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
 
       <div role="tabpanel" data-tab={tab} className="panel">
         {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
-        {tab === "queues" && <QueuesPanel model={model} p={p} />}
+        {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
         {tab === "volume" && <VolumePanel model={model} p={p} />}
         {tab === "map" && <MapPanel p={p} />}
@@ -232,44 +234,300 @@ function StructurePanel({ model, set }) {
   );
 }
 
-// ---- 2 · Queues — the master–detail scaffold (deep editor lands in U4) -------
-function QueuesPanel({ model, p }) {
+// ---- 2 · Queues — stations and their physics (U4) ----------------------------
+// Master list grouped by home (plus Global and Shared capacity); full editor in
+// six KPI families with an Advanced disclosure per family for the long tail.
+// Volume and effective AHT stay DERIVED — never entered here. Manual hires
+// (week × heads) live in Workforce — S4's input.
+function NumF({ label, value, onChange, placeholder }) {
+  return (
+    <div className="field"><label>{label}</label>
+      <input className="num" value={value} placeholder={placeholder || ""} aria-label={label}
+        onChange={(e) => onChange(e.target.value)} /></div>
+  );
+}
+const n0 = (v) => +v || 0;
+
+function Fam({ fam, name, sum, children, advanced }) {
+  const [adv, setAdv] = useState(false);
+  return (
+    <section className="fam-sec">
+      <div className="famhead"><span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b><span className="hint">{sum}</span>
+        {advanced ? <button className="linkbtn" style={{ marginLeft: "auto" }} onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "Hide advanced" : `Advanced (${advanced.count})`}</button> : null}
+      </div>
+      {children}
+      {adv && advanced ? <div style={{ marginTop: 8 }}>{advanced.body}</div> : null}
+    </section>
+  );
+}
+
+function QueueChips({ model, selfId, list, onToggle, label }) {
+  return (
+    <div className="field" style={{ gridColumn: "1/-1" }}><label>{label}</label>
+      <div className="regoff" style={{ marginTop: 2 }}>
+        {(model.queues || []).filter((x) => x.id !== selfId).map((x) => {
+          const on = (list || []).includes(x.id);
+          return <button key={x.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on} onClick={() => onToggle(x.id)}>{x.name}</button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function QueueDetail({ model, set, q, d }) {
+  const st = q.staffing || {};
+  const et = engineTypeOf(q);
+  const DEF = engineQueueDefaults(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
+  const eff = { ...DEF, ...st };
+  const wf = { ...DEF.wf, ...(st.wf || {}) };
+  const burn = { ...DEF.burn, ...(st.burn || {}) };
+  const upd = (patch) => set(Ops.updateQueueStaffing(model, q.id, patch));
+  const updWf = (patch) => upd({ wf: { ...wf, ...patch } });
+  const updBurn = (patch) => upd({ burn: { ...burn, ...patch } });
+  const updQ = (patch) => set(Ops.updateQueue(model, q.id, patch));
+  const usage = queueUsage(model, q.id);
+  const guard = canDeleteQueue(model, q.id);
+  const voice = et.type === "voice";
+  const hires = wf.hires || [];
+  const setHires = (h) => updWf({ hires: h });
+  return (
+    <div className="mddetail" data-testid="queue-detail">
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <h4 style={{ marginRight: "auto" }}>{q.name}{q._modified ? <span className="moddot" style={{ marginLeft: 6 }} aria-label="modified" /> : null}</h4>
+        <button className="btn sm" onClick={() => set(Ops.resetQueueStaffing(model, q.id))}>Reset to defaults</button>
+        {guard.ok
+          ? <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => set(Ops.deleteQueue(model, q.id))}>Delete</button>
+          : <span className="hint blocked" style={{ marginLeft: 0 }} title={"Referenced by " + guardSummary(guard)}>▲ in use</span>}
+      </div>
+      <p className="hint derived-strip">Derived: <b className="num">{fmt(d ? d.volume : 0)}/day</b> · eff. AHT <b className="num">{fmt(d ? d.effectiveAht : q.fallbackAhtSec)} s</b>{d && d.ahtMarker !== "queue" ? ` (${d.ahtMarker})` : ""} · {usage.processes ? `used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}` : "not used by any process yet"}</p>
+
+      <Fam fam="inputs" name="Inputs" sum={`${QTYPE_LABELS[q.type] || q.type} · fallback AHT ${q.fallbackAhtSec} s`}
+        advanced={{ count: voice ? 2 : 5, body: (
+          <div className="fields">
+            <NumF label="Priority" value={eff.priority} onChange={(v) => upd({ priority: n0(v) })} />
+            {!voice ? <>
+              <NumF label="Concurrency" value={eff.concurrency} onChange={(v) => upd({ concurrency: n0(v) })} />
+              <NumF label="Backlog limit" value={eff.backlogLimit} onChange={(v) => upd({ backlogLimit: n0(v) })} />
+              <div className="field"><label>Subtype</label>
+                <select value={st.subtype || ""} aria-label="Subtype" onChange={(e) => upd({ subtype: e.target.value || undefined })}>
+                  <option value="">Workflow (backlog)</option><option value="customer">Customer (live SLA)</option>
+                </select></div>
+            </> : null}
+            <div className="field"><label>Deflects to</label>
+              <select value={eff.deflectsTo || ""} aria-label="Deflects to" onChange={(e) => upd({ deflectsTo: e.target.value || null })}>
+                <option value="">— none</option>
+                {(model.queues || []).filter((x) => x.id !== q.id).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select></div>
+          </div>
+        ) }}>
+        <div className="fields">
+          <div className="field"><label>Name</label><input value={q.name} aria-label="Queue name" onChange={(e) => updQ({ name: e.target.value })} /></div>
+          <div className="field"><label>Type</label>
+            <select value={q.type} aria-label="Queue type" onChange={(e) => updQ({ type: e.target.value })}>
+              {QUEUE_TYPES.map((t) => <option key={t} value={t}>{QTYPE_LABELS[t]}</option>)}
+            </select></div>
+          <div className="field"><label>Home brand</label>
+            <select value={q.homeBrandId || ""} aria-label="Home brand" onChange={(e) => updQ({ homeBrandId: e.target.value || undefined })}>
+              <option value="">— global</option>
+              {(model.brands || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></div>
+          <div className="field"><label>Home BU</label>
+            <select value={q.homeBuId || ""} aria-label="Home BU" onChange={(e) => updQ({ homeBuId: e.target.value || undefined })}>
+              <option value="">— global</option>
+              {(model.businessUnits || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select></div>
+          <NumF label="Fallback AHT (s)" value={q.fallbackAhtSec} onChange={(v) => updQ({ fallbackAhtSec: n0(v) })} />
+        </div>
+      </Fam>
+
+      <Fam fam="performance" name="Performance" sum={voice ? `ASA ${eff.asaTarget} s · abandon ≤ ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`}>
+        <div className="fields">
+          {voice ? <>
+            <NumF label="ASA target (s)" value={eff.asaTarget} onChange={(v) => upd({ asaTarget: n0(v) })} />
+            <NumF label="Max abandon (%)" value={Math.round(eff.maxAbandon * 100)} onChange={(v) => upd({ maxAbandon: n0(v) / 100 })} />
+          </> : <>
+            <NumF label="SLA within (min)" value={eff.digitalSlaMinutes} onChange={(v) => upd({ digitalSlaMinutes: n0(v) })} />
+            <NumF label="SLA target (%)" value={Math.round(eff.digitalSlaPct * 100)} onChange={(v) => upd({ digitalSlaPct: n0(v) / 100 })} />
+          </>}
+          <NumF label="Patience (s)" value={eff.patience} onChange={(v) => upd({ patience: n0(v) })} />
+        </div>
+      </Fam>
+
+      <Fam fam="efficiency" name="Efficiency" sum={`occupancy ≤ ${Math.round((eff.occupancyCeiling ?? 0.85) * 100)}%`}
+        advanced={{ count: 5, body: (
+          <div className="fields">
+            <NumF label="Burnout threshold (%)" value={Math.round(burn.occThreshold * 100)} onChange={(v) => updBurn({ occThreshold: n0(v) / 100 })} />
+            <NumF label="Burnout sensitivity" value={burn.sensitivity} onChange={(v) => updBurn({ sensitivity: n0(v) })} />
+            <NumF label="Recovery (weeks)" value={burn.recovery} onChange={(v) => updBurn({ recovery: n0(v) })} />
+            <NumF label="Max attrition ×" value={burn.maxAttritionMult} onChange={(v) => updBurn({ maxAttritionMult: n0(v) })} />
+            <NumF label="Absence uplift (%)" value={Math.round(burn.absenceUplift * 100)} onChange={(v) => updBurn({ absenceUplift: n0(v) / 100 })} />
+          </div>
+        ) }}>
+        <div className="fields">
+          <NumF label="Occupancy ceiling (%)" value={Math.round((eff.occupancyCeiling ?? 0.85) * 100)} onChange={(v) => upd({ occupancyCeiling: n0(v) / 100 })} />
+        </div>
+      </Fam>
+
+      <Fam fam="workforce" name="Workforce" sum={`${eff.resourcing || "resourced"} · shrinkage ${Math.round(eff.shrinkage * 100)}%`}
+        advanced={{ count: 4 + 1, body: (
+          <>
+            <div className="fields">
+              <NumF label="Attrition growth (/mo)" value={wf.attritionGrowth} onChange={(v) => updWf({ attritionGrowth: n0(v) })} />
+              <div className="field"><label>Learning curve (× by week)</label>
+                <input value={(wf.learningCurve || []).join(", ")} aria-label="Learning curve"
+                  onChange={(e) => updWf({ learningCurve: e.target.value.split(",").map((x) => +x.trim()).filter((x) => !isNaN(x)) })} /></div>
+            </div>
+            <QueueChips model={model} selfId={q.id} list={eff.crossSkill} label="Cross-skilled with"
+              onToggle={(id) => upd({ crossSkill: (eff.crossSkill || []).includes(id) ? eff.crossSkill.filter((x) => x !== id) : [...(eff.crossSkill || []), id] })} />
+            <QueueChips model={model} selfId={q.id} list={eff.supports} label="Supports (capacity link)"
+              onToggle={(id) => upd({ supports: (eff.supports || []).includes(id) ? eff.supports.filter((x) => x !== id) : [...(eff.supports || []), id] })} />
+            <div className="field" style={{ gridColumn: "1/-1", marginTop: 6 }}><label>Manual hires (S4 — week × heads)</label>
+              {hires.map((h, i) => (
+                <div className="mixrow" key={i}>
+                  <span className="hint">week</span>
+                  <input className="num" value={h.week} aria-label={`hire ${i + 1} week`} onChange={(e) => setHires(hires.map((x, j) => j === i ? { ...x, week: n0(e.target.value) } : x))} />
+                  <span className="hint">heads</span>
+                  <input className="num" value={h.heads} aria-label={`hire ${i + 1} heads`} onChange={(e) => setHires(hires.map((x, j) => j === i ? { ...x, heads: n0(e.target.value) } : x))} />
+                  <button className="regdel" onClick={() => setHires(hires.filter((_, j) => j !== i))} aria-label={`remove hire ${i + 1}`}>✕</button>
+                </div>
+              ))}
+              <div><button className="btn sm" onClick={() => setHires([...hires, { week: 1, heads: 1 }])}>+ Hire</button></div>
+            </div>
+          </>
+        ) }}>
+        <div className="fields">
+          <div className="field"><label>Resourcing</label>
+            <select value={eff.resourcing || "resourced"} aria-label="Resourcing" onChange={(e) => upd({ resourcing: e.target.value })}>
+              <option value="resourced">Resourced — own headcount</option>
+              <option value="dedicated">Dedicated</option>
+              <option value="leveraged">Leveraged — shared pool</option>
+              <option value="overflow_only">Overflow only</option>
+            </select></div>
+          <NumF label="Starting FTE" value={eff.fte != null ? eff.fte : ""} placeholder="— sized by strategy" onChange={(v) => upd({ fte: v === "" ? undefined : n0(v) })} />
+          <NumF label="Shrinkage (%)" value={Math.round(eff.shrinkage * 100)} onChange={(v) => upd({ shrinkage: n0(v) / 100 })} />
+          <NumF label="Attrition (%/mo)" value={Math.round(wf.attrition * 1000) / 10} onChange={(v) => updWf({ attrition: n0(v) / 100 })} />
+          <NumF label="Req → start (weeks)" value={wf.reqToStart} onChange={(v) => updWf({ reqToStart: n0(v) })} />
+          <NumF label="Training (weeks)" value={wf.trainingWeeks} onChange={(v) => updWf({ trainingWeeks: n0(v) })} />
+        </div>
+      </Fam>
+
+      <Fam fam="customer" name="Customer" sum={`churn £${eff.churnCost ?? 500}`}>
+        <div className="fields">
+          <NumF label="Churn cost (£)" value={eff.churnCost ?? 500} onChange={(v) => upd({ churnCost: n0(v) })} />
+          <NumF label="Failed → churn (%)" value={eff.failedToChurnPct ?? 6} onChange={(v) => upd({ failedToChurnPct: n0(v) })} />
+        </div>
+      </Fam>
+
+      <Fam fam="outputs" name="Outputs" sum={`agent £${fmt(eff.agentCost)}/yr`}>
+        <div className="fields">
+          <NumF label="Agent cost (£/yr)" value={eff.agentCost} onChange={(v) => upd({ agentCost: n0(v) })} />
+        </div>
+      </Fam>
+    </div>
+  );
+}
+
+function TeamDetail({ model, set, team }) {
+  const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
+  return (
+    <div className="mddetail" data-testid="team-detail">
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <h4 style={{ marginRight: "auto" }}>{team.name}</h4>
+        <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => set(Ops.deleteServiceTeam(model, team.id))}>Delete</button>
+      </div>
+      <p className="hint">Shared capacity — spills into the queues it covers when they run hot.</p>
+      <div className="fields">
+        <div className="field"><label>Name</label><input value={team.name} aria-label="Team name" onChange={(e) => upd({ name: e.target.value })} /></div>
+        <NumF label="Size (FTE)" value={team.size} onChange={(v) => upd({ size: n0(v) })} />
+        <NumF label="Premium (%)" value={Math.round((team.premiumPct || 0) * 100)} onChange={(v) => upd({ premiumPct: n0(v) / 100 })} />
+        <NumF label="Proficiency (%)" value={Math.round((team.proficiency || 0) * 100)} onChange={(v) => upd({ proficiency: n0(v) / 100 })} />
+        <NumF label="Trigger occupancy (%)" value={Math.round((team.triggerOccupancy || 0) * 100)} onChange={(v) => upd({ triggerOccupancy: n0(v) / 100 })} />
+        <NumF label="Max hours (/wk)" value={team.maxHoursPerWeek} onChange={(v) => upd({ maxHoursPerWeek: n0(v) })} />
+        <NumF label="Agent cost (£/yr)" value={team.agentCost} onChange={(v) => upd({ agentCost: n0(v) })} />
+      </div>
+      <div className="field" style={{ marginTop: 8 }}><label>Covers</label>
+        <div className="regoff" style={{ marginTop: 2 }}>
+          {(model.queues || []).map((x) => {
+            const on = (team.coversQueues || []).includes(x.id);
+            return <button key={x.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on}
+              onClick={() => upd({ coversQueues: on ? team.coversQueues.filter((i) => i !== x.id) : [...(team.coversQueues || []), x.id] })}>{x.name}</button>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
-  const [sel, setSel] = useState(queues[0] ? queues[0].id : null);
-  const q = queues.find((x) => x.id === sel);
-  const d = q ? p.queues.get(q.id) : null;
-  const usage = q ? queueUsage(model, q.id) : null;
+  const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
+  const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
+  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
+  const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
+  // group by home: brand › BU · brand-only · Global
+  const groups = [];
+  const byKey = new Map();
+  for (const x of queues) {
+    const label = x.homeBrandId
+      ? nameOf(model.brands, x.homeBrandId) + (x.homeBuId ? " › " + nameOf(model.businessUnits, x.homeBuId) : "")
+      : "Global — no home";
+    if (!byKey.has(label)) { byKey.set(label, []); groups.push(label); }
+    byKey.get(label).push(x);
+  }
+  groups.sort((a, b) => (a === "Global — no home" ? 1 : b === "Global — no home" ? -1 : 0));
   return (
     <>
       <h3>Queues</h3>
-      <p className="hint">The stations and their physics. Volume and effective AHT are derived — never entered here.</p>
-      {queues.length === 0 ? <p className="hint">No queues yet.</p> : (
-        <div className="md">
-          <div className="mdlist" role="listbox" aria-label="Queues">
-            {queues.map((x) => {
-              const dx = p.queues.get(x.id);
-              return (
-                <button key={x.id} role="option" aria-selected={sel === x.id} className={sel === x.id ? "on" : ""} onClick={() => setSel(x.id)}>
-                  <b>{x.name}</b>
-                  <small>{QTYPE_LABELS[x.type] || x.type}</small>
-                  <span className="qstats num">{fmt(dx ? dx.volume : 0)}/day · {fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s{dx && dx.ahtMarker === "weighted" ? " · weighted" : dx && dx.ahtMarker === "svc" ? " · svc" : ""}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="mddetail" data-testid="queue-detail">
-            {q ? <>
-              <h4>{q.name}</h4>
-              <p className="hint">{QTYPE_LABELS[q.type] || q.type}{q.homeBrandId ? ` · ${nameOf(model.brands, q.homeBrandId)}` : ""}{q.homeBuId ? ` › ${nameOf(model.businessUnits, q.homeBuId)}` : ""}</p>
-              <div className="kv"><span>Derived volume/day</span><b className="num">{fmt(d ? d.volume : 0)}</b></div>
-              <div className="kv"><span>Effective AHT</span><b className="num">{fmt(d ? d.effectiveAht : q.fallbackAhtSec)} s{d && d.ahtMarker !== "queue" ? ` · ${d.ahtMarker}` : ""}</b></div>
-              <div className="kv"><span>Fallback AHT</span><b className="num">{fmt(q.fallbackAhtSec)} s</b></div>
-              <div className="kv"><span>Staffing</span><b>{q.staffing && q.staffing.wf ? "full physics carried" : q._modified ? "tuned" : "defaults"}</b></div>
-              <p className="usage">{usage && usage.processes ? `Used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}.` : "Not used by any process yet."}</p>
-            </> : null}
+      <p className="hint">Volume and effective AHT are derived — never entered here.</p>
+      <div className="md">
+        <div>
+          {groups.map((label) => (
+            <div className="mdgroup" key={label}>
+              <p className="mdgrouplab">{label}</p>
+              <div className="mdlist" role="listbox" aria-label={label}>
+                {byKey.get(label).map((x) => {
+                  const dx = p.queues.get(x.id);
+                  const u = queueUsage(model, x.id);
+                  const on = sel && sel.kind === "queue" && sel.id === x.id;
+                  return (
+                    <button key={x.id} role="option" aria-selected={on} className={on ? "on" : ""} onClick={() => setSel({ kind: "queue", id: x.id })}>
+                      <b>{x.name}{x._modified ? <span className="moddot" style={{ marginLeft: 5 }} aria-label="modified" /> : null}</b>
+                      <small>{QTYPE_LABELS[x.type] || x.type}{u.processes ? ` · ${u.processes} process${u.processes === 1 ? "" : "es"} · ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " · unused"}</small>
+                      <span className="qstats num">{fmt(dx ? dx.volume : 0)}/day · {fmt(dx ? dx.effectiveAht : x.fallbackAhtSec)} s{dx && dx.ahtMarker === "weighted" ? " · weighted" : dx && dx.ahtMarker === "svc" ? " · svc" : ""}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <button className="btn sm" onClick={() => {
+            const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
+            set(m2); setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
+          }}>+ Queue</button>
+          <div className="mdgroup">
+            <p className="mdgrouplab">Shared capacity</p>
+            <div className="mdlist" role="listbox" aria-label="Shared capacity">
+              {teams.map((x) => {
+                const on = sel && sel.kind === "team" && sel.id === x.id;
+                return (
+                  <button key={x.id} role="option" aria-selected={on} className={on ? "on" : ""} onClick={() => setSel({ kind: "team", id: x.id })}>
+                    <b>{x.name}</b>
+                    <small>service team · covers {(x.coversQueues || []).length} queue{(x.coversQueues || []).length === 1 ? "" : "s"}</small>
+                    <span className="qstats num">{x.size} FTE</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button className="btn sm" style={{ marginTop: 4 }} disabled={!model.engineConfig} onClick={() => {
+              const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
+              set(m2); setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
+            }}>+ Shared team</button>
           </div>
         </div>
-      )}
+        {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} />
+          : team ? <TeamDetail model={model} set={set} team={team} />
+          : <div className="mddetail" data-testid="queue-detail"><p className="hint">Select a queue or shared team.</p></div>}
+      </div>
     </>
   );
 }

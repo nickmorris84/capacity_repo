@@ -6,6 +6,36 @@
 > [GAP-ANALYSIS.md](./GAP-ANALYSIS.md) — the measured v1→v2.4 feature diff.
 > This file is the running build log: how it got here, phase by phase.
 
+## DOMAIN REDESIGN — U4: the Queues tab ✅ (new gate green)
+
+The deep editor per REVIEW-SETUP §3.2 (after the U3-checkpoint lighten pass
+and a phone-layout pass — owner: "get it working, style pass later"):
+
+- **Master list grouped by home** (brand › BU · Global — no home · Shared
+  capacity), rows carrying derived vol/AHT, modified dots and the blast
+  radius ("2 processes · 1 brand" / "unused").
+- **Six KPI families** in one scroll (Inputs · Performance · Efficiency ·
+  Workforce · Customer · Outputs), each with an **Advanced disclosure** for
+  the long tail — ~30 engine params restored: home/type/fallback AHT,
+  priority, concurrency, backlog limit, subtype (Workflow/Customer),
+  deflects-to; voice ASA/abandon/patience vs digital SLA-within/target;
+  occupancy + the burnout block (threshold, sensitivity, recovery, max
+  attrition ×, absence uplift); resourcing, starting FTE, shrinkage,
+  attrition, req→start, training, learning curve, cross-skill and supports
+  chips; churn; agent cost. Voice/digital fields swap by queue type.
+- **Manual hires** (week × heads rows) in Workforce — S4's input.
+- **Service teams** as the Shared capacity group: eight params + covers
+  chips, add/delete.
+- Guarded delete (in-use marker), reset-to-defaults clears the dot.
+- `tests/queues-ui.test.js` (10) — grouping, families, advanced content,
+  hires UI, digital/voice swap, rename + home regrouping live, guards,
+  teams, and the **S4 proof**: hires authored through the domain model
+  reach the engine (`wf.hires`) and trained staffing rises after the
+  planned week. Zero console noise.
+
+**Full suite: 30 gates green; dist rebuilt; artifact republished.**
+Next: U5 (the Volume cascade grid) — user checkpoint after.
+
 ## DOMAIN REDESIGN — U3: the Request types tab ✅ (new gate green) — CHECKPOINT
 
 The heart of Setup — the ONLY linking surface — as a master–detail editor

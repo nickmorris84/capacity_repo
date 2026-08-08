@@ -71,4 +71,4 @@ function domainToEngineConfig(model) {
   return { ...base, queues };
 }
 
-module.exports = { domainToEngineConfig, engineTypeOf };
+module.exports = { domainToEngineConfig, engineTypeOf, engineQueueDefaults };

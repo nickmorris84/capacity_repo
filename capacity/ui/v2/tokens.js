@@ -372,6 +372,12 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .stepdash{color:var(--ink-3); text-align:center; font-size:11px}
 .steprow input[type="checkbox"]{justify-self:start; margin:0}
 .scrollx{overflow-x:auto}
+.mdgroup{margin-bottom:10px}
+.mdgrouplab{font-size:10.5px; color:var(--ink-3); font-weight:600; margin:2px 0 4px}
+.fam-sec{border-top:0.5px solid var(--line); padding:10px 0 12px; margin-top:10px}
+.famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.famhead b{font-size:12.5px}
+.derived-strip{margin:6px 0 4px}
 
 /* ---- phone layout ---- */
 @media(max-width:640px){

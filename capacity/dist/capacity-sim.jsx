@@ -253,7 +253,7 @@ var require_derive = __commonJS({
       }
       return out;
     }
-    function canDeleteQueue2(model, queueId) {
+    function canDeleteQueue3(model, queueId) {
       const blockedBy = (model.services || []).filter((s) => (s.journey || []).some((step) => step.queueId === queueId)).map((s) => ({ serviceId: s.id, serviceName: s.name }));
       return { ok: blockedBy.length === 0, blockedBy };
     }
@@ -337,7 +337,7 @@ var require_derive = __commonJS({
       crossStructureWarnings,
       mixWarnings,
       sharedQueueAllocation,
-      canDeleteQueue: canDeleteQueue2,
+      canDeleteQueue: canDeleteQueue3,
       canDeleteService: canDeleteService2,
       validateModel,
       derive: derive2
@@ -434,7 +434,7 @@ var require_domain = __commonJS({
     function canDeleteProduct2(model, id) {
       return guard((model.requestTypes || []).filter((rt) => rt.productId === id).map((rt) => ({ kind: "requestType", id: rt.id })));
     }
-    function canDeleteQueue2(model, id) {
+    function canDeleteQueue3(model, id) {
       const b = [];
       for (const rt of model.requestTypes || [])
         for (const p of rt.processes || [])
@@ -467,7 +467,7 @@ var require_domain = __commonJS({
       canDeleteChannel: canDeleteChannel2,
       canDeleteGroup: canDeleteGroup2,
       canDeleteProduct: canDeleteProduct2,
-      canDeleteQueue: canDeleteQueue2,
+      canDeleteQueue: canDeleteQueue3,
       canDeleteRequestType: canDeleteRequestType2,
       queueUsage: queueUsage2
     };
@@ -640,390 +640,6 @@ var require_propagate = __commonJS({
       return { queues, leaves, nodes, notes, validation };
     }
     module.exports = { propagateDomain: propagateDomain2, WEEKS };
-  }
-});
-
-// model/ops.js
-var require_ops = __commonJS({
-  "model/ops.js"(exports, module) {
-    var {
-      canDeleteBrand: canDeleteBrand2,
-      canDeleteBU: canDeleteBU2,
-      canDeleteChannel: canDeleteChannel2,
-      canDeleteGroup: canDeleteGroup2,
-      canDeleteProduct: canDeleteProduct2,
-      canDeleteQueue: canDeleteQueue2,
-      canDeleteRequestType: canDeleteRequestType2,
-      keyOf
-    } = require_domain();
-    var { CHANNELS: CHANNELS4 } = require_taxonomy();
-    var { propagateDomain: propagateDomain2 } = require_propagate();
-    var clone2 = (m) => JSON.parse(JSON.stringify(m));
-    var _seq2 = 0;
-    var uid2 = (p) => `${p}_${(++_seq2).toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-    function applyPatch(target, patch) {
-      for (const [k, v] of Object.entries(patch)) {
-        if (v === void 0) delete target[k];
-        else target[k] = v;
-      }
-    }
-    function addToList(listKey, prefix) {
-      return (model, item = {}) => {
-        const m = clone2(model);
-        m[listKey] = m[listKey] || [];
-        m[listKey].push({ id: item.id || uid2(prefix), name: item.name || prefix, ...item });
-        return m;
-      };
-    }
-    function renameInList(listKey) {
-      return (model, id, name) => {
-        const m = clone2(model);
-        const x = (m[listKey] || []).find((e) => e.id === id);
-        if (x) x.name = name;
-        return m;
-      };
-    }
-    function deleteFromList(listKey, guardFn) {
-      return (model, id) => {
-        if (guardFn && !guardFn(model, id).ok) return model;
-        const m = clone2(model);
-        m[listKey] = (m[listKey] || []).filter((e) => e.id !== id);
-        return m;
-      };
-    }
-    var addBrand2 = addToList("brands", "b");
-    var renameBrand2 = renameInList("brands");
-    var deleteBrand2 = deleteFromList("brands", canDeleteBrand2);
-    var addBusinessUnit3 = addToList("businessUnits", "bu");
-    var renameBusinessUnit2 = renameInList("businessUnits");
-    var deleteBusinessUnit2 = deleteFromList("businessUnits", canDeleteBU2);
-    var addProcessGroup2 = addToList("processGroups", "pg");
-    var renameProcessGroup2 = renameInList("processGroups");
-    var deleteProcessGroup2 = deleteFromList("processGroups", canDeleteGroup2);
-    var addProduct3 = addToList("products", "prod");
-    var renameProduct2 = renameInList("products");
-    var deleteProduct2 = deleteFromList("products", canDeleteProduct2);
-    function addChannel2(model, { key, id, name, defaults } = {}) {
-      if (!CHANNELS4.includes(key)) return model;
-      if ((model.channels || []).some((c) => c.key === key)) return model;
-      const m = clone2(model);
-      m.channels = m.channels || [];
-      m.channels.push({ id: id || "ch_" + key, key, name: name || key, ...defaults ? { defaults } : {} });
-      return m;
-    }
-    var renameChannel2 = renameInList("channels");
-    var deleteChannel2 = deleteFromList("channels", canDeleteChannel2);
-    function setChannelDefaults2(model, channelId, patch) {
-      const m = clone2(model);
-      const c = (m.channels || []).find((x) => x.id === channelId);
-      if (c) {
-        c.defaults = c.defaults || {};
-        applyPatch(c.defaults, patch);
-      }
-      return m;
-    }
-    var DEFAULT_STAFFING = {
-      asaTarget: 30,
-      maxAbandon: 0.05,
-      patience: 90,
-      shrinkage: 0.3,
-      agentCost: 32e3,
-      resourcing: "dedicated",
-      occupancyCeiling: 0.85,
-      churnCost: 500,
-      failedToChurnPct: 6,
-      attritionPct: 26
-    };
-    function addQueue2(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
-      const m = clone2(model);
-      m.queues = m.queues || [];
-      const q = {
-        id: id || uid2("q"),
-        name: name || `Queue ${m.queues.length + 1}`,
-        type: type || "inbound_call",
-        fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
-        staffing: { ...DEFAULT_STAFFING }
-      };
-      if (homeBrandId) q.homeBrandId = homeBrandId;
-      if (homeBuId) q.homeBuId = homeBuId;
-      m.queues.push(q);
-      return m;
-    }
-    function updateQueue2(model, queueId, patch) {
-      const m = clone2(model);
-      const q = (m.queues || []).find((x) => x.id === queueId);
-      if (q) applyPatch(q, patch);
-      return m;
-    }
-    function updateQueueStaffing2(model, queueId, patch) {
-      const m = clone2(model);
-      const q = (m.queues || []).find((x) => x.id === queueId);
-      if (q) {
-        q.staffing = q.staffing || {};
-        applyPatch(q.staffing, patch);
-        q._modified = true;
-      }
-      return m;
-    }
-    function resetQueueStaffing2(model, queueId) {
-      const m = clone2(model);
-      const q = (m.queues || []).find((x) => x.id === queueId);
-      if (q) {
-        q.staffing = { ...DEFAULT_STAFFING };
-        delete q._modified;
-      }
-      return m;
-    }
-    var deleteQueue2 = deleteFromList("queues", canDeleteQueue2);
-    function addServiceTeam(model, team = {}) {
-      const m = clone2(model);
-      m.engineConfig = m.engineConfig || {};
-      m.engineConfig.serviceTeams = m.engineConfig.serviceTeams || [];
-      m.engineConfig.serviceTeams.push({
-        id: team.id || uid2("st"),
-        name: team.name || "Shared team",
-        size: 5,
-        premiumPct: 0.1,
-        proficiency: 0.8,
-        triggerOccupancy: 0.9,
-        maxHoursPerWeek: 100,
-        agentCost: 32e3,
-        coversQueues: [],
-        ...team
-      });
-      return m;
-    }
-    function updateServiceTeam(model, teamId, patch) {
-      const m = clone2(model);
-      const t = ((m.engineConfig || {}).serviceTeams || []).find((x) => x.id === teamId);
-      if (t) applyPatch(t, patch);
-      return m;
-    }
-    function deleteServiceTeam(model, teamId) {
-      const m = clone2(model);
-      if (m.engineConfig && m.engineConfig.serviceTeams)
-        m.engineConfig.serviceTeams = m.engineConfig.serviceTeams.filter((x) => x.id !== teamId);
-      return m;
-    }
-    function addRequestType2(model, { id, name, groupId, activity, productRequest, productId } = {}) {
-      const m = clone2(model);
-      m.requestTypes = m.requestTypes || [];
-      const rt = {
-        id: id || uid2("rt"),
-        name: name || "New request type",
-        activity: activity || "service_request",
-        productRequest: productRequest || "existing",
-        groupId,
-        brandIds: [],
-        buIds: [],
-        processes: []
-      };
-      if (productId != null) rt.productId = productId;
-      m.requestTypes.push(rt);
-      return m;
-    }
-    function updateRequestType2(model, rtId, patch) {
-      const m = clone2(model);
-      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
-      if (rt) applyPatch(rt, patch);
-      return m;
-    }
-    function setAssignment2(model, rtId, { brandIds, buIds } = {}) {
-      const m = clone2(model);
-      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
-      if (rt) {
-        if (brandIds) rt.brandIds = [...brandIds];
-        if (buIds) rt.buIds = [...buIds];
-      }
-      return m;
-    }
-    var deleteRequestType2 = deleteFromList("requestTypes", canDeleteRequestType2);
-    var procOf = (m, rtId, channelId) => {
-      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
-      return rt ? { rt, p: (rt.processes || []).find((x) => x.channelId === channelId) } : { rt: null, p: null };
-    };
-    function addProcess2(model, rtId, channelId) {
-      const { rt, p } = procOf(model, rtId, channelId);
-      if (!rt || p) return model;
-      const m = clone2(model);
-      const rt2 = m.requestTypes.find((x) => x.id === rtId);
-      rt2.processes.push({ channelId, outcomes: ["completed"], steps: [] });
-      return m;
-    }
-    function deleteProcess2(model, rtId, channelId) {
-      const { p } = procOf(model, rtId, channelId);
-      if (!p) return model;
-      const m = clone2(model);
-      const rt2 = m.requestTypes.find((x) => x.id === rtId);
-      rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
-      return m;
-    }
-    function addStep2(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
-      const { p } = procOf(model, rtId, channelId);
-      if (!p) return model;
-      const m = clone2(model);
-      const p2 = procOf(m, rtId, channelId).p;
-      const step = { queueId, splitPct: splitPct != null ? splitPct : 100 };
-      if (samplingPct != null) step.samplingPct = samplingPct;
-      p2.steps.push(step);
-      return m;
-    }
-    function updateStep2(model, rtId, channelId, index, patch) {
-      const { p } = procOf(model, rtId, channelId);
-      if (!p || !p.steps[index]) return model;
-      const m = clone2(model);
-      const step = procOf(m, rtId, channelId).p.steps[index];
-      applyPatch(step, patch);
-      if (patch.terminal === false) {
-        delete step.terminal;
-        delete step.outcome;
-      }
-      return m;
-    }
-    function removeStep2(model, rtId, channelId, index) {
-      const { p } = procOf(model, rtId, channelId);
-      if (!p || !p.steps[index]) return model;
-      const m = clone2(model);
-      procOf(m, rtId, channelId).p.steps.splice(index, 1);
-      return m;
-    }
-    function setOutcomes2(model, rtId, channelId, outcomes) {
-      const { p } = procOf(model, rtId, channelId);
-      if (!p) return model;
-      const m = clone2(model);
-      procOf(m, rtId, channelId).p.outcomes = [...outcomes];
-      return m;
-    }
-    function setVolumeEntry(model, scope, { daily, weekly } = {}) {
-      const m = clone2(model);
-      m.volumeEntries = (m.volumeEntries || []).filter((e2) => keyOf(e2.scope || {}) !== keyOf(scope || {}));
-      const e = { id: uid2("ve"), scope: { ...scope } };
-      if (daily != null) e.daily = daily;
-      if (weekly != null) e.weekly = [...weekly];
-      if (e.daily != null || e.weekly != null) m.volumeEntries.push(e);
-      return m;
-    }
-    function clearVolumeEntry(model, scope) {
-      const m = clone2(model);
-      m.volumeEntries = (m.volumeEntries || []).filter((e) => keyOf(e.scope || {}) !== keyOf(scope || {}));
-      return m;
-    }
-    function blankDomainModel(engineConfig) {
-      const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
-      if (engineConfig) m.engineConfig = engineConfig;
-      return m;
-    }
-    function sampleDomainModel() {
-      return {
-        brands: [{ id: "b_acme", name: "Acme" }],
-        businessUnits: [{ id: "bu_cs", name: "Customer Service" }],
-        channels: [{ id: "ch_voice", key: "voice", name: "Voice" }, { id: "ch_digital", key: "digital", name: "Digital" }],
-        processGroups: [{ id: "pg_billing", name: "Billing" }, { id: "pg_cards", name: "Cards" }],
-        products: [{ id: "prod_cards", name: "Credit cards" }],
-        queues: [
-          { id: "q_inbound", name: "Inbound \u2014 Billing", type: "inbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 300, staffing: { ...DEFAULT_STAFFING } },
-          { id: "q_verify", name: "Outbound \u2014 Verification", type: "outbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 240, staffing: { ...DEFAULT_STAFFING } },
-          { id: "q_apps", name: "Case \u2014 Applications", type: "case_processing", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 540, staffing: { ...DEFAULT_STAFFING } },
-          { id: "q_qa", name: "QA \u2014 Governance", type: "governance", fallbackAhtSec: 600, staffing: { ...DEFAULT_STAFFING } }
-        ],
-        requestTypes: [
-          {
-            id: "rt_billing",
-            name: "Billing enquiry",
-            activity: "service_request",
-            productRequest: "existing",
-            groupId: "pg_billing",
-            brandIds: ["b_acme"],
-            buIds: ["bu_cs"],
-            processes: [{ channelId: "ch_voice", outcomes: ["completed"], steps: [
-              { queueId: "q_inbound", splitPct: 100 },
-              { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" }
-            ] }]
-          },
-          {
-            id: "rt_newcard",
-            name: "New card application",
-            activity: "service_request",
-            productRequest: "new",
-            groupId: "pg_cards",
-            productId: "prod_cards",
-            ahtSec: 540,
-            brandIds: ["b_acme"],
-            buIds: ["bu_cs"],
-            processes: [{ channelId: "ch_digital", outcomes: ["completed", "rejected"], steps: [
-              { queueId: "q_apps", splitPct: 100 },
-              { queueId: "q_verify", splitPct: 60 },
-              { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" }
-            ] }]
-          }
-        ],
-        volumeEntries: [
-          { id: "ve_billing", scope: { brandId: "b_acme", buId: "bu_cs", requestTypeId: "rt_billing" }, daily: 2398 },
-          { id: "ve_newcard", scope: { brandId: "b_acme", buId: "bu_cs", requestTypeId: "rt_newcard" }, daily: 702 }
-        ]
-      };
-    }
-    function buildDomainImportReport(model) {
-      const v = propagateDomain2(model).validation;
-      return {
-        ok: v.ok,
-        counts: {
-          brands: (model.brands || []).length,
-          businessUnits: (model.businessUnits || []).length,
-          channels: (model.channels || []).length,
-          processGroups: (model.processGroups || []).length,
-          products: (model.products || []).length,
-          queues: (model.queues || []).length,
-          requestTypes: (model.requestTypes || []).length,
-          volumeEntries: (model.volumeEntries || []).length
-        },
-        errors: v.errors,
-        warnings: v.warnings
-      };
-    }
-    module.exports = {
-      DEFAULT_STAFFING,
-      uid: uid2,
-      addBrand: addBrand2,
-      renameBrand: renameBrand2,
-      deleteBrand: deleteBrand2,
-      addBusinessUnit: addBusinessUnit3,
-      renameBusinessUnit: renameBusinessUnit2,
-      deleteBusinessUnit: deleteBusinessUnit2,
-      addProcessGroup: addProcessGroup2,
-      renameProcessGroup: renameProcessGroup2,
-      deleteProcessGroup: deleteProcessGroup2,
-      addProduct: addProduct3,
-      renameProduct: renameProduct2,
-      deleteProduct: deleteProduct2,
-      addChannel: addChannel2,
-      renameChannel: renameChannel2,
-      deleteChannel: deleteChannel2,
-      setChannelDefaults: setChannelDefaults2,
-      addQueue: addQueue2,
-      updateQueue: updateQueue2,
-      updateQueueStaffing: updateQueueStaffing2,
-      resetQueueStaffing: resetQueueStaffing2,
-      deleteQueue: deleteQueue2,
-      addServiceTeam,
-      updateServiceTeam,
-      deleteServiceTeam,
-      addRequestType: addRequestType2,
-      updateRequestType: updateRequestType2,
-      setAssignment: setAssignment2,
-      deleteRequestType: deleteRequestType2,
-      addProcess: addProcess2,
-      deleteProcess: deleteProcess2,
-      addStep: addStep2,
-      updateStep: updateStep2,
-      removeStep: removeStep2,
-      setOutcomes: setOutcomes2,
-      setVolumeEntry,
-      clearVolumeEntry,
-      blankDomainModel,
-      sampleDomainModel,
-      buildDomainImportReport
-    };
   }
 });
 
@@ -2998,6 +2614,457 @@ var require_engine = __commonJS({
   }
 });
 
+// model/bridge.js
+var require_bridge = __commonJS({
+  "model/bridge.js"(exports, module) {
+    var { propagateDomain: propagateDomain2 } = require_propagate();
+    var { DEFAULT_PROFILE } = require_engine();
+    function engineTypeOf2(q) {
+      if (q.staffing && q.staffing.type) return { type: q.staffing.type, subtype: q.staffing.subtype };
+      if (q.type === "inbound_call" || q.type === "outbound_call") return { type: "voice" };
+      return { type: "digital" };
+    }
+    function engineQueueDefaults2(brandId, channel) {
+      return {
+        brandId,
+        channel,
+        priority: 5,
+        concurrency: 1,
+        digitalSlaMinutes: 5,
+        digitalSlaPct: 0.8,
+        backlogLimit: 150,
+        deflectsTo: null,
+        crossSkill: [],
+        supports: [],
+        weeklyVolumes: null,
+        seasonal: null,
+        profile: [...DEFAULT_PROFILE],
+        asaTarget: 30,
+        maxAbandon: 0.05,
+        patience: 90,
+        shrinkage: 0.3,
+        agentCost: 32e3,
+        resourcing: "resourced",
+        wf: { attrition: 0.04, attritionGrowth: 0, reqToStart: 6, trainingWeeks: 4, learningCurve: [0.6, 0.75, 0.9, 1], hires: [] },
+        burn: { occThreshold: 0.85, sensitivity: 1.5, recovery: 8, maxAttritionMult: 2, absenceUplift: 0.05 }
+      };
+    }
+    function domainToEngineConfig(model) {
+      const base = model.engineConfig;
+      if (!base) throw new Error("domainToEngineConfig: model carries no engineConfig (migrate first, or attach one)");
+      const p = propagateDomain2(model);
+      const brandDefault = model.brands && model.brands[0] && model.brands[0].id || "b1";
+      const queues = (model.queues || []).map((q) => {
+        const d = p.queues.get(q.id) || { volume: 0, effectiveAht: q.fallbackAhtSec, weekly: null };
+        const st = q.staffing || {};
+        const et = engineTypeOf2(q);
+        const channel = st.channel || (et.type === "voice" ? "voice" : "digital");
+        const defaults = engineQueueDefaults2(q.homeBrandId || brandDefault, channel);
+        const merged = { ...defaults, ...st };
+        if (!st.wf && st.attritionPct != null) merged.wf = { ...defaults.wf, attrition: st.attritionPct / 100 / 12 };
+        const hasShape = Array.isArray(d.weekly) && d.weekly.some((v) => Math.abs(v - d.volume) > 1e-9);
+        const eq = {
+          ...merged,
+          id: q.id,
+          name: q.name != null ? q.name : st.name,
+          type: et.type,
+          dailyVolume: d.volume,
+          aht: d.effectiveAht,
+          weeklyVolumes: hasShape ? d.weekly.slice() : null
+        };
+        if (et.subtype != null) eq.subtype = et.subtype;
+        return eq;
+      });
+      return { ...base, queues };
+    }
+    module.exports = { domainToEngineConfig, engineTypeOf: engineTypeOf2, engineQueueDefaults: engineQueueDefaults2 };
+  }
+});
+
+// model/ops.js
+var require_ops = __commonJS({
+  "model/ops.js"(exports, module) {
+    var {
+      canDeleteBrand: canDeleteBrand2,
+      canDeleteBU: canDeleteBU2,
+      canDeleteChannel: canDeleteChannel2,
+      canDeleteGroup: canDeleteGroup2,
+      canDeleteProduct: canDeleteProduct2,
+      canDeleteQueue: canDeleteQueue3,
+      canDeleteRequestType: canDeleteRequestType2,
+      keyOf
+    } = require_domain();
+    var { CHANNELS: CHANNELS4 } = require_taxonomy();
+    var { propagateDomain: propagateDomain2 } = require_propagate();
+    var clone2 = (m) => JSON.parse(JSON.stringify(m));
+    var _seq2 = 0;
+    var uid2 = (p) => `${p}_${(++_seq2).toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    function applyPatch(target, patch) {
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === void 0) delete target[k];
+        else target[k] = v;
+      }
+    }
+    function addToList(listKey, prefix) {
+      return (model, item = {}) => {
+        const m = clone2(model);
+        m[listKey] = m[listKey] || [];
+        m[listKey].push({ id: item.id || uid2(prefix), name: item.name || prefix, ...item });
+        return m;
+      };
+    }
+    function renameInList(listKey) {
+      return (model, id, name) => {
+        const m = clone2(model);
+        const x = (m[listKey] || []).find((e) => e.id === id);
+        if (x) x.name = name;
+        return m;
+      };
+    }
+    function deleteFromList(listKey, guardFn) {
+      return (model, id) => {
+        if (guardFn && !guardFn(model, id).ok) return model;
+        const m = clone2(model);
+        m[listKey] = (m[listKey] || []).filter((e) => e.id !== id);
+        return m;
+      };
+    }
+    var addBrand2 = addToList("brands", "b");
+    var renameBrand2 = renameInList("brands");
+    var deleteBrand2 = deleteFromList("brands", canDeleteBrand2);
+    var addBusinessUnit3 = addToList("businessUnits", "bu");
+    var renameBusinessUnit2 = renameInList("businessUnits");
+    var deleteBusinessUnit2 = deleteFromList("businessUnits", canDeleteBU2);
+    var addProcessGroup2 = addToList("processGroups", "pg");
+    var renameProcessGroup2 = renameInList("processGroups");
+    var deleteProcessGroup2 = deleteFromList("processGroups", canDeleteGroup2);
+    var addProduct3 = addToList("products", "prod");
+    var renameProduct2 = renameInList("products");
+    var deleteProduct2 = deleteFromList("products", canDeleteProduct2);
+    function addChannel2(model, { key, id, name, defaults } = {}) {
+      if (!CHANNELS4.includes(key)) return model;
+      if ((model.channels || []).some((c) => c.key === key)) return model;
+      const m = clone2(model);
+      m.channels = m.channels || [];
+      m.channels.push({ id: id || "ch_" + key, key, name: name || key, ...defaults ? { defaults } : {} });
+      return m;
+    }
+    var renameChannel2 = renameInList("channels");
+    var deleteChannel2 = deleteFromList("channels", canDeleteChannel2);
+    function setChannelDefaults2(model, channelId, patch) {
+      const m = clone2(model);
+      const c = (m.channels || []).find((x) => x.id === channelId);
+      if (c) {
+        c.defaults = c.defaults || {};
+        applyPatch(c.defaults, patch);
+      }
+      return m;
+    }
+    var DEFAULT_STAFFING = {
+      asaTarget: 30,
+      maxAbandon: 0.05,
+      patience: 90,
+      shrinkage: 0.3,
+      agentCost: 32e3,
+      resourcing: "dedicated",
+      occupancyCeiling: 0.85,
+      churnCost: 500,
+      failedToChurnPct: 6,
+      attritionPct: 26
+    };
+    function addQueue3(model, { id, name, type, homeBrandId, homeBuId, fallbackAhtSec } = {}) {
+      const m = clone2(model);
+      m.queues = m.queues || [];
+      const q = {
+        id: id || uid2("q"),
+        name: name || `Queue ${m.queues.length + 1}`,
+        type: type || "inbound_call",
+        fallbackAhtSec: fallbackAhtSec != null ? fallbackAhtSec : 300,
+        staffing: { ...DEFAULT_STAFFING }
+      };
+      if (homeBrandId) q.homeBrandId = homeBrandId;
+      if (homeBuId) q.homeBuId = homeBuId;
+      m.queues.push(q);
+      return m;
+    }
+    function updateQueue3(model, queueId, patch) {
+      const m = clone2(model);
+      const q = (m.queues || []).find((x) => x.id === queueId);
+      if (q) applyPatch(q, patch);
+      return m;
+    }
+    function updateQueueStaffing3(model, queueId, patch) {
+      const m = clone2(model);
+      const q = (m.queues || []).find((x) => x.id === queueId);
+      if (q) {
+        q.staffing = q.staffing || {};
+        applyPatch(q.staffing, patch);
+        q._modified = true;
+      }
+      return m;
+    }
+    function resetQueueStaffing3(model, queueId) {
+      const m = clone2(model);
+      const q = (m.queues || []).find((x) => x.id === queueId);
+      if (q) {
+        q.staffing = { ...DEFAULT_STAFFING };
+        delete q._modified;
+      }
+      return m;
+    }
+    var deleteQueue3 = deleteFromList("queues", canDeleteQueue3);
+    function addServiceTeam2(model, team = {}) {
+      const m = clone2(model);
+      m.engineConfig = m.engineConfig || {};
+      m.engineConfig.serviceTeams = m.engineConfig.serviceTeams || [];
+      m.engineConfig.serviceTeams.push({
+        id: team.id || uid2("st"),
+        name: team.name || "Shared team",
+        size: 5,
+        premiumPct: 0.1,
+        proficiency: 0.8,
+        triggerOccupancy: 0.9,
+        maxHoursPerWeek: 100,
+        agentCost: 32e3,
+        coversQueues: [],
+        ...team
+      });
+      return m;
+    }
+    function updateServiceTeam2(model, teamId, patch) {
+      const m = clone2(model);
+      const t = ((m.engineConfig || {}).serviceTeams || []).find((x) => x.id === teamId);
+      if (t) applyPatch(t, patch);
+      return m;
+    }
+    function deleteServiceTeam2(model, teamId) {
+      const m = clone2(model);
+      if (m.engineConfig && m.engineConfig.serviceTeams)
+        m.engineConfig.serviceTeams = m.engineConfig.serviceTeams.filter((x) => x.id !== teamId);
+      return m;
+    }
+    function addRequestType2(model, { id, name, groupId, activity, productRequest, productId } = {}) {
+      const m = clone2(model);
+      m.requestTypes = m.requestTypes || [];
+      const rt = {
+        id: id || uid2("rt"),
+        name: name || "New request type",
+        activity: activity || "service_request",
+        productRequest: productRequest || "existing",
+        groupId,
+        brandIds: [],
+        buIds: [],
+        processes: []
+      };
+      if (productId != null) rt.productId = productId;
+      m.requestTypes.push(rt);
+      return m;
+    }
+    function updateRequestType2(model, rtId, patch) {
+      const m = clone2(model);
+      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+      if (rt) applyPatch(rt, patch);
+      return m;
+    }
+    function setAssignment2(model, rtId, { brandIds, buIds } = {}) {
+      const m = clone2(model);
+      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+      if (rt) {
+        if (brandIds) rt.brandIds = [...brandIds];
+        if (buIds) rt.buIds = [...buIds];
+      }
+      return m;
+    }
+    var deleteRequestType2 = deleteFromList("requestTypes", canDeleteRequestType2);
+    var procOf = (m, rtId, channelId) => {
+      const rt = (m.requestTypes || []).find((x) => x.id === rtId);
+      return rt ? { rt, p: (rt.processes || []).find((x) => x.channelId === channelId) } : { rt: null, p: null };
+    };
+    function addProcess2(model, rtId, channelId) {
+      const { rt, p } = procOf(model, rtId, channelId);
+      if (!rt || p) return model;
+      const m = clone2(model);
+      const rt2 = m.requestTypes.find((x) => x.id === rtId);
+      rt2.processes.push({ channelId, outcomes: ["completed"], steps: [] });
+      return m;
+    }
+    function deleteProcess2(model, rtId, channelId) {
+      const { p } = procOf(model, rtId, channelId);
+      if (!p) return model;
+      const m = clone2(model);
+      const rt2 = m.requestTypes.find((x) => x.id === rtId);
+      rt2.processes = rt2.processes.filter((x) => x.channelId !== channelId);
+      return m;
+    }
+    function addStep2(model, rtId, channelId, { queueId, splitPct, samplingPct } = {}) {
+      const { p } = procOf(model, rtId, channelId);
+      if (!p) return model;
+      const m = clone2(model);
+      const p2 = procOf(m, rtId, channelId).p;
+      const step = { queueId, splitPct: splitPct != null ? splitPct : 100 };
+      if (samplingPct != null) step.samplingPct = samplingPct;
+      p2.steps.push(step);
+      return m;
+    }
+    function updateStep2(model, rtId, channelId, index, patch) {
+      const { p } = procOf(model, rtId, channelId);
+      if (!p || !p.steps[index]) return model;
+      const m = clone2(model);
+      const step = procOf(m, rtId, channelId).p.steps[index];
+      applyPatch(step, patch);
+      if (patch.terminal === false) {
+        delete step.terminal;
+        delete step.outcome;
+      }
+      return m;
+    }
+    function removeStep2(model, rtId, channelId, index) {
+      const { p } = procOf(model, rtId, channelId);
+      if (!p || !p.steps[index]) return model;
+      const m = clone2(model);
+      procOf(m, rtId, channelId).p.steps.splice(index, 1);
+      return m;
+    }
+    function setOutcomes2(model, rtId, channelId, outcomes) {
+      const { p } = procOf(model, rtId, channelId);
+      if (!p) return model;
+      const m = clone2(model);
+      procOf(m, rtId, channelId).p.outcomes = [...outcomes];
+      return m;
+    }
+    function setVolumeEntry(model, scope, { daily, weekly } = {}) {
+      const m = clone2(model);
+      m.volumeEntries = (m.volumeEntries || []).filter((e2) => keyOf(e2.scope || {}) !== keyOf(scope || {}));
+      const e = { id: uid2("ve"), scope: { ...scope } };
+      if (daily != null) e.daily = daily;
+      if (weekly != null) e.weekly = [...weekly];
+      if (e.daily != null || e.weekly != null) m.volumeEntries.push(e);
+      return m;
+    }
+    function clearVolumeEntry(model, scope) {
+      const m = clone2(model);
+      m.volumeEntries = (m.volumeEntries || []).filter((e) => keyOf(e.scope || {}) !== keyOf(scope || {}));
+      return m;
+    }
+    function blankDomainModel(engineConfig) {
+      const m = { brands: [], businessUnits: [], channels: [], processGroups: [], products: [], queues: [], requestTypes: [], volumeEntries: [] };
+      if (engineConfig) m.engineConfig = engineConfig;
+      return m;
+    }
+    function sampleDomainModel() {
+      return {
+        brands: [{ id: "b_acme", name: "Acme" }],
+        businessUnits: [{ id: "bu_cs", name: "Customer Service" }],
+        channels: [{ id: "ch_voice", key: "voice", name: "Voice" }, { id: "ch_digital", key: "digital", name: "Digital" }],
+        processGroups: [{ id: "pg_billing", name: "Billing" }, { id: "pg_cards", name: "Cards" }],
+        products: [{ id: "prod_cards", name: "Credit cards" }],
+        queues: [
+          { id: "q_inbound", name: "Inbound \u2014 Billing", type: "inbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 300, staffing: { ...DEFAULT_STAFFING } },
+          { id: "q_verify", name: "Outbound \u2014 Verification", type: "outbound_call", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 240, staffing: { ...DEFAULT_STAFFING } },
+          { id: "q_apps", name: "Case \u2014 Applications", type: "case_processing", homeBrandId: "b_acme", homeBuId: "bu_cs", fallbackAhtSec: 540, staffing: { ...DEFAULT_STAFFING } },
+          { id: "q_qa", name: "QA \u2014 Governance", type: "governance", fallbackAhtSec: 600, staffing: { ...DEFAULT_STAFFING } }
+        ],
+        requestTypes: [
+          {
+            id: "rt_billing",
+            name: "Billing enquiry",
+            activity: "service_request",
+            productRequest: "existing",
+            groupId: "pg_billing",
+            brandIds: ["b_acme"],
+            buIds: ["bu_cs"],
+            processes: [{ channelId: "ch_voice", outcomes: ["completed"], steps: [
+              { queueId: "q_inbound", splitPct: 100 },
+              { queueId: "q_qa", splitPct: 100, samplingPct: 2, terminal: true, outcome: "completed" }
+            ] }]
+          },
+          {
+            id: "rt_newcard",
+            name: "New card application",
+            activity: "service_request",
+            productRequest: "new",
+            groupId: "pg_cards",
+            productId: "prod_cards",
+            ahtSec: 540,
+            brandIds: ["b_acme"],
+            buIds: ["bu_cs"],
+            processes: [{ channelId: "ch_digital", outcomes: ["completed", "rejected"], steps: [
+              { queueId: "q_apps", splitPct: 100 },
+              { queueId: "q_verify", splitPct: 60 },
+              { queueId: "q_qa", splitPct: 100, samplingPct: 5, terminal: true, outcome: "completed" }
+            ] }]
+          }
+        ],
+        volumeEntries: [
+          { id: "ve_billing", scope: { brandId: "b_acme", buId: "bu_cs", requestTypeId: "rt_billing" }, daily: 2398 },
+          { id: "ve_newcard", scope: { brandId: "b_acme", buId: "bu_cs", requestTypeId: "rt_newcard" }, daily: 702 }
+        ]
+      };
+    }
+    function buildDomainImportReport(model) {
+      const v = propagateDomain2(model).validation;
+      return {
+        ok: v.ok,
+        counts: {
+          brands: (model.brands || []).length,
+          businessUnits: (model.businessUnits || []).length,
+          channels: (model.channels || []).length,
+          processGroups: (model.processGroups || []).length,
+          products: (model.products || []).length,
+          queues: (model.queues || []).length,
+          requestTypes: (model.requestTypes || []).length,
+          volumeEntries: (model.volumeEntries || []).length
+        },
+        errors: v.errors,
+        warnings: v.warnings
+      };
+    }
+    module.exports = {
+      DEFAULT_STAFFING,
+      uid: uid2,
+      addBrand: addBrand2,
+      renameBrand: renameBrand2,
+      deleteBrand: deleteBrand2,
+      addBusinessUnit: addBusinessUnit3,
+      renameBusinessUnit: renameBusinessUnit2,
+      deleteBusinessUnit: deleteBusinessUnit2,
+      addProcessGroup: addProcessGroup2,
+      renameProcessGroup: renameProcessGroup2,
+      deleteProcessGroup: deleteProcessGroup2,
+      addProduct: addProduct3,
+      renameProduct: renameProduct2,
+      deleteProduct: deleteProduct2,
+      addChannel: addChannel2,
+      renameChannel: renameChannel2,
+      deleteChannel: deleteChannel2,
+      setChannelDefaults: setChannelDefaults2,
+      addQueue: addQueue3,
+      updateQueue: updateQueue3,
+      updateQueueStaffing: updateQueueStaffing3,
+      resetQueueStaffing: resetQueueStaffing3,
+      deleteQueue: deleteQueue3,
+      addServiceTeam: addServiceTeam2,
+      updateServiceTeam: updateServiceTeam2,
+      deleteServiceTeam: deleteServiceTeam2,
+      addRequestType: addRequestType2,
+      updateRequestType: updateRequestType2,
+      setAssignment: setAssignment2,
+      deleteRequestType: deleteRequestType2,
+      addProcess: addProcess2,
+      deleteProcess: deleteProcess2,
+      addStep: addStep2,
+      updateStep: updateStep2,
+      removeStep: removeStep2,
+      setOutcomes: setOutcomes2,
+      setVolumeEntry,
+      clearVolumeEntry,
+      blankDomainModel,
+      sampleDomainModel,
+      buildDomainImportReport
+    };
+  }
+});
+
 // model/migrate.js
 var require_migrate = __commonJS({
   "model/migrate.js"(exports, module) {
@@ -3081,7 +3148,7 @@ var require_adapter = __commonJS({
   "model/adapter.js"(exports, module) {
     var D = require_derive();
     var { DEFAULT_PROFILE } = require_engine();
-    function engineTypeOf(q) {
+    function engineTypeOf2(q) {
       if (q.staffing && q.staffing.type) return { type: q.staffing.type, subtype: q.staffing.subtype };
       if (q.type === "inbound_call" || q.type === "outbound_call") return { type: "voice" };
       return { type: "digital" };
@@ -3103,9 +3170,9 @@ var require_adapter = __commonJS({
       const queues = (model.queues || []).map((q) => {
         const d = derived.get(q.id) || { volume: 0, effectiveAht: q.fallbackAhtSec };
         const st = q.staffing || {};
-        const et = engineTypeOf(q);
+        const et = engineTypeOf2(q);
         const cb = resolveChannelBrand(q);
-        const defaults = engineQueueDefaults(cb);
+        const defaults = engineQueueDefaults2(cb);
         const merged = { ...defaults, ...st };
         if (!st.wf && st.attritionPct != null) merged.wf = { ...defaults.wf, attrition: st.attritionPct / 100 / 12 };
         const eq = {
@@ -3123,7 +3190,7 @@ var require_adapter = __commonJS({
       });
       return { ...base, queues };
     }
-    function engineQueueDefaults(cb) {
+    function engineQueueDefaults2(cb) {
       return {
         brandId: cb.brandId,
         channel: cb.channel,
@@ -3153,7 +3220,7 @@ var require_adapter = __commonJS({
       const { migrateV1ToV2: migrateV1ToV22 } = require_migrate();
       return v2ToEngineConfig2(migrateV1ToV22(cfg));
     }
-    module.exports = { v2ToEngineConfig: v2ToEngineConfig2, roundTripConfig, engineTypeOf };
+    module.exports = { v2ToEngineConfig: v2ToEngineConfig2, roundTripConfig, engineTypeOf: engineTypeOf2 };
   }
 });
 
@@ -3879,6 +3946,12 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .stepdash{color:var(--ink-3); text-align:center; font-size:11px}
 .steprow input[type="checkbox"]{justify-self:start; margin:0}
 .scrollx{overflow-x:auto}
+.mdgroup{margin-bottom:10px}
+.mdgrouplab{font-size:10.5px; color:var(--ink-3); font-weight:600; margin:2px 0 4px}
+.fam-sec{border-top:0.5px solid var(--line); padding:10px 0 12px; margin-top:10px}
+.famhead{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.famhead b{font-size:12.5px}
+.derived-strip{margin:6px 0 4px}
 
 /* ---- phone layout ---- */
 @media(max-width:640px){
@@ -4789,6 +4862,7 @@ function drawerPath(model, q) {
 var import_propagate = __toESM(require_propagate());
 var import_domain = __toESM(require_domain());
 var import_taxonomy3 = __toESM(require_taxonomy());
+var import_bridge = __toESM(require_bridge());
 var Ops = __toESM(require_ops());
 import { useState as useState2, useMemo as useMemo2 } from "react";
 import { Fragment as Fragment2, jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
@@ -4887,7 +4961,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
     }) }),
     /* @__PURE__ */ jsxs2("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
       tab === "structure" && /* @__PURE__ */ jsx2(StructurePanel, { model, set: onModelChange }),
-      tab === "queues" && /* @__PURE__ */ jsx2(QueuesPanel, { model, p }),
+      tab === "queues" && /* @__PURE__ */ jsx2(QueuesPanel, { model, set: onModelChange, p }),
       tab === "requestTypes" && /* @__PURE__ */ jsx2(RequestTypesPanel, { model, set: onModelChange, p }),
       tab === "volume" && /* @__PURE__ */ jsx2(VolumePanel, { model, p }),
       tab === "map" && /* @__PURE__ */ jsx2(MapPanel, { p }),
@@ -5027,62 +5101,358 @@ function StructurePanel({ model, set }) {
     ] })
   ] });
 }
-function QueuesPanel({ model, p }) {
+function NumF({ label, value, onChange, placeholder }) {
+  return /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+    /* @__PURE__ */ jsx2("label", { children: label }),
+    /* @__PURE__ */ jsx2(
+      "input",
+      {
+        className: "num",
+        value,
+        placeholder: placeholder || "",
+        "aria-label": label,
+        onChange: (e) => onChange(e.target.value)
+      }
+    )
+  ] });
+}
+var n0 = (v) => +v || 0;
+function Fam({ fam, name, sum, children, advanced }) {
+  const [adv, setAdv] = useState2(false);
+  return /* @__PURE__ */ jsxs2("section", { className: "fam-sec", children: [
+    /* @__PURE__ */ jsxs2("div", { className: "famhead", children: [
+      /* @__PURE__ */ jsx2("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
+      /* @__PURE__ */ jsx2("b", { children: name }),
+      /* @__PURE__ */ jsx2("span", { className: "hint", children: sum }),
+      advanced ? /* @__PURE__ */ jsx2("button", { className: "linkbtn", style: { marginLeft: "auto" }, onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null
+    ] }),
+    children,
+    adv && advanced ? /* @__PURE__ */ jsx2("div", { style: { marginTop: 8 }, children: advanced.body }) : null
+  ] });
+}
+function QueueChips({ model, selfId, list, onToggle, label }) {
+  return /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
+    /* @__PURE__ */ jsx2("label", { children: label }),
+    /* @__PURE__ */ jsx2("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).filter((x) => x.id !== selfId).map((x) => {
+      const on = (list || []).includes(x.id);
+      return /* @__PURE__ */ jsx2("button", { className: "chip" + (on ? " on-toggle" : " off"), "aria-pressed": on, onClick: () => onToggle(x.id), children: x.name }, x.id);
+    }) })
+  ] });
+}
+function QueueDetail({ model, set, q, d }) {
+  const st = q.staffing || {};
+  const et = (0, import_bridge.engineTypeOf)(q);
+  const DEF = (0, import_bridge.engineQueueDefaults)(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
+  const eff = { ...DEF, ...st };
+  const wf = { ...DEF.wf, ...st.wf || {} };
+  const burn = { ...DEF.burn, ...st.burn || {} };
+  const upd = (patch) => set(Ops.updateQueueStaffing(model, q.id, patch));
+  const updWf = (patch) => upd({ wf: { ...wf, ...patch } });
+  const updBurn = (patch) => upd({ burn: { ...burn, ...patch } });
+  const updQ = (patch) => set(Ops.updateQueue(model, q.id, patch));
+  const usage = (0, import_domain.queueUsage)(model, q.id);
+  const guard = (0, import_domain.canDeleteQueue)(model, q.id);
+  const voice = et.type === "voice";
+  const hires = wf.hires || [];
+  const setHires = (h) => updWf({ hires: h });
+  return /* @__PURE__ */ jsxs2("div", { className: "mddetail", "data-testid": "queue-detail", children: [
+    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ jsxs2("h4", { style: { marginRight: "auto" }, children: [
+        q.name,
+        q._modified ? /* @__PURE__ */ jsx2("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" }) : null
+      ] }),
+      /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => set(Ops.resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
+      guard.ok ? /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx2("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
+    ] }),
+    /* @__PURE__ */ jsxs2("p", { className: "hint derived-strip", children: [
+      "Derived: ",
+      /* @__PURE__ */ jsxs2("b", { className: "num", children: [
+        fmt2(d ? d.volume : 0),
+        "/day"
+      ] }),
+      " \xB7 eff. AHT ",
+      /* @__PURE__ */ jsxs2("b", { className: "num", children: [
+        fmt2(d ? d.effectiveAht : q.fallbackAhtSec),
+        " s"
+      ] }),
+      d && d.ahtMarker !== "queue" ? ` (${d.ahtMarker})` : "",
+      " \xB7 ",
+      usage.processes ? `used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}` : "not used by any process yet"
+    ] }),
+    /* @__PURE__ */ jsx2(
+      Fam,
+      {
+        fam: "inputs",
+        name: "Inputs",
+        sum: `${QTYPE_LABELS[q.type] || q.type} \xB7 fallback AHT ${q.fallbackAhtSec} s`,
+        advanced: { count: voice ? 2 : 5, body: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+          /* @__PURE__ */ jsx2(NumF, { label: "Priority", value: eff.priority, onChange: (v) => upd({ priority: n0(v) }) }),
+          !voice ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
+            /* @__PURE__ */ jsx2(NumF, { label: "Concurrency", value: eff.concurrency, onChange: (v) => upd({ concurrency: n0(v) }) }),
+            /* @__PURE__ */ jsx2(NumF, { label: "Backlog limit", value: eff.backlogLimit, onChange: (v) => upd({ backlogLimit: n0(v) }) }),
+            /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+              /* @__PURE__ */ jsx2("label", { children: "Subtype" }),
+              /* @__PURE__ */ jsxs2("select", { value: st.subtype || "", "aria-label": "Subtype", onChange: (e) => upd({ subtype: e.target.value || void 0 }), children: [
+                /* @__PURE__ */ jsx2("option", { value: "", children: "Workflow (backlog)" }),
+                /* @__PURE__ */ jsx2("option", { value: "customer", children: "Customer (live SLA)" })
+              ] })
+            ] })
+          ] }) : null,
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Deflects to" }),
+            /* @__PURE__ */ jsxs2("select", { value: eff.deflectsTo || "", "aria-label": "Deflects to", onChange: (e) => upd({ deflectsTo: e.target.value || null }), children: [
+              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 none" }),
+              (model.queues || []).filter((x) => x.id !== q.id).map((x) => /* @__PURE__ */ jsx2("option", { value: x.id, children: x.name }, x.id))
+            ] })
+          ] })
+        ] }) },
+        children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Name" }),
+            /* @__PURE__ */ jsx2("input", { value: q.name, "aria-label": "Queue name", onChange: (e) => updQ({ name: e.target.value }) })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Type" }),
+            /* @__PURE__ */ jsx2("select", { value: q.type, "aria-label": "Queue type", onChange: (e) => updQ({ type: e.target.value }), children: QUEUE_TYPES.map((t) => /* @__PURE__ */ jsx2("option", { value: t, children: QTYPE_LABELS[t] }, t)) })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Home brand" }),
+            /* @__PURE__ */ jsxs2("select", { value: q.homeBrandId || "", "aria-label": "Home brand", onChange: (e) => updQ({ homeBrandId: e.target.value || void 0 }), children: [
+              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 global" }),
+              (model.brands || []).map((b) => /* @__PURE__ */ jsx2("option", { value: b.id, children: b.name }, b.id))
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Home BU" }),
+            /* @__PURE__ */ jsxs2("select", { value: q.homeBuId || "", "aria-label": "Home BU", onChange: (e) => updQ({ homeBuId: e.target.value || void 0 }), children: [
+              /* @__PURE__ */ jsx2("option", { value: "", children: "\u2014 global" }),
+              (model.businessUnits || []).map((b) => /* @__PURE__ */ jsx2("option", { value: b.id, children: b.name }, b.id))
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Fallback AHT (s)", value: q.fallbackAhtSec, onChange: (v) => updQ({ fallbackAhtSec: n0(v) }) })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsx2(Fam, { fam: "performance", name: "Performance", sum: voice ? `ASA ${eff.asaTarget} s \xB7 abandon \u2264 ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`, children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+      voice ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
+        /* @__PURE__ */ jsx2(NumF, { label: "ASA target (s)", value: eff.asaTarget, onChange: (v) => upd({ asaTarget: n0(v) }) }),
+        /* @__PURE__ */ jsx2(NumF, { label: "Max abandon (%)", value: Math.round(eff.maxAbandon * 100), onChange: (v) => upd({ maxAbandon: n0(v) / 100 }) })
+      ] }) : /* @__PURE__ */ jsxs2(Fragment2, { children: [
+        /* @__PURE__ */ jsx2(NumF, { label: "SLA within (min)", value: eff.digitalSlaMinutes, onChange: (v) => upd({ digitalSlaMinutes: n0(v) }) }),
+        /* @__PURE__ */ jsx2(NumF, { label: "SLA target (%)", value: Math.round(eff.digitalSlaPct * 100), onChange: (v) => upd({ digitalSlaPct: n0(v) / 100 }) })
+      ] }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Patience (s)", value: eff.patience, onChange: (v) => upd({ patience: n0(v) }) })
+    ] }) }),
+    /* @__PURE__ */ jsx2(
+      Fam,
+      {
+        fam: "efficiency",
+        name: "Efficiency",
+        sum: `occupancy \u2264 ${Math.round((eff.occupancyCeiling ?? 0.85) * 100)}%`,
+        advanced: { count: 5, body: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+          /* @__PURE__ */ jsx2(NumF, { label: "Burnout threshold (%)", value: Math.round(burn.occThreshold * 100), onChange: (v) => updBurn({ occThreshold: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Burnout sensitivity", value: burn.sensitivity, onChange: (v) => updBurn({ sensitivity: n0(v) }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Recovery (weeks)", value: burn.recovery, onChange: (v) => updBurn({ recovery: n0(v) }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Max attrition \xD7", value: burn.maxAttritionMult, onChange: (v) => updBurn({ maxAttritionMult: n0(v) }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Absence uplift (%)", value: Math.round(burn.absenceUplift * 100), onChange: (v) => updBurn({ absenceUplift: n0(v) / 100 }) })
+        ] }) },
+        children: /* @__PURE__ */ jsx2("div", { className: "fields", children: /* @__PURE__ */ jsx2(NumF, { label: "Occupancy ceiling (%)", value: Math.round((eff.occupancyCeiling ?? 0.85) * 100), onChange: (v) => upd({ occupancyCeiling: n0(v) / 100 }) }) })
+      }
+    ),
+    /* @__PURE__ */ jsx2(
+      Fam,
+      {
+        fam: "workforce",
+        name: "Workforce",
+        sum: `${eff.resourcing || "resourced"} \xB7 shrinkage ${Math.round(eff.shrinkage * 100)}%`,
+        advanced: { count: 4 + 1, body: /* @__PURE__ */ jsxs2(Fragment2, { children: [
+          /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+            /* @__PURE__ */ jsx2(NumF, { label: "Attrition growth (/mo)", value: wf.attritionGrowth, onChange: (v) => updWf({ attritionGrowth: n0(v) }) }),
+            /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+              /* @__PURE__ */ jsx2("label", { children: "Learning curve (\xD7 by week)" }),
+              /* @__PURE__ */ jsx2(
+                "input",
+                {
+                  value: (wf.learningCurve || []).join(", "),
+                  "aria-label": "Learning curve",
+                  onChange: (e) => updWf({ learningCurve: e.target.value.split(",").map((x) => +x.trim()).filter((x) => !isNaN(x)) })
+                }
+              )
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx2(
+            QueueChips,
+            {
+              model,
+              selfId: q.id,
+              list: eff.crossSkill,
+              label: "Cross-skilled with",
+              onToggle: (id) => upd({ crossSkill: (eff.crossSkill || []).includes(id) ? eff.crossSkill.filter((x) => x !== id) : [...eff.crossSkill || [], id] })
+            }
+          ),
+          /* @__PURE__ */ jsx2(
+            QueueChips,
+            {
+              model,
+              selfId: q.id,
+              list: eff.supports,
+              label: "Supports (capacity link)",
+              onToggle: (id) => upd({ supports: (eff.supports || []).includes(id) ? eff.supports.filter((x) => x !== id) : [...eff.supports || [], id] })
+            }
+          ),
+          /* @__PURE__ */ jsxs2("div", { className: "field", style: { gridColumn: "1/-1", marginTop: 6 }, children: [
+            /* @__PURE__ */ jsx2("label", { children: "Manual hires (S4 \u2014 week \xD7 heads)" }),
+            hires.map((h, i) => /* @__PURE__ */ jsxs2("div", { className: "mixrow", children: [
+              /* @__PURE__ */ jsx2("span", { className: "hint", children: "week" }),
+              /* @__PURE__ */ jsx2("input", { className: "num", value: h.week, "aria-label": `hire ${i + 1} week`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, week: n0(e.target.value) } : x)) }),
+              /* @__PURE__ */ jsx2("span", { className: "hint", children: "heads" }),
+              /* @__PURE__ */ jsx2("input", { className: "num", value: h.heads, "aria-label": `hire ${i + 1} heads`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, heads: n0(e.target.value) } : x)) }),
+              /* @__PURE__ */ jsx2("button", { className: "regdel", onClick: () => setHires(hires.filter((_, j) => j !== i)), "aria-label": `remove hire ${i + 1}`, children: "\u2715" })
+            ] }, i)),
+            /* @__PURE__ */ jsx2("div", { children: /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => setHires([...hires, { week: 1, heads: 1 }]), children: "+ Hire" }) })
+          ] })
+        ] }) },
+        children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+          /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+            /* @__PURE__ */ jsx2("label", { children: "Resourcing" }),
+            /* @__PURE__ */ jsxs2("select", { value: eff.resourcing || "resourced", "aria-label": "Resourcing", onChange: (e) => upd({ resourcing: e.target.value }), children: [
+              /* @__PURE__ */ jsx2("option", { value: "resourced", children: "Resourced \u2014 own headcount" }),
+              /* @__PURE__ */ jsx2("option", { value: "dedicated", children: "Dedicated" }),
+              /* @__PURE__ */ jsx2("option", { value: "leveraged", children: "Leveraged \u2014 shared pool" }),
+              /* @__PURE__ */ jsx2("option", { value: "overflow_only", children: "Overflow only" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Starting FTE", value: eff.fte != null ? eff.fte : "", placeholder: "\u2014 sized by strategy", onChange: (v) => upd({ fte: v === "" ? void 0 : n0(v) }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Shrinkage (%)", value: Math.round(eff.shrinkage * 100), onChange: (v) => upd({ shrinkage: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Attrition (%/mo)", value: Math.round(wf.attrition * 1e3) / 10, onChange: (v) => updWf({ attrition: n0(v) / 100 }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Req \u2192 start (weeks)", value: wf.reqToStart, onChange: (v) => updWf({ reqToStart: n0(v) }) }),
+          /* @__PURE__ */ jsx2(NumF, { label: "Training (weeks)", value: wf.trainingWeeks, onChange: (v) => updWf({ trainingWeeks: n0(v) }) })
+        ] })
+      }
+    ),
+    /* @__PURE__ */ jsx2(Fam, { fam: "customer", name: "Customer", sum: `churn \xA3${eff.churnCost ?? 500}`, children: /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+      /* @__PURE__ */ jsx2(NumF, { label: "Churn cost (\xA3)", value: eff.churnCost ?? 500, onChange: (v) => upd({ churnCost: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Failed \u2192 churn (%)", value: eff.failedToChurnPct ?? 6, onChange: (v) => upd({ failedToChurnPct: n0(v) }) })
+    ] }) }),
+    /* @__PURE__ */ jsx2(Fam, { fam: "outputs", name: "Outputs", sum: `agent \xA3${fmt2(eff.agentCost)}/yr`, children: /* @__PURE__ */ jsx2("div", { className: "fields", children: /* @__PURE__ */ jsx2(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
+  ] });
+}
+function TeamDetail({ model, set, team }) {
+  const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
+  return /* @__PURE__ */ jsxs2("div", { className: "mddetail", "data-testid": "team-detail", children: [
+    /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ jsx2("h4", { style: { marginRight: "auto" }, children: team.name }),
+      /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
+    ] }),
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
+    /* @__PURE__ */ jsxs2("div", { className: "fields", children: [
+      /* @__PURE__ */ jsxs2("div", { className: "field", children: [
+        /* @__PURE__ */ jsx2("label", { children: "Name" }),
+        /* @__PURE__ */ jsx2("input", { value: team.name, "aria-label": "Team name", onChange: (e) => upd({ name: e.target.value }) })
+      ] }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Size (FTE)", value: team.size, onChange: (v) => upd({ size: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Premium (%)", value: Math.round((team.premiumPct || 0) * 100), onChange: (v) => upd({ premiumPct: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Proficiency (%)", value: Math.round((team.proficiency || 0) * 100), onChange: (v) => upd({ proficiency: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Trigger occupancy (%)", value: Math.round((team.triggerOccupancy || 0) * 100), onChange: (v) => upd({ triggerOccupancy: n0(v) / 100 }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Max hours (/wk)", value: team.maxHoursPerWeek, onChange: (v) => upd({ maxHoursPerWeek: n0(v) }) }),
+      /* @__PURE__ */ jsx2(NumF, { label: "Agent cost (\xA3/yr)", value: team.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) })
+    ] }),
+    /* @__PURE__ */ jsxs2("div", { className: "field", style: { marginTop: 8 }, children: [
+      /* @__PURE__ */ jsx2("label", { children: "Covers" }),
+      /* @__PURE__ */ jsx2("div", { className: "regoff", style: { marginTop: 2 }, children: (model.queues || []).map((x) => {
+        const on = (team.coversQueues || []).includes(x.id);
+        return /* @__PURE__ */ jsx2(
+          "button",
+          {
+            className: "chip" + (on ? " on-toggle" : " off"),
+            "aria-pressed": on,
+            onClick: () => upd({ coversQueues: on ? team.coversQueues.filter((i) => i !== x.id) : [...team.coversQueues || [], x.id] }),
+            children: x.name
+          },
+          x.id
+        );
+      }) })
+    ] })
+  ] });
+}
+function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
-  const [sel, setSel] = useState2(queues[0] ? queues[0].id : null);
-  const q = queues.find((x) => x.id === sel);
-  const d = q ? p.queues.get(q.id) : null;
-  const usage = q ? (0, import_domain.queueUsage)(model, q.id) : null;
+  const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
+  const [sel, setSel] = useState2(queues[0] ? { kind: "queue", id: queues[0].id } : null);
+  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
+  const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
+  const groups = [];
+  const byKey = /* @__PURE__ */ new Map();
+  for (const x of queues) {
+    const label = x.homeBrandId ? nameOf(model.brands, x.homeBrandId) + (x.homeBuId ? " \u203A " + nameOf(model.businessUnits, x.homeBuId) : "") : "Global \u2014 no home";
+    if (!byKey.has(label)) {
+      byKey.set(label, []);
+      groups.push(label);
+    }
+    byKey.get(label).push(x);
+  }
+  groups.sort((a, b) => a === "Global \u2014 no home" ? 1 : b === "Global \u2014 no home" ? -1 : 0);
   return /* @__PURE__ */ jsxs2(Fragment2, { children: [
     /* @__PURE__ */ jsx2("h3", { children: "Queues" }),
-    /* @__PURE__ */ jsx2("p", { className: "hint", children: "The stations and their physics. Volume and effective AHT are derived \u2014 never entered here." }),
-    queues.length === 0 ? /* @__PURE__ */ jsx2("p", { className: "hint", children: "No queues yet." }) : /* @__PURE__ */ jsxs2("div", { className: "md", children: [
-      /* @__PURE__ */ jsx2("div", { className: "mdlist", role: "listbox", "aria-label": "Queues", children: queues.map((x) => {
-        const dx = p.queues.get(x.id);
-        return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": sel === x.id, className: sel === x.id ? "on" : "", onClick: () => setSel(x.id), children: [
-          /* @__PURE__ */ jsx2("b", { children: x.name }),
-          /* @__PURE__ */ jsx2("small", { children: QTYPE_LABELS[x.type] || x.type }),
-          /* @__PURE__ */ jsxs2("span", { className: "qstats num", children: [
-            fmt2(dx ? dx.volume : 0),
-            "/day \xB7 ",
-            fmt2(dx ? dx.effectiveAht : x.fallbackAhtSec),
-            " s",
-            dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
-          ] })
-        ] }, x.id);
-      }) }),
-      /* @__PURE__ */ jsx2("div", { className: "mddetail", "data-testid": "queue-detail", children: q ? /* @__PURE__ */ jsxs2(Fragment2, { children: [
-        /* @__PURE__ */ jsx2("h4", { children: q.name }),
-        /* @__PURE__ */ jsxs2("p", { className: "hint", children: [
-          QTYPE_LABELS[q.type] || q.type,
-          q.homeBrandId ? ` \xB7 ${nameOf(model.brands, q.homeBrandId)}` : "",
-          q.homeBuId ? ` \u203A ${nameOf(model.businessUnits, q.homeBuId)}` : ""
-        ] }),
-        /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-          /* @__PURE__ */ jsx2("span", { children: "Derived volume/day" }),
-          /* @__PURE__ */ jsx2("b", { className: "num", children: fmt2(d ? d.volume : 0) })
-        ] }),
-        /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-          /* @__PURE__ */ jsx2("span", { children: "Effective AHT" }),
-          /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-            fmt2(d ? d.effectiveAht : q.fallbackAhtSec),
-            " s",
-            d && d.ahtMarker !== "queue" ? ` \xB7 ${d.ahtMarker}` : ""
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-          /* @__PURE__ */ jsx2("span", { children: "Fallback AHT" }),
-          /* @__PURE__ */ jsxs2("b", { className: "num", children: [
-            fmt2(q.fallbackAhtSec),
-            " s"
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxs2("div", { className: "kv", children: [
-          /* @__PURE__ */ jsx2("span", { children: "Staffing" }),
-          /* @__PURE__ */ jsx2("b", { children: q.staffing && q.staffing.wf ? "full physics carried" : q._modified ? "tuned" : "defaults" })
-        ] }),
-        /* @__PURE__ */ jsx2("p", { className: "usage", children: usage && usage.processes ? `Used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}.` : "Not used by any process yet." })
-      ] }) : null })
+    /* @__PURE__ */ jsx2("p", { className: "hint", children: "Volume and effective AHT are derived \u2014 never entered here." }),
+    /* @__PURE__ */ jsxs2("div", { className: "md", children: [
+      /* @__PURE__ */ jsxs2("div", { children: [
+        groups.map((label) => /* @__PURE__ */ jsxs2("div", { className: "mdgroup", children: [
+          /* @__PURE__ */ jsx2("p", { className: "mdgrouplab", children: label }),
+          /* @__PURE__ */ jsx2("div", { className: "mdlist", role: "listbox", "aria-label": label, children: byKey.get(label).map((x) => {
+            const dx = p.queues.get(x.id);
+            const u = (0, import_domain.queueUsage)(model, x.id);
+            const on = sel && sel.kind === "queue" && sel.id === x.id;
+            return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "queue", id: x.id }), children: [
+              /* @__PURE__ */ jsxs2("b", { children: [
+                x.name,
+                x._modified ? /* @__PURE__ */ jsx2("span", { className: "moddot", style: { marginLeft: 5 }, "aria-label": "modified" }) : null
+              ] }),
+              /* @__PURE__ */ jsxs2("small", { children: [
+                QTYPE_LABELS[x.type] || x.type,
+                u.processes ? ` \xB7 ${u.processes} process${u.processes === 1 ? "" : "es"} \xB7 ${u.brands} brand${u.brands === 1 ? "" : "s"}` : " \xB7 unused"
+              ] }),
+              /* @__PURE__ */ jsxs2("span", { className: "qstats num", children: [
+                fmt2(dx ? dx.volume : 0),
+                "/day \xB7 ",
+                fmt2(dx ? dx.effectiveAht : x.fallbackAhtSec),
+                " s",
+                dx && dx.ahtMarker === "weighted" ? " \xB7 weighted" : dx && dx.ahtMarker === "svc" ? " \xB7 svc" : ""
+              ] })
+            ] }, x.id);
+          }) })
+        ] }, label)),
+        /* @__PURE__ */ jsx2("button", { className: "btn sm", onClick: () => {
+          const m2 = Ops.addQueue(model, { name: "New queue", type: "inbound_call" });
+          set(m2);
+          setSel({ kind: "queue", id: m2.queues[m2.queues.length - 1].id });
+        }, children: "+ Queue" }),
+        /* @__PURE__ */ jsxs2("div", { className: "mdgroup", children: [
+          /* @__PURE__ */ jsx2("p", { className: "mdgrouplab", children: "Shared capacity" }),
+          /* @__PURE__ */ jsx2("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
+            const on = sel && sel.kind === "team" && sel.id === x.id;
+            return /* @__PURE__ */ jsxs2("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
+              /* @__PURE__ */ jsx2("b", { children: x.name }),
+              /* @__PURE__ */ jsxs2("small", { children: [
+                "service team \xB7 covers ",
+                (x.coversQueues || []).length,
+                " queue",
+                (x.coversQueues || []).length === 1 ? "" : "s"
+              ] }),
+              /* @__PURE__ */ jsxs2("span", { className: "qstats num", children: [
+                x.size,
+                " FTE"
+              ] })
+            ] }, x.id);
+          }) }),
+          /* @__PURE__ */ jsx2("button", { className: "btn sm", style: { marginTop: 4 }, disabled: !model.engineConfig, onClick: () => {
+            const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
+            set(m2);
+            setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
+          }, children: "+ Shared team" })
+        ] })
+      ] }),
+      q ? /* @__PURE__ */ jsx2(QueueDetail, { model, set, q, d: p.queues.get(q.id) }) : team ? /* @__PURE__ */ jsx2(TeamDetail, { model, set, team }) : /* @__PURE__ */ jsx2("div", { className: "mddetail", "data-testid": "queue-detail", children: /* @__PURE__ */ jsx2("p", { className: "hint", children: "Select a queue or shared team." }) })
     ] })
   ] });
 }
