@@ -10,7 +10,7 @@
  * here renders a live read-only view of the model so the shell is reviewable
  * before the editors land.
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { propagateDomain } from "../../model/propagate.js";
 import { queueUsage, keyOf, canDeleteBrand, canDeleteBU, canDeleteChannel, canDeleteGroup, canDeleteProduct, canDeleteRequestType, canDeleteQueue } from "../../model/domain.js";
 import { SEASONAL_PRESETS } from "../../engine/engine.js";
@@ -91,6 +91,10 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
   const status = useMemo(() => computeStatus(model, p), [model, p]);
   const [tab, setTab] = useState("structure");
   const firstTodo = status.find((s) => !s.ok);
+  // Six labels overflow the strip on a phone, so a jump-link from Map (or the
+  // progress strip's Go) could select a tab whose button is off-screen.
+  const activeTabRef = useRef(null);
+  useEffect(() => { activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" }); }, [tab]);
 
   return (
     <div className="shell">
@@ -110,7 +114,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         <h2>Setup</h2>
         {onOpenClassic ? <button className="linkbtn" onClick={onOpenClassic}>← classic Setup</button> : null}
       </div>
-      <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined. Request types is the only place anything is wired together.</p>
+      <p className="lede">Six tabs in dependency order — each consumes what the previous ones defined.</p>
 
       {importReport ? <DomainImportReport report={importReport} onDismiss={onDismissImport} /> : null}
 
@@ -122,16 +126,19 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
       <div className="subtabs" role="tablist" aria-label="Setup tabs">
         {SETUP_TABS.map(([k, label]) => {
           const s = status.find((x) => x.key === k);
+          const on = tab === k;
           return (
-            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+            <button key={k} role="tab" id={"tab-" + k} aria-controls="setup-panel" aria-selected={on}
+              ref={on ? activeTabRef : null} className={on ? "on" : ""} onClick={() => setTab(k)}
+              aria-label={s.ok ? label : label + " — needs attention: " + s.next}>
               {label}
-              {!s.ok ? <span className="glyph todo">▲</span> : null}
+              {!s.ok ? <span className="glyph todo" title={s.next}>▲</span> : null}
             </button>
           );
         })}
       </div>
 
-      <div role="tabpanel" data-tab={tab} className="panel">
+      <div role="tabpanel" id="setup-panel" aria-labelledby={"tab-" + tab} data-tab={tab} className="panel flat">
         {tab === "structure" && <StructurePanel model={model} set={onModelChange} />}
         {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
@@ -140,9 +147,9 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
       </div>
 
-      {onDownloadTemplate || onUploadTemplate ? (
+      {(onDownloadTemplate || onUploadTemplate) && tab !== "map" && tab !== "defaults" ? (
         <div className="importbox">
-          <p><b>Load from the template.</b> Five sheets mirror the model — Registry, Queues, Request types, Steps, Volume entries. Download comes pre-filled; re-upload validates before anything changes.</p>
+          <p><b>Bulk edit via the five-sheet template.</b> Download comes pre-filled; re-upload validates first.</p>
           <div style={{ display: "flex", gap: 8 }}>
             {onDownloadTemplate ? <button className="btn sm" onClick={() => onDownloadTemplate(model)}>Download template</button> : null}
             {onUploadTemplate ? <button className="btn sm primary" onClick={() => onUploadTemplate()}>Upload data</button> : null}
@@ -151,6 +158,20 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
       ) : null}
     </div>
   );
+}
+
+// On a phone .md is one column and the detail pane renders after the entire
+// master list — selecting a row changed something off-screen. Moves focus (so
+// keyboard users land in the editor too) and scrolls only where it is stacked.
+// Both scrollIntoView and matchMedia are optional: jsdom defines neither.
+function useRevealOnSelect(sel) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (sel == null || !ref.current) return;
+    ref.current.focus?.();
+    if (window.matchMedia?.("(max-width:640px)")?.matches) ref.current.scrollIntoView?.({ block: "start" });
+  }, [sel]);
+  return ref;
 }
 
 const nameOf = (list, id) => { const e = (list || []).find((x) => x.id === id); return e ? e.name : id; };
@@ -213,7 +234,7 @@ function ChannelRow({ model, c, set }) {
       guard={canDeleteChannel(model, c.id)} onDelete={() => set(Ops.deleteChannel(model, c.id))}
       extra={<>
         <span className="tax">{CHANNEL_LABELS[c.key] || c.key}</span>
-        <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}</button>
+        <button className="linkbtn" onClick={() => setOpen(!open)} aria-expanded={open}>defaults{Object.keys(d).length ? " ●" : ""}<span className="chev">▼</span></button>
       </>}>
       {open ? (
         <div className="fields chdefaults" data-testid={"channel-defaults-" + c.key}>
@@ -248,8 +269,7 @@ function StructurePanel({ model, set }) {
   ));
   return (
     <>
-      <h3>Structure</h3>
-      <p className="hint">Brands, business units, channels, groups and products — set up here, wired together in Request types. Renames propagate; deletes are guarded while in use.</p>
+      <h3>Structure <small>the vocabulary of the estate</small></h3>
       <div className="structgrid">
         {brandsL}
         {busL}
@@ -288,11 +308,11 @@ function NumF({ label, value, onChange, placeholder }) {
 }
 const n0 = (v) => +v || 0;
 
-function Fam({ fam, name, sum, children, advanced }) {
+function Fam({ fam, name, children, advanced }) {
   const [adv, setAdv] = useState(false);
   return (
     <section className="fam-sec">
-      <div className="famhead"><span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b><span className="hint">{sum}</span>
+      <div className="famhead"><span className="fam" style={{ background: FAMILY_COLORS[fam] }} /><b>{name}</b>
         {advanced ? <button className="linkbtn" style={{ marginLeft: "auto" }} onClick={() => setAdv(!adv)} aria-expanded={adv}>{adv ? "Hide advanced" : `Advanced (${advanced.count})`}</button> : null}
       </div>
       {children}
@@ -314,7 +334,7 @@ function QueueChips({ model, selfId, list, onToggle, label }) {
   );
 }
 
-function QueueDetail({ model, set, q, d }) {
+function QueueDetail({ model, set, q, d, detailRef }) {
   const st = q.staffing || {};
   const et = engineTypeOf(q);
   const DEF = engineQueueDefaults(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
@@ -331,17 +351,17 @@ function QueueDetail({ model, set, q, d }) {
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
   return (
-    <div className="mddetail" data-testid="queue-detail">
+    <div className="mddetail" data-testid="queue-detail" ref={detailRef} tabIndex={-1} aria-label={q.name}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <h4 style={{ marginRight: "auto" }}>{q.name}{q._modified ? <span className="moddot" style={{ marginLeft: 6 }} aria-label="modified" /> : null}</h4>
         <button className="btn sm" onClick={() => set(Ops.resetQueueStaffing(model, q.id))}>Reset to defaults</button>
         {guard.ok
-          ? <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => set(Ops.deleteQueue(model, q.id))}>Delete</button>
+          ? <button className="btn sm danger" onClick={() => set(Ops.deleteQueue(model, q.id))}>Delete</button>
           : <span className="hint blocked" style={{ marginLeft: 0 }} title={"Referenced by " + guardSummary(guard)}>▲ in use</span>}
       </div>
       <p className="hint derived-strip">Derived: <b className="num">{fmt(d ? d.volume : 0)}/day</b> · eff. AHT <b className="num">{fmt(d ? d.effectiveAht : q.fallbackAhtSec)} s</b>{d && d.ahtMarker !== "queue" ? ` (${d.ahtMarker})` : ""} · {usage.processes ? `used in ${usage.processes} process${usage.processes === 1 ? "" : "es"} across ${usage.brands} brand${usage.brands === 1 ? "" : "s"}` : "not used by any process yet"}</p>
 
-      <Fam fam="inputs" name="Inputs" sum={`${QTYPE_LABELS[q.type] || q.type} · fallback AHT ${q.fallbackAhtSec} s`}
+      <Fam fam="inputs" name="Inputs"
         advanced={{ count: voice ? 2 : 5, body: (
           <div className="fields">
             <NumF label="Priority" value={eff.priority} onChange={(v) => upd({ priority: n0(v) })} />
@@ -380,7 +400,7 @@ function QueueDetail({ model, set, q, d }) {
         </div>
       </Fam>
 
-      <Fam fam="performance" name="Performance" sum={voice ? `ASA ${eff.asaTarget} s · abandon ≤ ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`}>
+      <Fam fam="performance" name="Performance">
         <div className="fields">
           {voice ? <>
             <NumF label="ASA target (s)" value={eff.asaTarget} onChange={(v) => upd({ asaTarget: n0(v) })} />
@@ -393,7 +413,7 @@ function QueueDetail({ model, set, q, d }) {
         </div>
       </Fam>
 
-      <Fam fam="efficiency" name="Efficiency" sum={`occupancy ≤ ${Math.round((eff.occupancyCeiling ?? 0.85) * 100)}%`}
+      <Fam fam="efficiency" name="Efficiency"
         advanced={{ count: 5, body: (
           <div className="fields">
             <NumF label="Burnout threshold (%)" value={Math.round(burn.occThreshold * 100)} onChange={(v) => updBurn({ occThreshold: n0(v) / 100 })} />
@@ -408,20 +428,20 @@ function QueueDetail({ model, set, q, d }) {
         </div>
       </Fam>
 
-      <Fam fam="workforce" name="Workforce" sum={`${eff.resourcing || "resourced"} · shrinkage ${Math.round(eff.shrinkage * 100)}%`}
+      <Fam fam="workforce" name="Workforce"
         advanced={{ count: 4 + 1, body: (
           <>
             <div className="fields">
               <NumF label="Attrition growth (/mo)" value={wf.attritionGrowth} onChange={(v) => updWf({ attritionGrowth: n0(v) })} />
               <div className="field"><label>Learning curve (× by week)</label>
-                <input value={(wf.learningCurve || []).join(", ")} aria-label="Learning curve"
+                <input value={(wf.learningCurve || []).join(", ")} aria-label="Learning curve" placeholder="0.6, 0.8, 0.9, 1"
                   onChange={(e) => updWf({ learningCurve: e.target.value.split(",").map((x) => +x.trim()).filter((x) => !isNaN(x)) })} /></div>
             </div>
             <QueueChips model={model} selfId={q.id} list={eff.crossSkill} label="Cross-skilled with"
               onToggle={(id) => upd({ crossSkill: (eff.crossSkill || []).includes(id) ? eff.crossSkill.filter((x) => x !== id) : [...(eff.crossSkill || []), id] })} />
             <QueueChips model={model} selfId={q.id} list={eff.supports} label="Supports (capacity link)"
               onToggle={(id) => upd({ supports: (eff.supports || []).includes(id) ? eff.supports.filter((x) => x !== id) : [...(eff.supports || []), id] })} />
-            <div className="field" style={{ gridColumn: "1/-1", marginTop: 6 }}><label>Manual hires (S4 — week × heads)</label>
+            <div className="field" style={{ gridColumn: "1/-1", marginTop: 6 }}><label>Manual hires (week × heads)</label>
               {hires.map((h, i) => (
                 <div className="mixrow" key={i}>
                   <span className="hint">week</span>
@@ -451,14 +471,14 @@ function QueueDetail({ model, set, q, d }) {
         </div>
       </Fam>
 
-      <Fam fam="customer" name="Customer" sum={`churn £${eff.churnCost ?? 500}`}>
+      <Fam fam="customer" name="Customer">
         <div className="fields">
           <NumF label="Churn cost (£)" value={eff.churnCost ?? 500} onChange={(v) => upd({ churnCost: n0(v) })} />
           <NumF label="Failed → churn (%)" value={eff.failedToChurnPct ?? 6} onChange={(v) => upd({ failedToChurnPct: n0(v) })} />
         </div>
       </Fam>
 
-      <Fam fam="outputs" name="Outputs" sum={`agent £${fmt(eff.agentCost)}/yr`}>
+      <Fam fam="outputs" name="Outputs">
         <div className="fields">
           <NumF label="Agent cost (£/yr)" value={eff.agentCost} onChange={(v) => upd({ agentCost: n0(v) })} />
         </div>
@@ -467,13 +487,13 @@ function QueueDetail({ model, set, q, d }) {
   );
 }
 
-function TeamDetail({ model, set, team }) {
+function TeamDetail({ model, set, team, detailRef }) {
   const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
   return (
-    <div className="mddetail" data-testid="team-detail">
+    <div className="mddetail" data-testid="team-detail" ref={detailRef} tabIndex={-1} aria-label={team.name}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <h4 style={{ marginRight: "auto" }}>{team.name}</h4>
-        <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => set(Ops.deleteServiceTeam(model, team.id))}>Delete</button>
+        <button className="btn sm danger" onClick={() => set(Ops.deleteServiceTeam(model, team.id))}>Delete</button>
       </div>
       <p className="hint">Shared capacity — spills into the queues it covers when they run hot.</p>
       <div className="fields">
@@ -502,7 +522,8 @@ function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
   const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
   const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
-  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
+  const detailRef = useRevealOnSelect(sel && sel.id);
+  const q = sel && sel.kind === "queue" ? (queues.find((x) => x.id === sel.id) || queues[0]) : null;
   const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
   // group by home: brand › BU · brand-only · Global
   const groups = [];
@@ -517,8 +538,7 @@ function QueuesPanel({ model, set, p }) {
   groups.sort((a, b) => (a === "Global — no home" ? 1 : b === "Global — no home" ? -1 : 0));
   return (
     <>
-      <h3>Queues</h3>
-      <p className="hint">Volume and effective AHT are derived — never entered here.</p>
+      <h3>Queues <small>volume and AHT are derived</small></h3>
       <div className="md">
         <div>
           {groups.map((label) => (
@@ -550,7 +570,7 @@ function QueuesPanel({ model, set, p }) {
               {teams.map((x) => {
                 const on = sel && sel.kind === "team" && sel.id === x.id;
                 return (
-                  <button key={x.id} role="option" aria-selected={on} className={on ? "on" : ""} onClick={() => setSel({ kind: "team", id: x.id })}>
+                  <button key={x.id} role="option" aria-selected={!!on} className={on ? "on" : ""} onClick={() => setSel({ kind: "team", id: x.id })}>
                     <b>{x.name}</b>
                     <small>service team · covers {(x.coversQueues || []).length} queue{(x.coversQueues || []).length === 1 ? "" : "s"}</small>
                     <span className="qstats num">{x.size} FTE</span>
@@ -558,15 +578,16 @@ function QueuesPanel({ model, set, p }) {
                 );
               })}
             </div>
-            <button className="btn sm" style={{ marginTop: 4 }} disabled={!model.engineConfig} onClick={() => {
+            <button className="btn sm" style={{ marginTop: 4 }} disabled={!model.engineConfig}
+              title={model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first — shared teams live in the engine config."} onClick={() => {
               const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
               set(m2); setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
             }}>+ Shared team</button>
           </div>
         </div>
-        {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} />
-          : team ? <TeamDetail model={model} set={set} team={team} />
-          : <div className="mddetail" data-testid="queue-detail"><p className="hint">Select a queue or shared team.</p></div>}
+        {q ? <QueueDetail model={model} set={set} q={q} d={p.queues.get(q.id)} detailRef={detailRef} />
+          : team ? <TeamDetail model={model} set={set} team={team} detailRef={detailRef} />
+          : <div className="mddetail" data-testid="queue-detail" ref={detailRef} tabIndex={-1}><p className="hint">Select a queue or shared team.</p></div>}
       </div>
     </>
   );
@@ -579,36 +600,58 @@ function QueuesPanel({ model, set, p }) {
 // p/(1−p) multi-round rework figure computed per branch) with V3 live.
 const fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
 
-function ToggleChips({ options, selected, onToggle, allLabel }) {
+// Two of these render back to back under one "Assignment" heading — brands and
+// business units. Unlabelled they were two anonymous rows of toggles deciding
+// the most consequential wiring on the surface. Same idiom QueueChips already
+// used 200 lines below: a .field label + a named group.
+function ToggleChips({ label, options, selected, onToggle, allLabel }) {
   return (
-    <div className="regoff" style={{ marginTop: 4 }}>
-      {options.map((o) => {
-        const on = selected.includes(o.id);
-        return (
-          <button key={o.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on}
-            onClick={() => onToggle(o.id)}>{on ? o.name : "+ " + o.name}</button>
-        );
-      })}
-      {options.length === 0 ? <span className="hint">{allLabel}</span> : null}
+    <div className="field">
+      <label>{label}</label>
+      <div className="regoff" role="group" aria-label={label}>
+        {options.map((o) => {
+          const on = selected.includes(o.id);
+          return (
+            <button key={o.id} className={"chip" + (on ? " on-toggle" : " off")} aria-pressed={on}
+              onClick={() => onToggle(o.id)}>{on ? o.name : "+ " + o.name}</button>
+          );
+        })}
+        {options.length === 0 ? <span className="hint">{allLabel}</span> : null}
+      </div>
     </div>
   );
 }
 
 function ProcessEditor({ model, set, rt, proc }) {
   const [newOutcome, setNewOutcome] = useState("");
+  const [armed, setArmed] = useState(false);
   const chName = nameOf(model.channels, proc.channelId);
   const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
   const hasGov = (proc.steps || []).some((s) => { const q = (model.queues || []).find((x) => x.id === s.queueId); return q && q.type === "governance"; });
+  // Removing a process destroys every step, split, sampling % and outcome in
+  // one grey ✕ identical to the one that removes a single row — and there is no
+  // undo anywhere in the product. Arm it once it has anything to lose; an empty
+  // process stays a single click. (Outcomes can't gate this: addProcess always
+  // seeds one, so the guard would never disarm.)
+  const remove = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
+  const needsConfirm = (proc.steps || []).length > 0;
   return (
     <div className="proc" data-testid={"process-" + rt.id + "-" + proc.channelId}>
       <div className="prochead">
         <span className="chip on-toggle">{chName}</span>
-        <button className="regdel" onClick={() => set(Ops.deleteProcess(model, rt.id, proc.channelId))} aria-label={"Remove " + chName + " process"}>✕</button>
+        {armed ? (
+          <button className="btn sm danger" style={{ marginLeft: "auto" }} aria-label={"Remove " + chName + " process"}
+            onBlur={() => setArmed(false)} onKeyDown={(e) => { if (e.key === "Escape") setArmed(false); }}
+            onClick={remove}>Remove {(proc.steps || []).length} step{(proc.steps || []).length === 1 ? "" : "s"}?</button>
+        ) : (
+          <button className="regdel" aria-label={"Remove " + chName + " process"}
+            onClick={() => (needsConfirm ? setArmed(true) : remove())}>✕</button>
+        )}
       </div>
       {(proc.steps || []).length === 0 ? <p className="hint" style={{ margin: "4px 0" }}>No steps yet — this process is inert until it routes somewhere.</p> : (
         <div className={"steps" + (hasGov ? " with-sample" : "")}>
-          <div className="steprow head"><span /><span>Queue</span><span>Split %</span>{hasGov ? <span>Sample %</span> : null}<span>Ends</span><span>Outcome</span><span /></div>
+          <div className="steprow head"><span>Step</span><span>Queue</span><span>Split %</span>{hasGov ? <span>Sample %</span> : null}<span>Ends</span><span>Outcome</span><span /></div>
           {(proc.steps || []).map((s, i) => {
             const q = (model.queues || []).find((x) => x.id === s.queueId);
             const gov = q && q.type === "governance";
@@ -668,6 +711,7 @@ function ProcessEditor({ model, set, rt, proc }) {
 function RequestTypesPanel({ model, set, p }) {
   const rts = model.requestTypes || [];
   const [sel, setSel] = useState(rts[0] ? rts[0].id : null);
+  const detailRef = useRevealOnSelect(sel);
   const rt = rts.find((x) => x.id === sel) || rts[0] || null;
   const rtErr = (x) => p.validation.errors.filter((e) => e.requestTypeId === x.id);
   const rtWarn = (x) => p.validation.warnings.filter((w) => (w.requestTypeIds || []).includes(x.id));
@@ -680,37 +724,42 @@ function RequestTypesPanel({ model, set, p }) {
   const guard = rt ? canDeleteRequestType(model, rt.id) : { ok: true, blockedBy: [] };
   return (
     <>
-      <h3>Request types</h3>
-      <p className="hint">What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together.</p>
-      {rts.length === 0 ? <p className="hint">No request types yet.</p> : null}
+      <h3>Request types <small>the only place things are wired together</small></h3>
+      {rts.length === 0 ? <p className="hint">No request types yet — add one to wire brands, channels and queues together.</p> : null}
       <div className="md">
+        {/* The add button sits OUTSIDE .mdlist: inside, `.mdlist button` beats
+            `.btn` and it rendered as a sixth list row — and a plain button is
+            not a valid child of role="listbox". Wrapped like QueuesPanel so the
+            sibling does not become a second column of the .md grid. */}
+        <div>
         <div className="mdlist" role="listbox" aria-label="Request types">
           {rts.map((x) => {
             const errs = rtErr(x), warns = rtWarn(x);
             return (
-              <button key={x.id} role="option" aria-selected={rt && rt.id === x.id} className={"rtrow" + (rt && rt.id === x.id ? " on" : "")} onClick={() => setSel(x.id)}>
+              <button key={x.id} role="option" aria-selected={!!(rt && rt.id === x.id)} className={"rtrow" + (rt && rt.id === x.id ? " on" : "")} onClick={() => setSel(x.id)}>
                 <b>{x.name} <span className={"glyph " + (errs.length ? "err" : warns.length ? "todo" : "ok")}>{errs.length ? "✕" : warns.length ? "▲" : "●"}</span></b>
                 <small>{nameOf(model.processGroups, x.groupId) || "no group"}{x.productId ? " · " + nameOf(model.products, x.productId) : ""} · {assignLine(x)}</small>
                 <small>{(x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" · ") || "no processes"}</small>
               </button>
             );
           })}
+        </div>
           <button className="btn sm" style={{ marginTop: 4 }} onClick={() => {
             const m2 = Ops.addRequestType(model, { name: "New request type", groupId: (model.processGroups[0] || {}).id });
             set(m2); setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
           }}>+ Request type</button>
         </div>
-        <div className="mddetail" data-testid="rt-detail">
+        <div className="mddetail" data-testid="rt-detail" ref={detailRef} tabIndex={-1}>
           {rt ? <>
             <h4>Identity</h4>
             <div className="fields">
               <div className="field"><label>Name</label><input value={rt.name} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { name: e.target.value }))} aria-label="Request type name" /></div>
               <div className="field"><label>Activity</label>
-                <select value={rt.activity} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value }))}>
+                <select value={rt.activity} aria-label="Activity" onChange={(e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value }))}>
                   {ACTIVITIES.map((a) => <option key={a} value={a}>{ACTIVITY_LABELS[a]}</option>)}
                 </select></div>
               <div className="field"><label>Product request</label>
-                <select value={rt.productRequest} onChange={(e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value }))}>
+                <select value={rt.productRequest} aria-label="Product request" onChange={(e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value }))}>
                   <option value="existing">Existing product</option><option value="new">New product</option>
                 </select></div>
               <div className="field"><label>Process group</label>
@@ -730,9 +779,9 @@ function RequestTypesPanel({ model, set, p }) {
 
             <h4 style={{ marginTop: 14 }}>Assignment</h4>
             <p className="hint">None selected = applies to all.</p>
-            <ToggleChips options={model.brands || []} selected={rt.brandIds || []} allLabel="no brands defined yet"
+            <ToggleChips label="Brands" options={model.brands || []} selected={rt.brandIds || []} allLabel="no brands defined yet"
               onToggle={(id) => set(Ops.setAssignment(model, rt.id, { brandIds: (rt.brandIds || []).includes(id) ? rt.brandIds.filter((x) => x !== id) : [...(rt.brandIds || []), id] }))} />
-            <ToggleChips options={model.businessUnits || []} selected={rt.buIds || []} allLabel="no business units defined yet"
+            <ToggleChips label="Business units" options={model.businessUnits || []} selected={rt.buIds || []} allLabel="no business units defined yet"
               onToggle={(id) => set(Ops.setAssignment(model, rt.id, { buIds: (rt.buIds || []).includes(id) ? rt.buIds.filter((x) => x !== id) : [...(rt.buIds || []), id] }))} />
             <p className="hint applies" data-testid="applies-line"><b>Applies to:</b> {assignLine(rt)}</p>
             {rtWarn(rt).map((w, i) => <p className="warnmsg" key={i}>▲ {w.message}</p>)}
@@ -749,7 +798,7 @@ function RequestTypesPanel({ model, set, p }) {
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }}>
               {guard.ok
-                ? <button className="btn sm" style={{ color: "var(--red-ink)", borderColor: "#F0B4B4" }} onClick={() => { set(Ops.deleteRequestType(model, rt.id)); setSel(null); }}>Delete request type</button>
+                ? <button className="btn sm danger" onClick={() => { set(Ops.deleteRequestType(model, rt.id)); setSel(null); }}>Delete request type</button>
                 : <span className="hint blocked" style={{ marginLeft: 0 }}>▲ Delete blocked — referenced by {guardSummary(guard)}. Remove them first.</span>}
             </div>
           </> : null}
@@ -766,6 +815,7 @@ function RequestTypesPanel({ model, set, p }) {
 // otherwise; over-runs scaled AND flagged — V5). Provenance badge on every
 // row. A row can also carry a 52-week series (typed, or expanded from a
 // seasonality preset) — shapes cascade down and aggregate up to queues.
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const PROV_LABELS = { entered: "entered", scaled: "scaled", equal: "equal split", sum: "sum", none: "—" };
 
 function entryAt(model, scope) {
@@ -852,8 +902,7 @@ function VolumePanel({ model, set, p }) {
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
   return (
     <>
-      <h3>Volume</h3>
-      <p className="hint">Type at any row — the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently.</p>
+      <h3>Volume <small>type a number at any row</small></h3>
       {rows.length <= 1 ? <p className="hint">Assign request types first — the spine builds itself from them.</p> : (
         <div className="scrollx">
           <div className="volgrid" data-testid="cascade-grid">
@@ -893,6 +942,9 @@ function VolumePanel({ model, set, p }) {
 // distinct from flow. The validation panel lives here, each issue with a
 // jump-link to the tab that fixes it.
 const NODE_W = 168, NODE_H = 52, COL_W = 212, ROW_H = 76;
+// Node boxes are a fixed 168px with a 44px gutter — anything longer collides
+// with the next column rather than overflowing its own box.
+const trunc = (s, n = 22) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 function buildMap(model, p) {
   const depth = new Map();
@@ -931,7 +983,9 @@ function buildMap(model, p) {
   for (const tm of teams)
     for (const t of tm.coversQueues || [])
       if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
-  const width = 40 + (maxD + 2) * COL_W;
+  // Teams lay out on their own row, so the viewBox must cover whichever is
+  // wider — otherwise a fourth shared team is silently clipped.
+  const width = Math.max(40 + (maxD + 2) * COL_W, 40 + teams.length * COL_W);
   const height = teamY + (teams.length ? NODE_H + 30 : 6);
   return { pos, flow, cap, teams, width, height };
 }
@@ -964,11 +1018,14 @@ function MapPanel({ model, p, onJump }) {
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return (
     <>
-      <h3>Map</h3>
-      <p className="hint">Generated from the model on every view — flow from process steps, capacity links dashed. Nothing is authored here.</p>
+      <h3>Map <small>generated — nothing authored here</small></h3>
       {(model.queues || []).length === 0 ? <p className="hint">The map draws itself once queues and processes exist.</p> : (
         <div className="scrollx">
-          <svg className="mapsvg" data-testid="map-svg" width={m.width} height={m.height} viewBox={`0 0 ${m.width} ${m.height}`}>
+          {/* No role="img": that would make the SVG an accessibility leaf and
+              delete every node button from the tree. */}
+          <svg className="mapsvg" data-testid="map-svg" aria-labelledby="mapttl" width={m.width} height={m.height} viewBox={`0 0 ${m.width} ${m.height}`}>
+            <title id="mapttl">Queue map</title>
+            <desc>{(model.queues || []).length} queues, {m.flow.length} routing links and {m.cap.length} capacity links, generated from the request-type processes.</desc>
             <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-3)" /></marker></defs>
             {m.flow.map((e, i) => edge(e, i, false))}
             {m.cap.map((e, i) => edge(e, i, true))}
@@ -976,9 +1033,13 @@ function MapPanel({ model, p, onJump }) {
               const c = m.pos.get(q.id);
               const d = p.queues.get(q.id);
               return (
-                <g key={q.id} className={"mnode" + (selQ === q.id ? " on" : "")} onClick={() => setSelQ(selQ === q.id ? null : q.id)} data-node={q.id}>
+                <g key={q.id} className={"mnode" + (selQ === q.id ? " on" : "")} data-node={q.id}
+                  tabIndex={0} role="button" aria-pressed={selQ === q.id}
+                  aria-label={q.name + " — " + (QTYPE_LABELS[q.type] || q.type) + ", " + fmt(d ? d.volume : 0) + " per day"}
+                  onClick={() => setSelQ(selQ === q.id ? null : q.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelQ(selQ === q.id ? null : q.id); } }}>
                   <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" />
-                  <text className="mname" x={c.x + 10} y={c.y + 21}>{q.name.length > 22 ? q.name.slice(0, 21) + "…" : q.name}</text>
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{trunc(q.name)}</text>
                   <text className="mmeta" x={c.x + 10} y={c.y + 38}>{fmt(d ? d.volume : 0)}/day · {QTYPE_LABELS[q.type] || q.type}</text>
                 </g>
               );
@@ -988,7 +1049,7 @@ function MapPanel({ model, p, onJump }) {
               return (
                 <g key={tm.id} className="mnode team" data-node={"team:" + tm.id}>
                   <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" strokeDasharray="5 4" />
-                  <text className="mname" x={c.x + 10} y={c.y + 21}>{tm.name}</text>
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{trunc(tm.name)}</text>
                   <text className="mmeta" x={c.x + 10} y={c.y + 38}>{tm.size} FTE shared</text>
                 </g>
               );
@@ -1048,8 +1109,7 @@ function DefaultsPanel({ model, set }) {
   const presetName = Object.keys(SEASONAL_PRESETS).find((k) => JSON.stringify(SEASONAL_PRESETS[k]) === JSON.stringify(season.system)) || "";
   return (
     <>
-      <h3>Defaults</h3>
-      <p className="hint">Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues.</p>
+      <h3>Defaults <small>what every queue inherits</small></h3>
       <G name="Simulation frame">
         <NumF label="Horizon (weeks)" value={eng.horizonWeeks} onChange={(v) => updEC("engine", { horizonWeeks: n0(v) })} />
         <NumF label="Day start (h)" value={eng.dayStart} onChange={(v) => updEC("engine", { dayStart: n0(v) })} />
@@ -1093,7 +1153,11 @@ function DefaultsPanel({ model, set }) {
             {presetName === "" ? <option value="">custom</option> : null}
             {Object.keys(SEASONAL_PRESETS).map((k) => <option key={k} value={k}>{k}</option>)}
           </select></div>
-        <NumF label="Season start month (0–11)" value={season.startMonth} onChange={(v) => updEC("seasonality", { startMonth: n0(v) })} />
+        <div className="field"><label>Season starts</label>
+          <select value={season.startMonth || 0} aria-label="Season start month"
+            onChange={(e) => updEC("seasonality", { startMonth: n0(e.target.value) })}>
+            {MONTHS.map((mn, i) => <option key={mn} value={i}>{mn}</option>)}
+          </select></div>
         <div className="field" style={{ gridColumn: "1/-1" }}><label>Presets</label>
           <p className="hint">The same library powers the shape chips on the Volume tab.</p></div>
       </G>

@@ -22,8 +22,11 @@ export const CSS = `
   --green-bg:#EAF3DE; --green-ink:#27500A;
   --coral:#993C1D; --coral-bg:#FAECE7;
   --pink:#993556; --pink-bg:#FBEAF0;
-  --red:#E24B4A; --red-bg:#FCEBEB; --red-ink:#791F1F;
-  --ink:#1a1a1a; --ink-2:#5c5a54; --ink-3:#8a887f;
+  --red:#E24B4A; --red-bg:#FCEBEB; --red-ink:#791F1F; --red-line:#F0B4B4;
+  /* --ink-3 was #8a887f: 3.40:1 on canvas at 9-12.5px, i.e. below AA for most
+     of the words on the surface. #6f6d64 is 4.97:1 on canvas and 4.53:1 on
+     blue-tint, with --ink-2 at 6.61:1 so the three-step hierarchy survives. */
+  --ink:#1a1a1a; --ink-2:#5c5a54; --ink-3:#6f6d64;
   --line:#e4e2db; --canvas:#fbfaf7;
 }
 *{box-sizing:border-box; margin:0}
@@ -56,6 +59,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .dots:disabled{opacity:0.4; cursor:not-allowed}
 .btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
 .btn.sm{padding:4px 9px; font-size:11.5px}
+.btn.danger{color:var(--red-ink); border-color:var(--red-line)}
+.btn.danger:hover{background:var(--red-bg)}
 .hint{font-size:12px; color:var(--ink-3)}
 
 .sec{background:#fff; border:0.5px solid var(--line); border-radius:14px; margin-bottom:12px; overflow:hidden}
@@ -131,7 +136,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   padding:2px 9px; border-radius:999px; white-space:nowrap}
 .warnmsg{margin-top:8px; font-size:12px; color:var(--amber-ink)}
 
-.importbox{margin-top:4px; border:1.5px dashed var(--blue-line); border-radius:12px; padding:12px 14px;
+.importbox{margin-top:4px; border:0.5px dashed var(--blue-line); border-radius:12px; padding:12px 14px;
   display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap}
 .importbox p{font-size:12.5px; color:var(--ink-2)}
 .importbox b{font-weight:600; color:var(--ink)}
@@ -327,8 +332,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .subtabs button:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
 .subtabs .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
 .subtabs button.on .count{background:var(--blue-tint); border-color:var(--blue-line); color:var(--blue-deep)}
-.panel h3{font-size:15px; font-weight:600; margin-bottom:2px}
-.panel>.hint{margin-bottom:12px}
+/* The Setup tabpanel is NOT a card: it already sits inside the tab chrome, and
+   filling it white made every nested list/row/detail card white-on-white with
+   hairlines as the only separation. Scoped with .flat so the real cards on
+   Results and Levers keep .panel (and their own h3 sizing) untouched. */
+.panel.flat{background:transparent; border:none; border-radius:0; padding:0}
+.panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
+.panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}
 .reglist{border:0.5px solid var(--line); border-radius:10px; background:#fff; padding:10px 12px; margin-bottom:8px}
 .reghead{display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:6px}
@@ -337,13 +347,16 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
 .regrow{border-top:0.5px dashed var(--line); padding:4px 0}
 .regrow:first-of-type{border-top:none}
-.regmain{display:flex; align-items:center; gap:8px}
-.regmain input{flex:0 1 260px; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
+.regmain{display:flex; align-items:center; gap:8px; flex-wrap:wrap; row-gap:4px}
+.regmain input{flex:0 1 260px; min-width:0; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
 .regmain input:hover{border-color:var(--line); background:#fff}
 .regmain input:focus{border-color:var(--blue); background:#fff; outline:none}
+/* Touch has no hover, so the rename field would be invisible on the very
+   layout the owner flagged — reveal it where hover cannot. */
+@media(hover:none){ .regmain input{border-color:var(--line); background:#fff} }
 .regdel{margin-left:auto; border:none; background:none; color:var(--ink-3); font:inherit; font-size:12px; cursor:pointer; padding:2px 6px; border-radius:6px}
 .regdel:hover{color:var(--red-ink); background:var(--red-bg)}
-.blocked{margin-left:auto; color:var(--amber-ink); white-space:nowrap}
+.blocked{margin-left:auto; min-width:0; color:var(--amber-ink)}
 .regoff{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
 .chdefaults{margin:4px 0 8px; padding:10px 12px; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas)}
 .glyph.err{color:var(--red-ink)}
@@ -363,8 +376,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
 .v3banner .btn{margin-left:auto; white-space:nowrap}
 .structgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:10px; align-items:start}
-.steps{margin-top:2px}
-.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0}
+/* The step grid's own columns need 478px (550px with a sampling column), which
+   overflows the detail pane at every window width — so it must be its own
+   scroll container at ALL widths, not just on a phone. Making .steps a scroll
+   container is the load-bearing half: it zeroes the automatic minimum size the
+   grid would otherwise force onto .mddetail and out to the page. */
+.steps{margin-top:2px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
+.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0; min-width:min-content}
 .steps.with-sample .steprow{grid-template-columns:44px minmax(150px,1.4fr) 64px 64px 44px minmax(110px,1fr) 26px}
 .steprow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
 .steprow.head{border-bottom:0.5px solid var(--line); padding-bottom:3px; margin-bottom:2px}
@@ -382,15 +400,31 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
 .volrow.head{border-bottom:0.5px solid var(--line)}
 .volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+/* Weight must decrease with depth, or the request type outranks the brand that
+   contains it while being indented further — indent and weight disagreeing
+   about the same tree is why the grid was hard to read. */
 .volrow.lvl0 .volname{font-weight:600}
-.volrow.lvl3 .volname{font-weight:500}
+.volrow.lvl1 .volname{font-weight:600}
+.volrow.lvl2 .volname{font-weight:500}
 .volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   padding-left:calc(var(--lvl,0) * 18px)}
-.volrow input{width:100%}
+/* The cascade and step grids were the only inputs in the stylesheet never given
+   a skin — they rendered as raw UA widgets next to styled siblings. Written as
+   one block with the alignment so the two rules cannot drift apart. Base-block
+   font-size on purpose: the phone block (later in source) raises it to 16px. */
+.volrow input,.steprow input:not([type="checkbox"]),.steprow select{
+  width:100%; font:inherit; font-size:13px; padding:6px 8px;
+  border:0.5px solid var(--line); border-radius:8px; background:#fff}
+.field input.num,.volrow input,.steprow input:not([type="checkbox"]){text-align:right}
+.volrow.head span:nth-child(2),.steprow.head span:nth-child(3){text-align:right}
+.steps.with-sample .steprow.head span:nth-child(4){text-align:right}
 .prov{font-size:10.5px; border-radius:999px; padding:1px 8px; text-align:center; white-space:nowrap}
 .prov.entered{background:var(--blue-tint); color:var(--blue-deep); font-weight:600}
-.prov.equal{background:var(--canvas); color:var(--ink-3); border:0.5px solid var(--line)}
-.prov.sum{background:var(--teal-bg); color:var(--teal)}
+/* equal/sum are the automatic majority — de-chromed so the two badges worth
+   finding (a human number, and a reconciliation) are the only ones that carry
+   fill. Flagging fails when every row shouts equally (REVIEW-SETUP §3.4 V5). */
+.prov.equal{color:var(--ink-3)}
+.prov.sum{color:var(--ink-3)}
 .prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
 .prov.none{color:var(--ink-3)}
 .shapecell{text-align:left; font-size:11px}
@@ -398,7 +432,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
 .mapsvg{display:block}
-.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1; cursor:pointer}
+.mnode:not(.team) rect{cursor:pointer}
+.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1}
 .mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
 .mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
 .mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
@@ -419,7 +454,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mnode:focus-visible{outline:none}
 .mnode:focus-visible rect{stroke:var(--blue); stroke-width:2}
 .mnode rect{transition:stroke 0.12s}
-.mnode:hover rect{stroke:var(--blue-mid)}
+/* Team nodes are not selectable — they must not advertise that they are. */
+.mnode:not(.team):hover rect{stroke:var(--blue-mid)}
 
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -429,6 +465,12 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mdlist button small{grid-column:1; font-size:10.5px; color:var(--ink-3)}
 .mdlist button .qstats{grid-row:1/3; align-self:center; font-size:11px; color:var(--ink-2)}
 .mdlist button.on{border-color:var(--blue); background:var(--blue-tint)}
+.mdlist button.on small{color:var(--ink-2)}
+/* :not(.on) — a bare hover rule has the same specificity as .mdlist button.on
+   and, placed after it, would silently clobber the selected row's blue border. */
+.mdlist button:not(.on):hover{border-color:var(--blue-line)}
+.chip.off:hover,.chip.on-toggle:hover{background:var(--blue-tint); color:var(--blue-deep)}
+.subtabs button:hover{color:var(--blue-deep)}
 .mddetail{border:0.5px solid var(--line); border-radius:12px; background:#fff; padding:14px 16px}
 .mddetail h4{font-size:14px; font-weight:600}
 .mddetail>.hint{margin-bottom:10px}
@@ -471,22 +513,36 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   .mdlist button{grid-template-columns:1fr}
   .mdlist button .qstats{grid-row:auto; grid-column:1; margin-top:1px}
   .mddetail{padding:12px}
-  .steps{overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
-  .steprow{min-width:520px}
   .volgrid{min-width:0}
   .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape shape"; gap:6px 8px; padding:6px 0}
   .volrow>.volname{grid-area:name}
   .volrow>input{grid-area:val}
   .volrow>.prov{grid-area:prov}
   .volrow>.shapecell{grid-area:shape; padding-left:0}
-  .volrow.head{display:none}
+  /* The header row is the ONLY place the unit "Daily" appears — hiding it on
+     the contributor's own tab invites weekly figures in a per-day box. */
+  .volrow.head>span:nth-child(4){grid-area:shape; padding-left:0}
   .volname{padding-left:calc(var(--lvl,0) * 9px)}
   .fam-sec{padding:8px 0 10px}
-  .mapsvg{max-width:none}
-  /* Comfortable touch targets without changing the desktop look. */
+  .mddetail{scroll-margin-top:12px}
+  .panel.flat h3{flex-wrap:wrap; gap:2px 10px; align-items:baseline}
+
+  /* iOS Safari auto-zooms on focus for any control under 16px and never zooms
+     back out — one tap on any field would leave the page horizontally scrolled
+     for the rest of the session. This is the single most disruptive phone bug
+     on the surface, so every control is raised together. */
+  .field input,.field select,.regmain input,.mixrow input,.mixrow select,
+  .outin,.shapebox textarea,.volrow input,.steprow input,.steprow select{font-size:16px}
+  .outin{width:100%; flex:1 1 140px}
+
+  /* Comfortable touch targets. button.chip, not .chip — several .chip are
+     non-interactive spans here and on Home, and inflating those adds chrome. */
   .regdel,.chipx{min-width:32px; min-height:32px; display:inline-flex; align-items:center; justify-content:center}
-  .chip,.btn.sm{padding:7px 11px}
-  .linkbtn{padding:4px 0; display:inline-block}
+  .steprow .regdel{min-width:0}
+  button.chip{min-height:38px}
+  .btn.sm{padding:7px 11px}
+  .linkbtn{padding:10px 8px; display:inline-block}
+  .steprow input[type="checkbox"]{width:20px; height:20px; min-height:24px}
 }
 @media(max-width:400px){
   /* One field per row: two 150px columns inside a padded card is unreadable

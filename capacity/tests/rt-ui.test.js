@@ -155,13 +155,21 @@ await t("channel picker: adding a Voice process to the card journey, then removi
   ok(/inert until it routes/.test(proc.textContent), "empty-process hint");
   click($$(".btn", proc).find((b) => b.textContent === "+ Step"));
   ok($$(".steprow:not(.head)", $('[data-testid="process-rt_newcard-ch_voice"]')).length === 1, "entry step added");
+  // The process now holds a step, so removal arms once before it commits —
+  // it destroys every step/split/outcome and there is no undo.
   click($(".prochead .regdel", $('[data-testid="process-rt_newcard-ch_voice"]')));
-  ok(!$('[data-testid="process-rt_newcard-ch_voice"]'), "process removed");
+  const arm = $(".prochead .btn.danger", $('[data-testid="process-rt_newcard-ch_voice"]'));
+  ok(arm && /Remove 1 step\?/.test(arm.textContent), "arms with what will be lost: " + (arm && arm.textContent));
+  ok($('[data-testid="process-rt_newcard-ch_voice"]'), "first click does not delete");
+  click(arm);
+  ok(!$('[data-testid="process-rt_newcard-ch_voice"]'), "second click removes the process");
   ok($$(".chip.off", detail()).some((c) => /Voice/.test(c.textContent)), "channel offered again");
 });
 
 await t("add + guarded delete: a new request type deletes; one with volume entries is blocked", () => {
-  click($$(".mdlist .btn").find((b) => b.textContent === "+ Request type"));
+  // The add button now sits outside .mdlist (it is not a valid listbox child,
+  // and .mdlist button was overriding its skin). Exact text is unambiguous.
+  click($$(".btn").find((b) => b.textContent === "+ Request type"));
   ok(rtRow("New request type"), "created and listed");
   ok($$(".btn", detail()).some((b) => b.textContent === "Delete request type"), "fresh one deletable");
   click($$(".btn", detail()).find((b) => b.textContent === "Delete request type"));

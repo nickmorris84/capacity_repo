@@ -3569,7 +3569,7 @@ var init_template_domain_xlsx = __esm({
 import { createRoot } from "react-dom/client";
 
 // ui/v2/App.jsx
-import { useState as useState7, useEffect as useEffect5, useMemo as useMemo6, useRef as useRef4, useCallback as useCallback2 } from "react";
+import { useState as useState7, useEffect as useEffect6, useMemo as useMemo6, useRef as useRef5, useCallback as useCallback2 } from "react";
 
 // ui/v2/SetupV3Page.jsx
 var import_propagate = __toESM(require_propagate());
@@ -3578,7 +3578,7 @@ var import_engine = __toESM(require_engine());
 var import_taxonomy2 = __toESM(require_taxonomy());
 var import_bridge = __toESM(require_bridge());
 var Ops = __toESM(require_ops());
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 // ui/v2/model.js
 var import_derive = __toESM(require_derive());
@@ -3654,8 +3654,11 @@ var CSS = `
   --green-bg:#EAF3DE; --green-ink:#27500A;
   --coral:#993C1D; --coral-bg:#FAECE7;
   --pink:#993556; --pink-bg:#FBEAF0;
-  --red:#E24B4A; --red-bg:#FCEBEB; --red-ink:#791F1F;
-  --ink:#1a1a1a; --ink-2:#5c5a54; --ink-3:#8a887f;
+  --red:#E24B4A; --red-bg:#FCEBEB; --red-ink:#791F1F; --red-line:#F0B4B4;
+  /* --ink-3 was #8a887f: 3.40:1 on canvas at 9-12.5px, i.e. below AA for most
+     of the words on the surface. #6f6d64 is 4.97:1 on canvas and 4.53:1 on
+     blue-tint, with --ink-2 at 6.61:1 so the three-step hierarchy survives. */
+  --ink:#1a1a1a; --ink-2:#5c5a54; --ink-3:#6f6d64;
   --line:#e4e2db; --canvas:#fbfaf7;
 }
 *{box-sizing:border-box; margin:0}
@@ -3688,6 +3691,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .dots:disabled{opacity:0.4; cursor:not-allowed}
 .btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
 .btn.sm{padding:4px 9px; font-size:11.5px}
+.btn.danger{color:var(--red-ink); border-color:var(--red-line)}
+.btn.danger:hover{background:var(--red-bg)}
 .hint{font-size:12px; color:var(--ink-3)}
 
 .sec{background:#fff; border:0.5px solid var(--line); border-radius:14px; margin-bottom:12px; overflow:hidden}
@@ -3763,7 +3768,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   padding:2px 9px; border-radius:999px; white-space:nowrap}
 .warnmsg{margin-top:8px; font-size:12px; color:var(--amber-ink)}
 
-.importbox{margin-top:4px; border:1.5px dashed var(--blue-line); border-radius:12px; padding:12px 14px;
+.importbox{margin-top:4px; border:0.5px dashed var(--blue-line); border-radius:12px; padding:12px 14px;
   display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap}
 .importbox p{font-size:12.5px; color:var(--ink-2)}
 .importbox b{font-weight:600; color:var(--ink)}
@@ -3959,8 +3964,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .subtabs button:focus-visible{outline:2px solid var(--blue); outline-offset:-2px}
 .subtabs .count{font-size:10.5px; color:var(--ink-3); background:var(--canvas); border:0.5px solid var(--line); border-radius:999px; padding:1px 7px}
 .subtabs button.on .count{background:var(--blue-tint); border-color:var(--blue-line); color:var(--blue-deep)}
-.panel h3{font-size:15px; font-weight:600; margin-bottom:2px}
-.panel>.hint{margin-bottom:12px}
+/* The Setup tabpanel is NOT a card: it already sits inside the tab chrome, and
+   filling it white made every nested list/row/detail card white-on-white with
+   hairlines as the only separation. Scoped with .flat so the real cards on
+   Results and Levers keep .panel (and their own h3 sizing) untouched. */
+.panel.flat{background:transparent; border:none; border-radius:0; padding:0}
+.panel.flat h3{font-size:15px; font-weight:600; margin-bottom:2px}
+.panel.flat>.hint{margin-bottom:12px}
 .phase-note{font-size:11.5px; color:var(--ink-3); border-top:0.5px dashed var(--line); margin-top:16px; padding-top:8px}
 .reglist{border:0.5px solid var(--line); border-radius:10px; background:#fff; padding:10px 12px; margin-bottom:8px}
 .reghead{display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:6px}
@@ -3969,13 +3979,16 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .regchips .chip small{color:inherit; opacity:0.7; font-size:10px}
 .regrow{border-top:0.5px dashed var(--line); padding:4px 0}
 .regrow:first-of-type{border-top:none}
-.regmain{display:flex; align-items:center; gap:8px}
-.regmain input{flex:0 1 260px; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
+.regmain{display:flex; align-items:center; gap:8px; flex-wrap:wrap; row-gap:4px}
+.regmain input{flex:0 1 260px; min-width:0; border:0.5px solid transparent; border-radius:7px; padding:4px 7px; font:inherit; font-size:12.5px; background:transparent}
 .regmain input:hover{border-color:var(--line); background:#fff}
 .regmain input:focus{border-color:var(--blue); background:#fff; outline:none}
+/* Touch has no hover, so the rename field would be invisible on the very
+   layout the owner flagged \u2014 reveal it where hover cannot. */
+@media(hover:none){ .regmain input{border-color:var(--line); background:#fff} }
 .regdel{margin-left:auto; border:none; background:none; color:var(--ink-3); font:inherit; font-size:12px; cursor:pointer; padding:2px 6px; border-radius:6px}
 .regdel:hover{color:var(--red-ink); background:var(--red-bg)}
-.blocked{margin-left:auto; color:var(--amber-ink); white-space:nowrap}
+.blocked{margin-left:auto; min-width:0; color:var(--amber-ink)}
 .regoff{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px}
 .chdefaults{margin:4px 0 8px; padding:10px 12px; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas)}
 .glyph.err{color:var(--red-ink)}
@@ -3995,8 +4008,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .v3banner p{font-size:12px; color:var(--ink-2); margin-top:2px}
 .v3banner .btn{margin-left:auto; white-space:nowrap}
 .structgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:10px; align-items:start}
-.steps{margin-top:2px}
-.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0}
+/* The step grid's own columns need 478px (550px with a sampling column), which
+   overflows the detail pane at every window width \u2014 so it must be its own
+   scroll container at ALL widths, not just on a phone. Making .steps a scroll
+   container is the load-bearing half: it zeroes the automatic minimum size the
+   grid would otherwise force onto .mddetail and out to the page. */
+.steps{margin-top:2px; overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
+.steprow{display:grid; grid-template-columns:44px minmax(150px,1.4fr) 64px 44px minmax(110px,1fr) 26px; gap:8px; align-items:center; padding:3px 0; min-width:min-content}
 .steps.with-sample .steprow{grid-template-columns:44px minmax(150px,1.4fr) 64px 64px 44px minmax(110px,1fr) 26px}
 .steprow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
 .steprow.head{border-bottom:0.5px solid var(--line); padding-bottom:3px; margin-bottom:2px}
@@ -4014,15 +4032,31 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
 .volrow.head{border-bottom:0.5px solid var(--line)}
 .volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
+/* Weight must decrease with depth, or the request type outranks the brand that
+   contains it while being indented further \u2014 indent and weight disagreeing
+   about the same tree is why the grid was hard to read. */
 .volrow.lvl0 .volname{font-weight:600}
-.volrow.lvl3 .volname{font-weight:500}
+.volrow.lvl1 .volname{font-weight:600}
+.volrow.lvl2 .volname{font-weight:500}
 .volname{font-size:12.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   padding-left:calc(var(--lvl,0) * 18px)}
-.volrow input{width:100%}
+/* The cascade and step grids were the only inputs in the stylesheet never given
+   a skin \u2014 they rendered as raw UA widgets next to styled siblings. Written as
+   one block with the alignment so the two rules cannot drift apart. Base-block
+   font-size on purpose: the phone block (later in source) raises it to 16px. */
+.volrow input,.steprow input:not([type="checkbox"]),.steprow select{
+  width:100%; font:inherit; font-size:13px; padding:6px 8px;
+  border:0.5px solid var(--line); border-radius:8px; background:#fff}
+.field input.num,.volrow input,.steprow input:not([type="checkbox"]){text-align:right}
+.volrow.head span:nth-child(2),.steprow.head span:nth-child(3){text-align:right}
+.steps.with-sample .steprow.head span:nth-child(4){text-align:right}
 .prov{font-size:10.5px; border-radius:999px; padding:1px 8px; text-align:center; white-space:nowrap}
 .prov.entered{background:var(--blue-tint); color:var(--blue-deep); font-weight:600}
-.prov.equal{background:var(--canvas); color:var(--ink-3); border:0.5px solid var(--line)}
-.prov.sum{background:var(--teal-bg); color:var(--teal)}
+/* equal/sum are the automatic majority \u2014 de-chromed so the two badges worth
+   finding (a human number, and a reconciliation) are the only ones that carry
+   fill. Flagging fails when every row shouts equally (REVIEW-SETUP \xA73.4 V5). */
+.prov.equal{color:var(--ink-3)}
+.prov.sum{color:var(--ink-3)}
 .prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
 .prov.none{color:var(--ink-3)}
 .shapecell{text-align:left; font-size:11px}
@@ -4030,7 +4064,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
 .mapsvg{display:block}
-.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1; cursor:pointer}
+.mnode:not(.team) rect{cursor:pointer}
+.mnode rect{fill:#fff; stroke:var(--line); stroke-width:1}
 .mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
 .mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
 .mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
@@ -4051,7 +4086,8 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mnode:focus-visible{outline:none}
 .mnode:focus-visible rect{stroke:var(--blue); stroke-width:2}
 .mnode rect{transition:stroke 0.12s}
-.mnode:hover rect{stroke:var(--blue-mid)}
+/* Team nodes are not selectable \u2014 they must not advertise that they are. */
+.mnode:not(.team):hover rect{stroke:var(--blue-mid)}
 
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -4061,6 +4097,12 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mdlist button small{grid-column:1; font-size:10.5px; color:var(--ink-3)}
 .mdlist button .qstats{grid-row:1/3; align-self:center; font-size:11px; color:var(--ink-2)}
 .mdlist button.on{border-color:var(--blue); background:var(--blue-tint)}
+.mdlist button.on small{color:var(--ink-2)}
+/* :not(.on) \u2014 a bare hover rule has the same specificity as .mdlist button.on
+   and, placed after it, would silently clobber the selected row's blue border. */
+.mdlist button:not(.on):hover{border-color:var(--blue-line)}
+.chip.off:hover,.chip.on-toggle:hover{background:var(--blue-tint); color:var(--blue-deep)}
+.subtabs button:hover{color:var(--blue-deep)}
 .mddetail{border:0.5px solid var(--line); border-radius:12px; background:#fff; padding:14px 16px}
 .mddetail h4{font-size:14px; font-weight:600}
 .mddetail>.hint{margin-bottom:10px}
@@ -4103,22 +4145,36 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   .mdlist button{grid-template-columns:1fr}
   .mdlist button .qstats{grid-row:auto; grid-column:1; margin-top:1px}
   .mddetail{padding:12px}
-  .steps{overflow-x:auto; padding-bottom:4px; -webkit-overflow-scrolling:touch}
-  .steprow{min-width:520px}
   .volgrid{min-width:0}
   .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape shape"; gap:6px 8px; padding:6px 0}
   .volrow>.volname{grid-area:name}
   .volrow>input{grid-area:val}
   .volrow>.prov{grid-area:prov}
   .volrow>.shapecell{grid-area:shape; padding-left:0}
-  .volrow.head{display:none}
+  /* The header row is the ONLY place the unit "Daily" appears \u2014 hiding it on
+     the contributor's own tab invites weekly figures in a per-day box. */
+  .volrow.head>span:nth-child(4){grid-area:shape; padding-left:0}
   .volname{padding-left:calc(var(--lvl,0) * 9px)}
   .fam-sec{padding:8px 0 10px}
-  .mapsvg{max-width:none}
-  /* Comfortable touch targets without changing the desktop look. */
+  .mddetail{scroll-margin-top:12px}
+  .panel.flat h3{flex-wrap:wrap; gap:2px 10px; align-items:baseline}
+
+  /* iOS Safari auto-zooms on focus for any control under 16px and never zooms
+     back out \u2014 one tap on any field would leave the page horizontally scrolled
+     for the rest of the session. This is the single most disruptive phone bug
+     on the surface, so every control is raised together. */
+  .field input,.field select,.regmain input,.mixrow input,.mixrow select,
+  .outin,.shapebox textarea,.volrow input,.steprow input,.steprow select{font-size:16px}
+  .outin{width:100%; flex:1 1 140px}
+
+  /* Comfortable touch targets. button.chip, not .chip \u2014 several .chip are
+     non-interactive spans here and on Home, and inflating those adds chrome. */
   .regdel,.chipx{min-width:32px; min-height:32px; display:inline-flex; align-items:center; justify-content:center}
-  .chip,.btn.sm{padding:7px 11px}
-  .linkbtn{padding:4px 0; display:inline-block}
+  .steprow .regdel{min-width:0}
+  button.chip{min-height:38px}
+  .btn.sm{padding:7px 11px}
+  .linkbtn{padding:10px 8px; display:inline-block}
+  .steprow input[type="checkbox"]{width:20px; height:20px; min-height:24px}
 }
 @media(max-width:400px){
   /* One field per row: two 150px columns inside a padded card is unreadable
@@ -4234,6 +4290,10 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
   const status = useMemo(() => computeStatus(model, p), [model, p]);
   const [tab, setTab] = useState("structure");
   const firstTodo = status.find((s) => !s.ok);
+  const activeTabRef = useRef(null);
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [tab]);
   return /* @__PURE__ */ jsxs("div", { className: "shell", children: [
     /* @__PURE__ */ jsxs("header", { className: "top", children: [
       /* @__PURE__ */ jsxs("div", { className: "brand", children: [
@@ -4249,7 +4309,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       /* @__PURE__ */ jsx("h2", { children: "Setup" }),
       onOpenClassic ? /* @__PURE__ */ jsx("button", { className: "linkbtn", onClick: onOpenClassic, children: "\u2190 classic Setup" }) : null
     ] }),
-    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined. Request types is the only place anything is wired together." }),
+    /* @__PURE__ */ jsx("p", { className: "lede", children: "Six tabs in dependency order \u2014 each consumes what the previous ones defined." }),
     importReport ? /* @__PURE__ */ jsx(DomainImportReport, { report: importReport, onDismiss: onDismissImport }) : null,
     firstTodo ? /* @__PURE__ */ jsxs("div", { className: "pstrip", role: "status", children: [
       /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }),
@@ -4262,12 +4322,27 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
     ] }) : null,
     /* @__PURE__ */ jsx("div", { className: "subtabs", role: "tablist", "aria-label": "Setup tabs", children: SETUP_TABS.map(([k, label]) => {
       const s = status.find((x) => x.key === k);
-      return /* @__PURE__ */ jsxs("button", { role: "tab", "aria-selected": tab === k, className: tab === k ? "on" : "", onClick: () => setTab(k), children: [
-        label,
-        !s.ok ? /* @__PURE__ */ jsx("span", { className: "glyph todo", children: "\u25B2" }) : null
-      ] }, k);
+      const on = tab === k;
+      return /* @__PURE__ */ jsxs(
+        "button",
+        {
+          role: "tab",
+          id: "tab-" + k,
+          "aria-controls": "setup-panel",
+          "aria-selected": on,
+          ref: on ? activeTabRef : null,
+          className: on ? "on" : "",
+          onClick: () => setTab(k),
+          "aria-label": s.ok ? label : label + " \u2014 needs attention: " + s.next,
+          children: [
+            label,
+            !s.ok ? /* @__PURE__ */ jsx("span", { className: "glyph todo", title: s.next, children: "\u25B2" }) : null
+          ]
+        },
+        k
+      );
     }) }),
-    /* @__PURE__ */ jsxs("div", { role: "tabpanel", "data-tab": tab, className: "panel", children: [
+    /* @__PURE__ */ jsxs("div", { role: "tabpanel", id: "setup-panel", "aria-labelledby": "tab-" + tab, "data-tab": tab, className: "panel flat", children: [
       tab === "structure" && /* @__PURE__ */ jsx(StructurePanel, { model, set: onModelChange }),
       tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
       tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
@@ -4275,10 +4350,10 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
       tab === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
     ] }),
-    onDownloadTemplate || onUploadTemplate ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
+    (onDownloadTemplate || onUploadTemplate) && tab !== "map" && tab !== "defaults" ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
       /* @__PURE__ */ jsxs("p", { children: [
-        /* @__PURE__ */ jsx("b", { children: "Load from the template." }),
-        " Five sheets mirror the model \u2014 Registry, Queues, Request types, Steps, Volume entries. Download comes pre-filled; re-upload validates before anything changes."
+        /* @__PURE__ */ jsx("b", { children: "Bulk edit via the five-sheet template." }),
+        " Download comes pre-filled; re-upload validates first."
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8 }, children: [
         onDownloadTemplate ? /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => onDownloadTemplate(model), children: "Download template" }) : null,
@@ -4286,6 +4361,15 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       ] })
     ] }) : null
   ] });
+}
+function useRevealOnSelect(sel) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (sel == null || !ref.current) return;
+    ref.current.focus?.();
+    if (window.matchMedia?.("(max-width:640px)")?.matches) ref.current.scrollIntoView?.({ block: "start" });
+  }, [sel]);
+  return ref;
 }
 var nameOf = (list, id) => {
   const e = (list || []).find((x) => x.id === id);
@@ -4346,7 +4430,8 @@ function ChannelRow({ model, c, set }) {
         /* @__PURE__ */ jsx("span", { className: "tax", children: CHANNEL_LABELS[c.key] || c.key }),
         /* @__PURE__ */ jsxs("button", { className: "linkbtn", onClick: () => setOpen(!open), "aria-expanded": open, children: [
           "defaults",
-          Object.keys(d).length ? " \u25CF" : ""
+          Object.keys(d).length ? " \u25CF" : "",
+          /* @__PURE__ */ jsx("span", { className: "chev", children: "\u25BC" })
         ] })
       ] }),
       children: open ? /* @__PURE__ */ jsxs("div", { className: "fields chdefaults", "data-testid": "channel-defaults-" + c.key, children: [
@@ -4397,8 +4482,10 @@ function StructurePanel({ model, set }) {
     key
   ));
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Structure" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Brands, business units, channels, groups and products \u2014 set up here, wired together in Request types. Renames propagate; deletes are guarded while in use." }),
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Structure ",
+      /* @__PURE__ */ jsx("small", { children: "the vocabulary of the estate" })
+    ] }),
     /* @__PURE__ */ jsxs("div", { className: "structgrid", children: [
       brandsL,
       busL,
@@ -4435,13 +4522,12 @@ function NumF({ label, value, onChange, placeholder }) {
   ] });
 }
 var n0 = (v) => +v || 0;
-function Fam({ fam, name, sum, children, advanced }) {
+function Fam({ fam, name, children, advanced }) {
   const [adv, setAdv] = useState(false);
   return /* @__PURE__ */ jsxs("section", { className: "fam-sec", children: [
     /* @__PURE__ */ jsxs("div", { className: "famhead", children: [
       /* @__PURE__ */ jsx("span", { className: "fam", style: { background: FAMILY_COLORS[fam] } }),
       /* @__PURE__ */ jsx("b", { children: name }),
-      /* @__PURE__ */ jsx("span", { className: "hint", children: sum }),
       advanced ? /* @__PURE__ */ jsx("button", { className: "linkbtn", style: { marginLeft: "auto" }, onClick: () => setAdv(!adv), "aria-expanded": adv, children: adv ? "Hide advanced" : `Advanced (${advanced.count})` }) : null
     ] }),
     children,
@@ -4457,7 +4543,7 @@ function QueueChips({ model, selfId, list, onToggle, label }) {
     }) })
   ] });
 }
-function QueueDetail({ model, set, q, d }) {
+function QueueDetail({ model, set, q, d, detailRef }) {
   const st = q.staffing || {};
   const et = (0, import_bridge.engineTypeOf)(q);
   const DEF = (0, import_bridge.engineQueueDefaults)(q.homeBrandId || (model.brands[0] || {}).id || "b1", st.channel || (et.type === "voice" ? "voice" : "digital"));
@@ -4473,14 +4559,14 @@ function QueueDetail({ model, set, q, d }) {
   const voice = et.type === "voice";
   const hires = wf.hires || [];
   const setHires = (h) => updWf({ hires: h });
-  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "queue-detail", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "queue-detail", ref: detailRef, tabIndex: -1, "aria-label": q.name, children: [
     /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ jsxs("h4", { style: { marginRight: "auto" }, children: [
         q.name,
         q._modified ? /* @__PURE__ */ jsx("span", { className: "moddot", style: { marginLeft: 6 }, "aria-label": "modified" }) : null
       ] }),
       /* @__PURE__ */ jsx("button", { className: "btn sm", onClick: () => set(Ops.resetQueueStaffing(model, q.id)), children: "Reset to defaults" }),
-      guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
+      guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => set(Ops.deleteQueue(model, q.id)), children: "Delete" }) : /* @__PURE__ */ jsx("span", { className: "hint blocked", style: { marginLeft: 0 }, title: "Referenced by " + guardSummary(guard), children: "\u25B2 in use" })
     ] }),
     /* @__PURE__ */ jsxs("p", { className: "hint derived-strip", children: [
       "Derived: ",
@@ -4502,7 +4588,6 @@ function QueueDetail({ model, set, q, d }) {
       {
         fam: "inputs",
         name: "Inputs",
-        sum: `${QTYPE_LABELS[q.type] || q.type} \xB7 fallback AHT ${q.fallbackAhtSec} s`,
         advanced: { count: voice ? 2 : 5, body: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
           /* @__PURE__ */ jsx(NumF, { label: "Priority", value: eff.priority, onChange: (v) => upd({ priority: n0(v) }) }),
           !voice ? /* @__PURE__ */ jsxs(Fragment, { children: [
@@ -4551,7 +4636,7 @@ function QueueDetail({ model, set, q, d }) {
         ] })
       }
     ),
-    /* @__PURE__ */ jsx(Fam, { fam: "performance", name: "Performance", sum: voice ? `ASA ${eff.asaTarget} s \xB7 abandon \u2264 ${Math.round(eff.maxAbandon * 100)}%` : `${eff.digitalSlaPct * 100}% in ${eff.digitalSlaMinutes} min`, children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+    /* @__PURE__ */ jsx(Fam, { fam: "performance", name: "Performance", children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
       voice ? /* @__PURE__ */ jsxs(Fragment, { children: [
         /* @__PURE__ */ jsx(NumF, { label: "ASA target (s)", value: eff.asaTarget, onChange: (v) => upd({ asaTarget: n0(v) }) }),
         /* @__PURE__ */ jsx(NumF, { label: "Max abandon (%)", value: Math.round(eff.maxAbandon * 100), onChange: (v) => upd({ maxAbandon: n0(v) / 100 }) })
@@ -4566,7 +4651,6 @@ function QueueDetail({ model, set, q, d }) {
       {
         fam: "efficiency",
         name: "Efficiency",
-        sum: `occupancy \u2264 ${Math.round((eff.occupancyCeiling ?? 0.85) * 100)}%`,
         advanced: { count: 5, body: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
           /* @__PURE__ */ jsx(NumF, { label: "Burnout threshold (%)", value: Math.round(burn.occThreshold * 100), onChange: (v) => updBurn({ occThreshold: n0(v) / 100 }) }),
           /* @__PURE__ */ jsx(NumF, { label: "Burnout sensitivity", value: burn.sensitivity, onChange: (v) => updBurn({ sensitivity: n0(v) }) }),
@@ -4582,7 +4666,6 @@ function QueueDetail({ model, set, q, d }) {
       {
         fam: "workforce",
         name: "Workforce",
-        sum: `${eff.resourcing || "resourced"} \xB7 shrinkage ${Math.round(eff.shrinkage * 100)}%`,
         advanced: { count: 4 + 1, body: /* @__PURE__ */ jsxs(Fragment, { children: [
           /* @__PURE__ */ jsxs("div", { className: "fields", children: [
             /* @__PURE__ */ jsx(NumF, { label: "Attrition growth (/mo)", value: wf.attritionGrowth, onChange: (v) => updWf({ attritionGrowth: n0(v) }) }),
@@ -4593,6 +4676,7 @@ function QueueDetail({ model, set, q, d }) {
                 {
                   value: (wf.learningCurve || []).join(", "),
                   "aria-label": "Learning curve",
+                  placeholder: "0.6, 0.8, 0.9, 1",
                   onChange: (e) => updWf({ learningCurve: e.target.value.split(",").map((x) => +x.trim()).filter((x) => !isNaN(x)) })
                 }
               )
@@ -4619,7 +4703,7 @@ function QueueDetail({ model, set, q, d }) {
             }
           ),
           /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1", marginTop: 6 }, children: [
-            /* @__PURE__ */ jsx("label", { children: "Manual hires (S4 \u2014 week \xD7 heads)" }),
+            /* @__PURE__ */ jsx("label", { children: "Manual hires (week \xD7 heads)" }),
             hires.map((h, i) => /* @__PURE__ */ jsxs("div", { className: "mixrow", children: [
               /* @__PURE__ */ jsx("span", { className: "hint", children: "week" }),
               /* @__PURE__ */ jsx("input", { className: "num", value: h.week, "aria-label": `hire ${i + 1} week`, onChange: (e) => setHires(hires.map((x, j) => j === i ? { ...x, week: n0(e.target.value) } : x)) }),
@@ -4648,19 +4732,19 @@ function QueueDetail({ model, set, q, d }) {
         ] })
       }
     ),
-    /* @__PURE__ */ jsx(Fam, { fam: "customer", name: "Customer", sum: `churn \xA3${eff.churnCost ?? 500}`, children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
+    /* @__PURE__ */ jsx(Fam, { fam: "customer", name: "Customer", children: /* @__PURE__ */ jsxs("div", { className: "fields", children: [
       /* @__PURE__ */ jsx(NumF, { label: "Churn cost (\xA3)", value: eff.churnCost ?? 500, onChange: (v) => upd({ churnCost: n0(v) }) }),
       /* @__PURE__ */ jsx(NumF, { label: "Failed \u2192 churn (%)", value: eff.failedToChurnPct ?? 6, onChange: (v) => upd({ failedToChurnPct: n0(v) }) })
     ] }) }),
-    /* @__PURE__ */ jsx(Fam, { fam: "outputs", name: "Outputs", sum: `agent \xA3${fmt(eff.agentCost)}/yr`, children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
+    /* @__PURE__ */ jsx(Fam, { fam: "outputs", name: "Outputs", children: /* @__PURE__ */ jsx("div", { className: "fields", children: /* @__PURE__ */ jsx(NumF, { label: "Agent cost (\xA3/yr)", value: eff.agentCost, onChange: (v) => upd({ agentCost: n0(v) }) }) }) })
   ] });
 }
-function TeamDetail({ model, set, team }) {
+function TeamDetail({ model, set, team, detailRef }) {
   const upd = (patch) => set(Ops.updateServiceTeam(model, team.id, patch));
-  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "team-detail", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "mddetail", "data-testid": "team-detail", ref: detailRef, tabIndex: -1, "aria-label": team.name, children: [
     /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ jsx("h4", { style: { marginRight: "auto" }, children: team.name }),
-      /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
+      /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => set(Ops.deleteServiceTeam(model, team.id)), children: "Delete" })
     ] }),
     /* @__PURE__ */ jsx("p", { className: "hint", children: "Shared capacity \u2014 spills into the queues it covers when they run hot." }),
     /* @__PURE__ */ jsxs("div", { className: "fields", children: [
@@ -4697,7 +4781,8 @@ function QueuesPanel({ model, set, p }) {
   const queues = model.queues || [];
   const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
   const [sel, setSel] = useState(queues[0] ? { kind: "queue", id: queues[0].id } : null);
-  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) : null;
+  const detailRef = useRevealOnSelect(sel && sel.id);
+  const q = sel && sel.kind === "queue" ? queues.find((x) => x.id === sel.id) || queues[0] : null;
   const team = sel && sel.kind === "team" ? teams.find((x) => x.id === sel.id) : null;
   const groups = [];
   const byKey = /* @__PURE__ */ new Map();
@@ -4711,8 +4796,10 @@ function QueuesPanel({ model, set, p }) {
   }
   groups.sort((a, b) => a === "Global \u2014 no home" ? 1 : b === "Global \u2014 no home" ? -1 : 0);
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Queues" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Volume and effective AHT are derived \u2014 never entered here." }),
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Queues ",
+      /* @__PURE__ */ jsx("small", { children: "volume and AHT are derived" })
+    ] }),
     /* @__PURE__ */ jsxs("div", { className: "md", children: [
       /* @__PURE__ */ jsxs("div", { children: [
         groups.map((label) => /* @__PURE__ */ jsxs("div", { className: "mdgroup", children: [
@@ -4749,7 +4836,7 @@ function QueuesPanel({ model, set, p }) {
           /* @__PURE__ */ jsx("p", { className: "mdgrouplab", children: "Shared capacity" }),
           /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Shared capacity", children: teams.map((x) => {
             const on = sel && sel.kind === "team" && sel.id === x.id;
-            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
+            return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": !!on, className: on ? "on" : "", onClick: () => setSel({ kind: "team", id: x.id }), children: [
               /* @__PURE__ */ jsx("b", { children: x.name }),
               /* @__PURE__ */ jsxs("small", { children: [
                 "service team \xB7 covers ",
@@ -4763,38 +4850,52 @@ function QueuesPanel({ model, set, p }) {
               ] })
             ] }, x.id);
           }) }),
-          /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginTop: 4 }, disabled: !model.engineConfig, onClick: () => {
-            const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
-            set(m2);
-            setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
-          }, children: "+ Shared team" })
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              className: "btn sm",
+              style: { marginTop: 4 },
+              disabled: !model.engineConfig,
+              title: model.engineConfig ? "" : "Attach engine defaults on the Defaults tab first \u2014 shared teams live in the engine config.",
+              onClick: () => {
+                const m2 = Ops.addServiceTeam(model, { name: "Shared team" });
+                set(m2);
+                setSel({ kind: "team", id: m2.engineConfig.serviceTeams[m2.engineConfig.serviceTeams.length - 1].id });
+              },
+              children: "+ Shared team"
+            }
+          )
         ] })
       ] }),
-      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id) }) : team ? /* @__PURE__ */ jsx(TeamDetail, { model, set, team }) : /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "queue-detail", children: /* @__PURE__ */ jsx("p", { className: "hint", children: "Select a queue or shared team." }) })
+      q ? /* @__PURE__ */ jsx(QueueDetail, { model, set, q, d: p.queues.get(q.id), detailRef }) : team ? /* @__PURE__ */ jsx(TeamDetail, { model, set, team, detailRef }) : /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "queue-detail", ref: detailRef, tabIndex: -1, children: /* @__PURE__ */ jsx("p", { className: "hint", children: "Select a queue or shared team." }) })
     ] })
   ] });
 }
 var fmtPct = (x) => (Math.round(x * 10) / 10).toLocaleString("en-GB");
-function ToggleChips({ options, selected, onToggle, allLabel }) {
-  return /* @__PURE__ */ jsxs("div", { className: "regoff", style: { marginTop: 4 }, children: [
-    options.map((o) => {
-      const on = selected.includes(o.id);
-      return /* @__PURE__ */ jsx(
-        "button",
-        {
-          className: "chip" + (on ? " on-toggle" : " off"),
-          "aria-pressed": on,
-          onClick: () => onToggle(o.id),
-          children: on ? o.name : "+ " + o.name
-        },
-        o.id
-      );
-    }),
-    options.length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: allLabel }) : null
+function ToggleChips({ label, options, selected, onToggle, allLabel }) {
+  return /* @__PURE__ */ jsxs("div", { className: "field", children: [
+    /* @__PURE__ */ jsx("label", { children: label }),
+    /* @__PURE__ */ jsxs("div", { className: "regoff", role: "group", "aria-label": label, children: [
+      options.map((o) => {
+        const on = selected.includes(o.id);
+        return /* @__PURE__ */ jsx(
+          "button",
+          {
+            className: "chip" + (on ? " on-toggle" : " off"),
+            "aria-pressed": on,
+            onClick: () => onToggle(o.id),
+            children: on ? o.name : "+ " + o.name
+          },
+          o.id
+        );
+      }),
+      options.length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: allLabel }) : null
+    ] })
   ] });
 }
 function ProcessEditor({ model, set, rt, proc }) {
   const [newOutcome, setNewOutcome] = useState("");
+  const [armed, setArmed] = useState(false);
   const chName = nameOf(model.channels, proc.channelId);
   const upd = (i, patch) => set(Ops.updateStep(model, rt.id, proc.channelId, i, patch));
   const noTerminal = (proc.steps || []).length > 0 && !proc.steps.some((s) => s.terminal);
@@ -4802,14 +4903,43 @@ function ProcessEditor({ model, set, rt, proc }) {
     const q = (model.queues || []).find((x) => x.id === s.queueId);
     return q && q.type === "governance";
   });
+  const remove = () => set(Ops.deleteProcess(model, rt.id, proc.channelId));
+  const needsConfirm = (proc.steps || []).length > 0;
   return /* @__PURE__ */ jsxs("div", { className: "proc", "data-testid": "process-" + rt.id + "-" + proc.channelId, children: [
     /* @__PURE__ */ jsxs("div", { className: "prochead", children: [
       /* @__PURE__ */ jsx("span", { className: "chip on-toggle", children: chName }),
-      /* @__PURE__ */ jsx("button", { className: "regdel", onClick: () => set(Ops.deleteProcess(model, rt.id, proc.channelId)), "aria-label": "Remove " + chName + " process", children: "\u2715" })
+      armed ? /* @__PURE__ */ jsxs(
+        "button",
+        {
+          className: "btn sm danger",
+          style: { marginLeft: "auto" },
+          "aria-label": "Remove " + chName + " process",
+          onBlur: () => setArmed(false),
+          onKeyDown: (e) => {
+            if (e.key === "Escape") setArmed(false);
+          },
+          onClick: remove,
+          children: [
+            "Remove ",
+            (proc.steps || []).length,
+            " step",
+            (proc.steps || []).length === 1 ? "" : "s",
+            "?"
+          ]
+        }
+      ) : /* @__PURE__ */ jsx(
+        "button",
+        {
+          className: "regdel",
+          "aria-label": "Remove " + chName + " process",
+          onClick: () => needsConfirm ? setArmed(true) : remove(),
+          children: "\u2715"
+        }
+      )
     ] }),
     (proc.steps || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", style: { margin: "4px 0" }, children: "No steps yet \u2014 this process is inert until it routes somewhere." }) : /* @__PURE__ */ jsxs("div", { className: "steps" + (hasGov ? " with-sample" : ""), children: [
       /* @__PURE__ */ jsxs("div", { className: "steprow head", children: [
-        /* @__PURE__ */ jsx("span", {}),
+        /* @__PURE__ */ jsx("span", { children: "Step" }),
         /* @__PURE__ */ jsx("span", { children: "Queue" }),
         /* @__PURE__ */ jsx("span", { children: "Split %" }),
         hasGov ? /* @__PURE__ */ jsx("span", { children: "Sample %" }) : null,
@@ -4876,6 +5006,7 @@ function ProcessEditor({ model, set, rt, proc }) {
 function RequestTypesPanel({ model, set, p }) {
   const rts = model.requestTypes || [];
   const [sel, setSel] = useState(rts[0] ? rts[0].id : null);
+  const detailRef = useRevealOnSelect(sel);
   const rt = rts.find((x) => x.id === sel) || rts[0] || null;
   const rtErr = (x) => p.validation.errors.filter((e) => e.requestTypeId === x.id);
   const rtWarn = (x) => p.validation.warnings.filter((w) => (w.requestTypeIds || []).includes(x.id));
@@ -4887,14 +5018,16 @@ function RequestTypesPanel({ model, set, p }) {
   const offChannels = rt ? (model.channels || []).filter((c) => !(rt.processes || []).some((pr) => pr.channelId === c.id)) : [];
   const guard = rt ? (0, import_domain.canDeleteRequestType)(model, rt.id) : { ok: true, blockedBy: [] };
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Request types" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "What customers ask for, and how each is processed. This is the only place brands, BUs, channels, groups, products and queues are wired together." }),
-    rts.length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "No request types yet." }) : null,
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Request types ",
+      /* @__PURE__ */ jsx("small", { children: "the only place things are wired together" })
+    ] }),
+    rts.length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "No request types yet \u2014 add one to wire brands, channels and queues together." }) : null,
     /* @__PURE__ */ jsxs("div", { className: "md", children: [
-      /* @__PURE__ */ jsxs("div", { className: "mdlist", role: "listbox", "aria-label": "Request types", children: [
-        rts.map((x) => {
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("div", { className: "mdlist", role: "listbox", "aria-label": "Request types", children: rts.map((x) => {
           const errs = rtErr(x), warns = rtWarn(x);
-          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": rt && rt.id === x.id, className: "rtrow" + (rt && rt.id === x.id ? " on" : ""), onClick: () => setSel(x.id), children: [
+          return /* @__PURE__ */ jsxs("button", { role: "option", "aria-selected": !!(rt && rt.id === x.id), className: "rtrow" + (rt && rt.id === x.id ? " on" : ""), onClick: () => setSel(x.id), children: [
             /* @__PURE__ */ jsxs("b", { children: [
               x.name,
               " ",
@@ -4908,14 +5041,14 @@ function RequestTypesPanel({ model, set, p }) {
             ] }),
             /* @__PURE__ */ jsx("small", { children: (x.processes || []).map((pr) => nameOf(model.channels, pr.channelId)).join(" \xB7 ") || "no processes" })
           ] }, x.id);
-        }),
+        }) }),
         /* @__PURE__ */ jsx("button", { className: "btn sm", style: { marginTop: 4 }, onClick: () => {
           const m2 = Ops.addRequestType(model, { name: "New request type", groupId: (model.processGroups[0] || {}).id });
           set(m2);
           setSel(m2.requestTypes[m2.requestTypes.length - 1].id);
         }, children: "+ Request type" })
       ] }),
-      /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "rt-detail", children: rt ? /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsx("div", { className: "mddetail", "data-testid": "rt-detail", ref: detailRef, tabIndex: -1, children: rt ? /* @__PURE__ */ jsxs(Fragment, { children: [
         /* @__PURE__ */ jsx("h4", { children: "Identity" }),
         /* @__PURE__ */ jsxs("div", { className: "fields", children: [
           /* @__PURE__ */ jsxs("div", { className: "field", children: [
@@ -4924,11 +5057,11 @@ function RequestTypesPanel({ model, set, p }) {
           ] }),
           /* @__PURE__ */ jsxs("div", { className: "field", children: [
             /* @__PURE__ */ jsx("label", { children: "Activity" }),
-            /* @__PURE__ */ jsx("select", { value: rt.activity, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
+            /* @__PURE__ */ jsx("select", { value: rt.activity, "aria-label": "Activity", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { activity: e.target.value })), children: ACTIVITIES.map((a) => /* @__PURE__ */ jsx("option", { value: a, children: ACTIVITY_LABELS[a] }, a)) })
           ] }),
           /* @__PURE__ */ jsxs("div", { className: "field", children: [
             /* @__PURE__ */ jsx("label", { children: "Product request" }),
-            /* @__PURE__ */ jsxs("select", { value: rt.productRequest, onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
+            /* @__PURE__ */ jsxs("select", { value: rt.productRequest, "aria-label": "Product request", onChange: (e) => set(Ops.updateRequestType(model, rt.id, { productRequest: e.target.value })), children: [
               /* @__PURE__ */ jsx("option", { value: "existing", children: "Existing product" }),
               /* @__PURE__ */ jsx("option", { value: "new", children: "New product" })
             ] })
@@ -4966,6 +5099,7 @@ function RequestTypesPanel({ model, set, p }) {
         /* @__PURE__ */ jsx(
           ToggleChips,
           {
+            label: "Brands",
             options: model.brands || [],
             selected: rt.brandIds || [],
             allLabel: "no brands defined yet",
@@ -4975,6 +5109,7 @@ function RequestTypesPanel({ model, set, p }) {
         /* @__PURE__ */ jsx(
           ToggleChips,
           {
+            label: "Business units",
             options: model.businessUnits || [],
             selected: rt.buIds || [],
             allLabel: "no business units defined yet",
@@ -4996,7 +5131,7 @@ function RequestTypesPanel({ model, set, p }) {
           "+ ",
           c.name
         ] }, c.id)) }) : null,
-        /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm", style: { color: "var(--red-ink)", borderColor: "#F0B4B4" }, onClick: () => {
+        /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: 8, marginTop: 16, borderTop: "0.5px solid var(--line)", paddingTop: 10 }, children: guard.ok ? /* @__PURE__ */ jsx("button", { className: "btn sm danger", onClick: () => {
           set(Ops.deleteRequestType(model, rt.id));
           setSel(null);
         }, children: "Delete request type" }) : /* @__PURE__ */ jsxs("span", { className: "hint blocked", style: { marginLeft: 0 }, children: [
@@ -5008,6 +5143,7 @@ function RequestTypesPanel({ model, set, p }) {
     ] })
   ] });
 }
+var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 var PROV_LABELS = { entered: "entered", scaled: "scaled", equal: "equal split", sum: "sum", none: "\u2014" };
 function entryAt(model, scope) {
   const k = (0, import_domain.keyOf)(scope || {});
@@ -5131,8 +5267,10 @@ function VolumePanel({ model, set, p }) {
   }
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Volume" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Type at any row \u2014 the highest entered figure is authoritative beneath it; entered finer figures act as weights; the rest split equally. Nothing reconciles silently." }),
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Volume ",
+      /* @__PURE__ */ jsx("small", { children: "type a number at any row" })
+    ] }),
     rows.length <= 1 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "Assign request types first \u2014 the spine builds itself from them." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("div", { className: "volgrid", "data-testid": "cascade-grid", children: [
       /* @__PURE__ */ jsxs("div", { className: "volrow head", children: [
         /* @__PURE__ */ jsx("span", { className: "volname", children: "Spine" }),
@@ -5181,6 +5319,7 @@ var NODE_W = 168;
 var NODE_H = 52;
 var COL_W = 212;
 var ROW_H = 76;
+var trunc = (s, n = 22) => s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 function buildMap(model, p) {
   const depth = /* @__PURE__ */ new Map();
   for (const rt of model.requestTypes || [])
@@ -5232,7 +5371,7 @@ function buildMap(model, p) {
   for (const tm of teams)
     for (const t of tm.coversQueues || [])
       if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
-  const width = 40 + (maxD + 2) * COL_W;
+  const width = Math.max(40 + (maxD + 2) * COL_W, 40 + teams.length * COL_W);
   const height = teamY + (teams.length ? NODE_H + 30 : 6);
   return { pos, flow, cap, teams, width, height };
 }
@@ -5265,30 +5404,60 @@ function MapPanel({ model, p, onJump }) {
   ];
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Map" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Generated from the model on every view \u2014 flow from process steps, capacity links dashed. Nothing is authored here." }),
-    (model.queues || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("svg", { className: "mapsvg", "data-testid": "map-svg", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Map ",
+      /* @__PURE__ */ jsx("small", { children: "generated \u2014 nothing authored here" })
+    ] }),
+    (model.queues || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("svg", { className: "mapsvg", "data-testid": "map-svg", "aria-labelledby": "mapttl", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
+      /* @__PURE__ */ jsx("title", { id: "mapttl", children: "Queue map" }),
+      /* @__PURE__ */ jsxs("desc", { children: [
+        (model.queues || []).length,
+        " queues, ",
+        m.flow.length,
+        " routing links and ",
+        m.cap.length,
+        " capacity links, generated from the request-type processes."
+      ] }),
       /* @__PURE__ */ jsx("defs", { children: /* @__PURE__ */ jsx("marker", { id: "arr", markerWidth: "8", markerHeight: "8", refX: "7", refY: "3", orient: "auto", children: /* @__PURE__ */ jsx("path", { d: "M0,0 L7,3 L0,6 z", fill: "var(--ink-3)" }) }) }),
       m.flow.map((e, i) => edge(e, i, false)),
       m.cap.map((e, i) => edge(e, i, true)),
       (model.queues || []).map((q) => {
         const c = m.pos.get(q.id);
         const d = p.queues.get(q.id);
-        return /* @__PURE__ */ jsxs("g", { className: "mnode" + (selQ === q.id ? " on" : ""), onClick: () => setSelQ(selQ === q.id ? null : q.id), "data-node": q.id, children: [
-          /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
-          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: q.name.length > 22 ? q.name.slice(0, 21) + "\u2026" : q.name }),
-          /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
-            fmt(d ? d.volume : 0),
-            "/day \xB7 ",
-            QTYPE_LABELS[q.type] || q.type
-          ] })
-        ] }, q.id);
+        return /* @__PURE__ */ jsxs(
+          "g",
+          {
+            className: "mnode" + (selQ === q.id ? " on" : ""),
+            "data-node": q.id,
+            tabIndex: 0,
+            role: "button",
+            "aria-pressed": selQ === q.id,
+            "aria-label": q.name + " \u2014 " + (QTYPE_LABELS[q.type] || q.type) + ", " + fmt(d ? d.volume : 0) + " per day",
+            onClick: () => setSelQ(selQ === q.id ? null : q.id),
+            onKeyDown: (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setSelQ(selQ === q.id ? null : q.id);
+              }
+            },
+            children: [
+              /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
+              /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: trunc(q.name) }),
+              /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+                fmt(d ? d.volume : 0),
+                "/day \xB7 ",
+                QTYPE_LABELS[q.type] || q.type
+              ] })
+            ]
+          },
+          q.id
+        );
       }),
       m.teams.map((tm) => {
         const c = m.pos.get("team:" + tm.id);
         return /* @__PURE__ */ jsxs("g", { className: "mnode team", "data-node": "team:" + tm.id, children: [
           /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9", strokeDasharray: "5 4" }),
-          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: tm.name }),
+          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: trunc(tm.name) }),
           /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
             tm.size,
             " FTE shared"
@@ -5350,8 +5519,10 @@ function DefaultsPanel({ model, set }) {
   };
   const presetName = Object.keys(import_engine.SEASONAL_PRESETS).find((k) => JSON.stringify(import_engine.SEASONAL_PRESETS[k]) === JSON.stringify(season.system)) || "";
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsx("h3", { children: "Defaults" }),
-    /* @__PURE__ */ jsx("p", { className: "hint", children: "Global physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams in Queues." }),
+    /* @__PURE__ */ jsxs("h3", { children: [
+      "Defaults ",
+      /* @__PURE__ */ jsx("small", { children: "what every queue inherits" })
+    ] }),
     /* @__PURE__ */ jsxs(G, { name: "Simulation frame", children: [
       /* @__PURE__ */ jsx(NumF, { label: "Horizon (weeks)", value: eng.horizonWeeks, onChange: (v) => updEC("engine", { horizonWeeks: n0(v) }) }),
       /* @__PURE__ */ jsx(NumF, { label: "Day start (h)", value: eng.dayStart, onChange: (v) => updEC("engine", { dayStart: n0(v) }) }),
@@ -5400,7 +5571,18 @@ function DefaultsPanel({ model, set }) {
           Object.keys(import_engine.SEASONAL_PRESETS).map((k) => /* @__PURE__ */ jsx("option", { value: k, children: k }, k))
         ] })
       ] }),
-      /* @__PURE__ */ jsx(NumF, { label: "Season start month (0\u201311)", value: season.startMonth, onChange: (v) => updEC("seasonality", { startMonth: n0(v) }) }),
+      /* @__PURE__ */ jsxs("div", { className: "field", children: [
+        /* @__PURE__ */ jsx("label", { children: "Season starts" }),
+        /* @__PURE__ */ jsx(
+          "select",
+          {
+            value: season.startMonth || 0,
+            "aria-label": "Season start month",
+            onChange: (e) => updEC("seasonality", { startMonth: n0(e.target.value) }),
+            children: MONTHS.map((mn, i) => /* @__PURE__ */ jsx("option", { value: i, children: mn }, mn))
+          }
+        )
+      ] }),
       /* @__PURE__ */ jsxs("div", { className: "field", style: { gridColumn: "1/-1" }, children: [
         /* @__PURE__ */ jsx("label", { children: "Presets" }),
         /* @__PURE__ */ jsx("p", { className: "hint", children: "The same library powers the shape chips on the Volume tab." })
@@ -5419,7 +5601,7 @@ var import_engine3 = __toESM(require_engine());
 
 // ui/sim-set.js
 var import_engine2 = __toESM(require_engine());
-import { useRef, useState as useState2, useEffect, useMemo as useMemo2 } from "react";
+import { useRef as useRef2, useState as useState2, useEffect as useEffect2, useMemo as useMemo2 } from "react";
 
 // ui/views.js
 var STRATEGIES = [
@@ -5537,12 +5719,12 @@ function normalizeSel(selected, matrix, groups, strategies) {
 }
 
 // ui/v2/hooks.js
-import { useState as useState3, useEffect as useEffect2, useRef as useRef2 } from "react";
+import { useState as useState3, useEffect as useEffect3, useRef as useRef3 } from "react";
 function useDeferred(input, compute) {
   const [value, setValue] = useState3(() => compute(input));
   const [pending, setPending] = useState3(false);
-  const seen = useRef2(input);
-  useEffect2(() => {
+  const seen = useRef3(input);
+  useEffect3(() => {
     if (input === seen.current) return;
     seen.current = input;
     setPending(true);
@@ -5838,7 +6020,7 @@ function bestUnderWeight(base, w) {
 }
 
 // ui/v2/ResultsPage.jsx
-import { useState as useState5, useMemo as useMemo4, useEffect as useEffect3, useRef as useRef3, useCallback, Fragment as Fragment4 } from "react";
+import { useState as useState5, useMemo as useMemo4, useEffect as useEffect4, useRef as useRef4, useCallback, Fragment as Fragment4 } from "react";
 import { Fragment as Fragment5, jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 var fmtGBP = (n) => "\xA3" + Math.round(n).toLocaleString("en-GB");
 var fmtM2 = (n) => "\xA3" + (n / 1e6).toFixed(1) + "m";
@@ -6232,8 +6414,8 @@ function DataLens({ weeks, cfg }) {
 }
 function Flow({ weeks, cfg, week, setWeek }) {
   const [playing, setPlaying] = useState5(false);
-  const timer = useRef3(null);
-  useEffect3(() => {
+  const timer = useRef4(null);
+  useEffect4(() => {
     if (!playing) return;
     timer.current = setInterval(() => setWeek((w) => w >= weeks.length - 1 ? 0 : w + 1), 300);
     return () => clearInterval(timer.current);
@@ -6331,7 +6513,7 @@ function bestUnderWeight2(base, w) {
 }
 
 // ui/v2/HomePage.jsx
-import { useState as useState6, useMemo as useMemo5, useEffect as useEffect4 } from "react";
+import { useState as useState6, useMemo as useMemo5, useEffect as useEffect5 } from "react";
 
 // ui/v2/ecosystem.js
 var import_derive2 = __toESM(require_derive());
@@ -6565,7 +6747,7 @@ function ForkModal({ onClose, onNew }) {
     onClose();
     onNew && onNew();
   };
-  useEffect4(() => {
+  useEffect5(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
     };
@@ -6676,13 +6858,13 @@ function App({ initialModel }) {
     setSelected(null);
     setTab("setup");
   }, [initialModel]);
-  const timer = useRef4(null);
-  useEffect5(() => {
+  const timer = useRef5(null);
+  useEffect6(() => {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => (0, import_store_domain.saveDomainModel)(model), 300);
     return () => clearTimeout(timer.current);
   }, [model]);
-  const lastHeadline = useRef4(null);
+  const lastHeadline = useRef5(null);
   const simulations = useMemo6(() => {
     let headline = lastHeadline.current;
     if (tab === "home" || !headline) {
