@@ -4260,7 +4260,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
 .volgrid{min-width:560px}
-.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
+.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px 84px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
 .volrow.head{border-bottom:0.5px solid var(--line)}
 .volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
 /* Weight must decrease with depth, or the request type outranks the brand that
@@ -4294,6 +4294,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
 .prov.none{color:var(--ink-3)}
 .shapecell{text-align:left; font-size:11px}
+.flowcell{text-align:left; font-size:11px; white-space:nowrap}
+.flowstrip{display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; padding:7px 0 9px;
+  border-bottom:0.5px dashed var(--line)}
+.jseg{display:inline-flex; align-items:center; gap:4px 6px; flex-wrap:wrap}
+.jstep.entry{background:var(--canvas); border:0.5px solid var(--line)}
+.jdone{font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px;
+  background:var(--green-bg); color:var(--green-ink)}
 .shapecell.set{color:var(--purple); font-weight:600}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
@@ -4313,7 +4320,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
    control cannot ship without one \u2014 keyboard users get the same visible focus
    the v2.4 surfaces already had. */
 .linkbtn:focus-visible,.chip:focus-visible,.regdel:focus-visible,.chipx:focus-visible,
-.mdlist button:focus-visible,.shapecell:focus-visible,.outin:focus-visible,
+.mdlist button:focus-visible,.shapecell:focus-visible,.flowcell:focus-visible,.outin:focus-visible,
 .volrow input:focus-visible,.steprow input:focus-visible,.steprow select:focus-visible,
 .regmain input:focus-visible,.shapebox textarea:focus-visible,.famhead button:focus-visible{
   outline:2px solid var(--blue); outline-offset:2px; border-radius:6px}
@@ -4380,14 +4387,16 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   .mdlist button .qstats{grid-row:auto; grid-column:1; margin-top:1px}
   .mddetail{padding:12px}
   .volgrid{min-width:0}
-  .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape shape"; gap:6px 8px; padding:6px 0}
+  .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape flow"; gap:6px 8px; padding:6px 0}
   .volrow>.volname{grid-area:name}
   .volrow>input{grid-area:val}
   .volrow>.prov{grid-area:prov}
   .volrow>.shapecell{grid-area:shape; padding-left:0}
+  .volrow>.flowcell{grid-area:flow; text-align:right}
   /* The header row is the ONLY place the unit "Daily" appears \u2014 hiding it on
      the contributor's own tab invites weekly figures in a per-day box. */
   .volrow.head>span:nth-child(4){grid-area:shape; padding-left:0}
+  .volrow.head>span:nth-child(5){display:none}
   .volname{padding-left:calc(var(--lvl,0) * 9px)}
   .fam-sec{padding:8px 0 10px}
   .mddetail{scroll-margin-top:12px}
@@ -4426,8 +4435,7 @@ var SETUP_TABS = [
   ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes \u2014 they are never entered here. Tap a queue to open its editor."],
   ["processes", "Processes", "The journeys work can take, defined once and reused. A process is a channel-specific route through your queues, ending in a declared outcome \u2014 attach the same one to as many request types as need it. Process groups are managed here."],
   ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together \u2014 one process per channel, ending in a declared outcome."],
-  ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
-  ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here \u2014 it redraws from the model, and lists anything that does not hang together."],
+  ["volume", "Volume & flow", "How much arrives, and where it goes. Type a figure at any level you know; it is authoritative beneath, finer entries act as weights, and the rest splits equally. Expand a process row to see its journey with those volumes on the arrows; the whole-estate map lives at the bottom."],
   ["defaults", "Defaults", "The physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams live in Queues; risk thresholds are a reading lens on Results."]
 ];
 function computeStatus(model, p) {
@@ -4470,12 +4478,6 @@ function computeStatus(model, p) {
       ok: nVe > 0 && uncovered === 0,
       badge: uncovered ? `${uncovered} uncovered` : `${nVe} entr${nVe === 1 ? "y" : "ies"}`,
       next: nVe === 0 ? "Enter volume at whatever level you know it." : "Cover the volume flagged as reaching no process."
-    },
-    {
-      key: "map",
-      ok: p.validation.ok,
-      badge: p.validation.ok ? "no issues" : `${errs.length + warns.length} issue${errs.length + warns.length === 1 ? "" : "s"}`,
-      next: "Resolve the issues listed in Map."
     },
     {
       key: "defaults",
@@ -4593,8 +4595,7 @@ function SetupV3Page({ model, onModelChange, onNav = () => {
       tab === "queues" && /* @__PURE__ */ jsx(QueuesPanel, { model, set: onModelChange, p }),
       tab === "processes" && /* @__PURE__ */ jsx(ProcessesPanel, { model, set: onModelChange, p }),
       tab === "requestTypes" && /* @__PURE__ */ jsx(RequestTypesPanel, { model, set: onModelChange, p }),
-      tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p }),
-      tab === "map" && /* @__PURE__ */ jsx(MapPanel, { model, p, onJump: setTab }),
+      tab === "volume" && /* @__PURE__ */ jsx(VolumePanel, { model, set: onModelChange, p, onJump: setTab }),
       tab === "defaults" && /* @__PURE__ */ jsx(DefaultsPanel, { model, set: onModelChange })
     ] }),
     onDownloadTemplate || onUploadTemplate ? /* @__PURE__ */ jsxs("div", { className: "importbox", children: [
@@ -5718,8 +5719,38 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
     ] })
   ] });
 }
-function VolRow({ model, set, level, name, kind, sub, scope, node, hasOwnShape, inheritsShape }) {
+function FlowStrip({ model, p, scope, proc }) {
+  const node = p.nodes.get((0, import_domain.keyOf)(scope));
+  const total = node ? node.total : 0;
+  return /* @__PURE__ */ jsxs("div", { className: "flowstrip", "data-testid": "flow-" + proc.id, children: [
+    /* @__PURE__ */ jsxs("span", { className: "jstep entry", children: [
+      fmt(total),
+      "/day in"
+    ] }),
+    proc.steps.length === 0 ? /* @__PURE__ */ jsx("span", { className: "hint", children: "No steps yet \u2014 add them on the Processes tab." }) : null,
+    proc.steps.map((s, i) => {
+      const q = (model.queues || []).find((x) => x.id === s.queueId);
+      const sampling = s.samplingPct != null ? s.samplingPct : 100;
+      const vol = total * (s.splitPct / 100) * (sampling / 100);
+      return /* @__PURE__ */ jsxs("span", { className: "jseg", children: [
+        /* @__PURE__ */ jsxs("span", { className: "jarr", title: s.splitPct + "% of the process total" + (s.samplingPct != null ? ", sampled at " + s.samplingPct + "%" : ""), children: [
+          "\u2192\xA0",
+          fmt(vol),
+          "/day",
+          s.samplingPct != null ? " (" + s.samplingPct + "% sample)" : ""
+        ] }),
+        /* @__PURE__ */ jsx("span", { className: "jstep" + (q && q.type === "governance" ? " gov" : ""), children: q ? q.name : s.queueId }),
+        s.terminal ? /* @__PURE__ */ jsxs("span", { className: "jdone", children: [
+          "\u2713 ",
+          s.outcome || "done"
+        ] }) : null
+      ] }, i);
+    })
+  ] });
+}
+function VolRow({ model, set, p, level, name, kind, sub, scope, node, hasOwnShape, inheritsShape, proc }) {
   const [shapeOpen, setShapeOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
   const entry = entryAt(model, scope);
   const total = node ? node.total : 0;
   const prov = node ? node.prov : "none";
@@ -5757,12 +5788,29 @@ function VolRow({ model, set, level, name, kind, sub, scope, node, hasOwnShape, 
           "aria-label": "Shape at " + name,
           children: hasOwnShape ? "52-wk \u25CF" : inheritsShape ? "inherited" : "flat"
         }
-      )
+      ),
+      proc ? /* @__PURE__ */ jsxs(
+        "button",
+        {
+          className: "linkbtn flowcell",
+          onClick: () => setFlowOpen(!flowOpen),
+          "aria-expanded": flowOpen,
+          "aria-label": "Flow for " + name,
+          children: [
+            proc.steps.length,
+            " step",
+            proc.steps.length === 1 ? "" : "s",
+            " ",
+            flowOpen ? "\u25BE" : "\u25B8"
+          ]
+        }
+      ) : /* @__PURE__ */ jsx("span", { className: "flowcell" })
     ] }),
+    flowOpen && proc ? /* @__PURE__ */ jsx(FlowStrip, { model, p, scope, proc }) : null,
     shapeOpen ? /* @__PURE__ */ jsx(ShapeEditor, { model, set, scope, entry, daily: total }) : null
   ] });
 }
-function VolumePanel({ model, set, p }) {
+function VolumePanel({ model, set, p, onJump }) {
   const rows = [];
   const seen = /* @__PURE__ */ new Set();
   const hasShapeAt = (scope) => {
@@ -5792,13 +5840,14 @@ function VolumePanel({ model, set, p }) {
       kind: "Process",
       name: proc && proc.name || nameOf(model.channels, leaf.channelId),
       sub: nameOf(model.channels, leaf.channelId),
-      scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId }
+      scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId },
+      proc
     });
   }
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs("h3", { children: [
-      "Volume ",
+      "Volume & flow ",
       /* @__PURE__ */ jsx("small", { children: "type a number at any row" })
     ] }),
     rows.length <= 1 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "Assign request types first \u2014 the spine builds itself from them." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("div", { className: "volgrid", "data-testid": "cascade-grid", children: [
@@ -5806,7 +5855,8 @@ function VolumePanel({ model, set, p }) {
         /* @__PURE__ */ jsx("span", { className: "volname", children: "Level" }),
         /* @__PURE__ */ jsx("span", { children: "Daily" }),
         /* @__PURE__ */ jsx("span", { children: "Provenance" }),
-        /* @__PURE__ */ jsx("span", { children: "Shape" })
+        /* @__PURE__ */ jsx("span", { children: "Shape" }),
+        /* @__PURE__ */ jsx("span", { children: "Flow" })
       ] }),
       rows.map((r) => {
         const anc = [];
@@ -5822,6 +5872,7 @@ function VolumePanel({ model, set, p }) {
           {
             model,
             set,
+            p,
             level: r.level,
             name: r.name,
             kind: r.kind,
@@ -5829,7 +5880,8 @@ function VolumePanel({ model, set, p }) {
             scope: r.scope,
             node: p.nodes.get((0, import_domain.keyOf)(r.scope)),
             hasOwnShape: hasShapeAt(r.scope),
-            inheritsShape: anc.some((a) => hasShapeAt(a))
+            inheritsShape: anc.some((a) => hasShapeAt(a)),
+            proc: r.proc
           },
           (0, import_domain.keyOf)(r.scope)
         );
@@ -5844,7 +5896,20 @@ function VolumePanel({ model, set, p }) {
         "\u25B2 ",
         w.message
       ] }, "u" + i))
-    ] }) : null
+    ] }) : null,
+    /* @__PURE__ */ jsx(
+      Drawer,
+      {
+        title: "Whole estate map",
+        testid: "estate-map",
+        info: "A generated picture of the whole estate \u2014 nothing is authored here. Queues are placed by journey depth; solid arrows are routing from process steps, dashed lines are shared capacity. Every validation issue is listed beneath with a link to the tab that fixes it.",
+        count: (() => {
+          const n = p.validation.errors.length + p.validation.warnings.length + (p.notes || []).length;
+          return n ? n + (n === 1 ? " issue" : " issues") : "no issues";
+        })(),
+        children: /* @__PURE__ */ jsx(EstateMap, { model, p, onJump })
+      }
+    )
   ] });
 }
 var NODE_W = 168;
@@ -5907,7 +5972,7 @@ function buildMap(model, p) {
   const height = teamY + (teams.length ? NODE_H + 30 : 6);
   return { pos, flow, cap, teams, width, height };
 }
-function MapPanel({ model, p, onJump }) {
+function EstateMap({ model, p, onJump }) {
   const { ok, errors, warnings } = p.validation;
   const [selQ, setSelQ] = useState(null);
   const m = buildMap(model, p);
@@ -5936,10 +6001,6 @@ function MapPanel({ model, p, onJump }) {
   ];
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return /* @__PURE__ */ jsxs(Fragment, { children: [
-    /* @__PURE__ */ jsxs("h3", { children: [
-      "Map ",
-      /* @__PURE__ */ jsx("small", { children: "generated \u2014 nothing authored here" })
-    ] }),
     (model.queues || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("svg", { className: "mapsvg", "data-testid": "map-svg", "aria-labelledby": "mapttl", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
       /* @__PURE__ */ jsx("title", { id: "mapttl", children: "Queue map" }),
       /* @__PURE__ */ jsxs("desc", { children: [

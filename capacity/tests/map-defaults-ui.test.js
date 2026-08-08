@@ -1,7 +1,8 @@
-/* U6 GATE — Map + Defaults (BUILD-PLAN U6). The Map is a PURE generated
+/* U6 GATE — Estate map + Defaults (BUILD-PLAN U6). The map is a PURE generated
  * artefact: queue nodes by journey depth, flow edges entirely from process
  * steps (split % · sampling), capacity links dashed and distinct, always
  * current, validation panel with jump-links, node tap → "Edit in Queues".
+ * It lives in the "Whole estate map" drawer at the foot of Volume & flow.
  * Renders the sample AND an empty model clean. Defaults is the global form
  * (frame · workforce · overtime · costs · customer · pattern libraries) and
  * edits reach the engineConfig. Zero console noise throughout.
@@ -54,14 +55,21 @@ function subtab(label, r) {
   if (b && b.getAttribute("aria-selected") !== "true") click(b);
   return b;
 }
+// The estate map lives in a drawer at the foot of Volume & flow. Idempotent.
+function openEstate(r) {
+  subtab("Volume", r);
+  const b = $$(".drwhead", r).find((x) => /Whole estate map/.test(x.textContent));
+  ok(b, "estate map drawer present");
+  if (b.getAttribute("aria-expanded") !== "true") click(b);
+}
 const byLabel = (re, r) => $$("input,select", r).find((i) => re.test(i.getAttribute("aria-label") || ""));
 
-console.log("Map + Defaults gate — BUILD-PLAN U6");
+console.log("Estate map + Defaults gate — BUILD-PLAN U6");
 
 async function main() {
-await t("the Map generates itself from the sample: nodes by depth, flow edges labelled", () => {
+await t("the estate map generates itself from the sample: nodes by depth, flow edges labelled", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
-  subtab("Map");
+  openEstate();
   const svg = $('[data-testid="map-svg"]');
   ok(svg, "svg rendered");
   eq($$(".mnode:not(.team)", svg).length, 4, "four queue nodes");
@@ -81,7 +89,7 @@ await t("capacity links draw dashed and distinct from flow", () => {
   m.engineConfig = ec;
   m = Ops.addServiceTeam(m, { name: "Flex pool", coversQueues: ["q_inbound", "q_apps"] });
   act(() => { mod.exports.mount(c, { model: m }); });
-  subtab("Map", c);
+  openEstate(c);
   const caps = $$(".medge.cap", c);
   ok(caps.some((e) => /supports/.test(e.textContent)), "supports link present");
   ok(caps.filter((e) => /covers/.test(e.textContent)).length === 2, "team covers links");
@@ -98,7 +106,7 @@ await t("tap a node → details + Edit in Queues jumps to the editor", () => {
   ok(det && /Inbound — Billing/.test(det.textContent), "node detail shown");
   click($$("button", det).find((b) => /Edit in Queues/.test(b.textContent)));
   eq($('[role="tabpanel"]').getAttribute("data-tab"), "queues", "jumped to Queues");
-  subtab("Map");
+  openEstate();
 });
 
 await t("validation issues carry jump-links to the tab that fixes them", () => {
@@ -108,7 +116,7 @@ await t("validation issues carry jump-links to the tab that fixes them", () => {
   m = Ops.addBrand(m, { id: "b_z", name: "Zeta" });
   m = Ops.setVolumeEntry(m, { brandId: "b_z" }, { daily: 500 });
   act(() => { mod.exports.mount(c, { model: m }); });
-  subtab("Map", c);
+  openEstate(c);
   const panel = $('[data-testid="validation-panel"]', c);
   ok(/leads nowhere/.test(panel.textContent), "V3 listed");
   ok(/inert/.test(panel.textContent), "V1 uncovered listed");
@@ -120,10 +128,10 @@ await t("validation issues carry jump-links to the tab that fixes them", () => {
   c.remove();
 });
 
-await t("an empty model renders the Map clean (no crash, a hint instead)", () => {
+await t("an empty model renders the estate map clean (no crash, a hint instead)", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   act(() => { mod.exports.mount(c, { model: Ops.blankDomainModel() }); });
-  subtab("Map", c);
+  openEstate(c);
   ok(/draws itself once/.test($('[role="tabpanel"]', c).textContent), "empty hint");
   ok(!$('[data-testid="map-svg"]', c), "no svg for an empty world");
   c.remove();

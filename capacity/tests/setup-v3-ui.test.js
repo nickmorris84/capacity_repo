@@ -51,15 +51,22 @@ function subtab(label, r) {
   if (b && b.getAttribute("aria-selected") !== "true") click(b);
   return b;
 }
+// The estate map lives in a drawer at the foot of Volume & flow. Idempotent.
+function openEstate(r) {
+  subtab("Volume", r);
+  const b = $$(".drwhead", r).find((x) => /Whole estate map/.test(x.textContent));
+  ok(b, "estate map drawer present");
+  if (b.getAttribute("aria-expanded") !== "true") click(b);
+}
 
 console.log("Setup shell gate — BUILD-PLAN U1");
 
 async function main() {
-await t("mounts with zero console noise; seven tabs in dependency order", () => {
+await t("mounts with zero console noise; six tabs in dependency order", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   ok(document.getElementById("root").children.length > 0, "rendered");
   const labels = $$(".subtabs button").map((b) => b.textContent.replace(/[●▲✕]/g, "").trim());
-  eq(labels.join(" | "), "Structure | Queues | Processes | Request types | Volume | Map | Defaults", "tab order");
+  eq(labels.join(" | "), "Structure | Queues | Processes | Request types | Volume & flow | Defaults", "tab order");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
@@ -103,15 +110,15 @@ await t("Defaults groups are drawers with hovers too", () => {
   ok($$('[role="tabpanel"] .drw .info').length >= 6, "each explains itself");
 });
 
-await t("tab navigation switches panels (Structure → Queues → Map)", () => {
+await t("tab navigation switches panels (Structure → Queues → Volume & flow)", () => {
   subtab("Structure");
   eq($('[role="tabpanel"]').getAttribute("data-tab"), "structure", "starts on Structure");
   ok($$(".reglist").length === 4, "the registry lists");
   subtab("Queues");
   eq($('[role="tabpanel"]').getAttribute("data-tab"), "queues", "Queues panel shown");
   ok(subtab("Queues").getAttribute("aria-selected") === "true", "aria-selected moves");
-  subtab("Map");
-  ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "Map validation clean for the sample");
+  openEstate();
+  ok(/No issues/.test($('[data-testid="validation-panel"]').textContent), "estate validation clean for the sample");
 });
 
 await t("Queues are tickets: name left, status right, opening in place", () => {
@@ -193,14 +200,14 @@ await t("a blank model drives the progress strip: names the next step, Go jumps 
   c.remove();
 });
 
-await t("a broken process flags Request types and Map lists the error", () => {
+await t("a broken process flags Request types and the estate map lists the error", () => {
   const c = document.createElement("div"); document.body.appendChild(c);
   let m = Ops.sampleDomainModel();
   m = Ops.updateStep(m, "rt_billing", "ch_voice", 1, { terminal: false });
   act(() => { mod.exports.mount(c, { model: m }); });
   ok(subtab("Request types", c).textContent.includes("▲"), "Request types flagged");
-  subtab("Map", c);
-  ok(/leads nowhere/.test($('[data-testid="validation-panel"]', c).textContent), "V3 error listed in Map");
+  openEstate(c);
+  ok(/leads nowhere/.test($('[data-testid="validation-panel"]', c).textContent), "V3 error listed under the estate map");
   c.remove();
 });
 

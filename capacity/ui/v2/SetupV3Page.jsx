@@ -28,8 +28,7 @@ export const SETUP_TABS = [
   ["queues", "Queues", "The stations work actually lands on, and the physics that staff them. Volume and effective AHT are derived from your processes — they are never entered here. Tap a queue to open its editor."],
   ["processes", "Processes", "The journeys work can take, defined once and reused. A process is a channel-specific route through your queues, ending in a declared outcome — attach the same one to as many request types as need it. Process groups are managed here."],
   ["requestTypes", "Request types", "What customers ask for, and how each one is handled. This is the only place brands, business units, channels and queues are wired together — one process per channel, ending in a declared outcome."],
-  ["volume", "Volume", "How much arrives. Type a figure at any level you know; it is authoritative beneath, entered finer figures act as weights, and the rest splits equally. Every number shows where it came from."],
-  ["map", "Map", "A generated picture of the estate: routing taken from your process steps, capacity sharing drawn dashed. Nothing is authored here — it redraws from the model, and lists anything that does not hang together."],
+  ["volume", "Volume & flow", "How much arrives, and where it goes. Type a figure at any level you know; it is authoritative beneath, finer entries act as weights, and the rest splits equally. Expand a process row to see its journey with those volumes on the arrows; the whole-estate map lives at the bottom."],
   ["defaults", "Defaults", "The physics every queue inherits unless it overrides them. Channel defaults live in Structure; shared teams live in Queues; risk thresholds are a reading lens on Results."],
 ];
 
@@ -60,8 +59,6 @@ export function computeStatus(model, p) {
     { key: "volume", ok: nVe > 0 && uncovered === 0,
       badge: uncovered ? `${uncovered} uncovered` : `${nVe} entr${nVe === 1 ? "y" : "ies"}`,
       next: nVe === 0 ? "Enter volume at whatever level you know it." : "Cover the volume flagged as reaching no process." },
-    { key: "map", ok: p.validation.ok, badge: p.validation.ok ? "no issues" : `${errs.length + warns.length} issue${errs.length + warns.length === 1 ? "" : "s"}`,
-      next: "Resolve the issues listed in Map." },
     { key: "defaults", ok: !!model.engineConfig, badge: model.engineConfig ? "attached" : "missing",
       next: "Attach engine defaults (import a model or start from the sample)." },
   ];
@@ -152,8 +149,7 @@ export default function SetupV3Page({ model, onModelChange, onNav = () => {}, on
         {tab === "queues" && <QueuesPanel model={model} set={onModelChange} p={p} />}
         {tab === "processes" && <ProcessesPanel model={model} set={onModelChange} p={p} />}
         {tab === "requestTypes" && <RequestTypesPanel model={model} set={onModelChange} p={p} />}
-        {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} />}
-        {tab === "map" && <MapPanel model={model} p={p} onJump={setTab} />}
+        {tab === "volume" && <VolumePanel model={model} set={onModelChange} p={p} onJump={setTab} />}
         {tab === "defaults" && <DefaultsPanel model={model} set={onModelChange} />}
       </div>
 
@@ -1099,8 +1095,37 @@ function ShapeEditor({ model, set, scope, entry, daily }) {
   );
 }
 
-function VolRow({ model, set, level, name, kind, sub, scope, node, hasOwnShape, inheritsShape }) {
+// The flow strip is where Volume meets the old Map: each Process row unfolds
+// into its journey, with the step volumes computed exactly as propagation does
+// (each step independently takes total x split% x sampling% of the process).
+function FlowStrip({ model, p, scope, proc }) {
+  const node = p.nodes.get(keyOf(scope));
+  const total = node ? node.total : 0;
+  return (
+    <div className="flowstrip" data-testid={"flow-" + proc.id}>
+      <span className="jstep entry">{fmt(total)}/day in</span>
+      {proc.steps.length === 0 ? <span className="hint">No steps yet — add them on the Processes tab.</span> : null}
+      {proc.steps.map((s, i) => {
+        const q = (model.queues || []).find((x) => x.id === s.queueId);
+        const sampling = s.samplingPct != null ? s.samplingPct : 100;
+        const vol = total * (s.splitPct / 100) * (sampling / 100);
+        return (
+          <span className="jseg" key={i}>
+            <span className="jarr" title={s.splitPct + "% of the process total" + (s.samplingPct != null ? ", sampled at " + s.samplingPct + "%" : "")}>
+              →&nbsp;{fmt(vol)}/day{s.samplingPct != null ? " (" + s.samplingPct + "% sample)" : ""}
+            </span>
+            <span className={"jstep" + (q && q.type === "governance" ? " gov" : "")}>{q ? q.name : s.queueId}</span>
+            {s.terminal ? <span className="jdone">✓ {s.outcome || "done"}</span> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function VolRow({ model, set, p, level, name, kind, sub, scope, node, hasOwnShape, inheritsShape, proc }) {
   const [shapeOpen, setShapeOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
   const entry = entryAt(model, scope);
   const total = node ? node.total : 0;
   const prov = node ? node.prov : "none";
@@ -1122,13 +1147,20 @@ function VolRow({ model, set, level, name, kind, sub, scope, node, hasOwnShape, 
           aria-label={"Shape at " + name}>
           {hasOwnShape ? "52-wk ●" : inheritsShape ? "inherited" : "flat"}
         </button>
+        {proc ? (
+          <button className="linkbtn flowcell" onClick={() => setFlowOpen(!flowOpen)} aria-expanded={flowOpen}
+            aria-label={"Flow for " + name}>
+            {proc.steps.length} step{proc.steps.length === 1 ? "" : "s"} {flowOpen ? "▾" : "▸"}
+          </button>
+        ) : <span className="flowcell" />}
       </div>
+      {flowOpen && proc ? <FlowStrip model={model} p={p} scope={scope} proc={proc} /> : null}
       {shapeOpen ? <ShapeEditor model={model} set={set} scope={scope} entry={entry} daily={total} /> : null}
     </>
   );
 }
 
-function VolumePanel({ model, set, p }) {
+function VolumePanel({ model, set, p, onJump }) {
   // Spine tree from the resolved leaves (assignment-driven).
   const rows = [];
   const seen = new Set();
@@ -1150,16 +1182,17 @@ function VolumePanel({ model, set, p }) {
       name: (proc && proc.name) || nameOf(model.channels, leaf.channelId),
       sub: nameOf(model.channels, leaf.channelId),
       scope: { brandId: leaf.brandId, buId: leaf.buId, requestTypeId: leaf.requestTypeId, channelId: leaf.channelId },
+      proc,
     });
   }
   const uncovered = p.validation.warnings.filter((w) => w.kind === "uncovered_volume");
   return (
     <>
-      <h3>Volume <small>type a number at any row</small></h3>
+      <h3>Volume & flow <small>type a number at any row</small></h3>
       {rows.length <= 1 ? <p className="hint">Assign request types first — the spine builds itself from them.</p> : (
         <div className="scrollx">
           <div className="volgrid" data-testid="cascade-grid">
-            <div className="volrow head"><span className="volname">Level</span><span>Daily</span><span>Provenance</span><span>Shape</span></div>
+            <div className="volrow head"><span className="volname">Level</span><span>Daily</span><span>Provenance</span><span>Shape</span><span>Flow</span></div>
             {rows.map((r) => {
               const anc = [];
               if (r.scope.brandId) {
@@ -1170,9 +1203,9 @@ function VolumePanel({ model, set, p }) {
                 anc.pop(); // self is not an ancestor
               }
               return (
-                <VolRow key={keyOf(r.scope)} model={model} set={set} level={r.level} name={r.name} kind={r.kind} sub={r.sub} scope={r.scope}
+                <VolRow key={keyOf(r.scope)} model={model} set={set} p={p} level={r.level} name={r.name} kind={r.kind} sub={r.sub} scope={r.scope}
                   node={p.nodes.get(keyOf(r.scope))} hasOwnShape={hasShapeAt(r.scope)}
-                  inheritsShape={anc.some((a) => hasShapeAt(a))} />
+                  inheritsShape={anc.some((a) => hasShapeAt(a))} proc={r.proc} />
               );
             })}
           </div>
@@ -1184,11 +1217,17 @@ function VolumePanel({ model, set, p }) {
           {uncovered.map((w, i) => <p key={"u" + i} className="warnmsg">▲ {w.message}</p>)}
         </div>
       ) : null}
+      <Drawer title="Whole estate map" testid="estate-map"
+        info="A generated picture of the whole estate — nothing is authored here. Queues are placed by journey depth; solid arrows are routing from process steps, dashed lines are shared capacity. Every validation issue is listed beneath with a link to the tab that fixes it."
+        count={(() => { const n = p.validation.errors.length + p.validation.warnings.length + (p.notes || []).length; return n ? n + (n === 1 ? " issue" : " issues") : "no issues"; })()}>
+        <EstateMap model={model} p={p} onJump={onJump} />
+      </Drawer>
     </>
   );
 }
 
-// ---- 5 · Map — a pure generated artefact (U6) --------------------------------
+// ---- 5 · Estate map — a pure generated artefact (U6), drawn at the foot of
+// the Volume & flow tab.
 // Nothing is authored here, ever. Queues are nodes placed by journey depth;
 // flow edges come entirely from process steps (split % · sampling); capacity-
 // sharing (supports, cross-skill, service teams) draws DASHED, visually
@@ -1243,7 +1282,7 @@ function buildMap(model, p) {
   return { pos, flow, cap, teams, width, height };
 }
 
-function MapPanel({ model, p, onJump }) {
+function EstateMap({ model, p, onJump }) {
   const { ok, errors, warnings } = p.validation;
   const [selQ, setSelQ] = useState(null);
   const m = buildMap(model, p);
@@ -1271,7 +1310,6 @@ function MapPanel({ model, p, onJump }) {
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return (
     <>
-      <h3>Map <small>generated — nothing authored here</small></h3>
       {(model.queues || []).length === 0 ? <p className="hint">The map draws itself once queues and processes exist.</p> : (
         <div className="scrollx">
           {/* No role="img": that would make the SVG an accessibility leaf and

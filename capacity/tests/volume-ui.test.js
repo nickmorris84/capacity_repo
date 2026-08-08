@@ -193,6 +193,40 @@ await t("every level is labelled, and the finest one is a PROCESS not a queue", 
   ok(!names.some((n) => /^Inbound — Billing$|^QA — Governance$/.test(n)), "no queue is a volume level: " + names.join(", "));
 });
 
+await t("a process row unfolds into its flow, volumes computed as propagation does", () => {
+  const c = document.createElement("div"); document.body.appendChild(c);
+  act(() => { mod.exports.mount(c, { model: Ops.sampleDomainModel() }); });
+  subtab("Volume", c);
+  const r = row("Billing enquiry — Voice", c);
+  const btn = $$("button", r).find((b) => /step/.test(b.textContent));
+  ok(btn, "process row carries a flow toggle");
+  ok(/2 steps/.test(btn.textContent), "step count shown shut: " + btn.textContent);
+  click(btn);
+  const strip = $('[data-testid="flow-proc_billing_voice"]', c);
+  ok(strip, "flow strip unfolds in place");
+  ok(/2,398\/day in/.test(strip.textContent), "process total leads the strip: " + strip.textContent.slice(0, 40));
+  ok(/Inbound — Billing/.test(strip.textContent), "queue named on its chip");
+  // QA takes 100% of the process, sampled at 2%: 2,398 × 1.00 × 0.02 ≈ 48/day
+  ok(/48\/day \(2% sample\)/.test(strip.textContent), "sampled step volume on the arrow: " + strip.textContent);
+  ok($$(".jstep.gov", strip).length === 1, "governance queue visually distinct");
+  ok(/✓ completed/.test(strip.textContent), "terminal step shows its outcome");
+  c.remove();
+});
+
+await t("the flow strip is live: retype the volume and the arrows follow", () => {
+  const c = document.createElement("div"); document.body.appendChild(c);
+  act(() => { mod.exports.mount(c, { model: Ops.sampleDomainModel() }); });
+  subtab("Volume", c);
+  click($$("button", row("Billing enquiry — Voice", c)).find((b) => /step/.test(b.textContent)));
+  setV($("input", row("Billing enquiry", c)), 1199);
+  const strip = $('[data-testid="flow-proc_billing_voice"]', c);
+  ok(/1,199\/day in/.test(strip.textContent), "total follows the edit");
+  ok(/24\/day \(2% sample\)/.test(strip.textContent), "half the volume → half the QA load: " + strip.textContent);
+  // non-process rows carry no toggle — the flow belongs to the journey level only
+  ok(!$$("button", row("Billing enquiry", c)).some((b) => /step/.test(b.textContent)), "no flow toggle above the process level");
+  c.remove();
+});
+
 await t("zero unexpected console output across the whole run", () => {
   eq(consoleEvents.length, 0, "console noise: " + consoleEvents.join(" | "));
 });

@@ -1597,3 +1597,19 @@ The §25.3 model note ("servers = agents × concurrency … the standard chat
 approximation, mildly optimistic about juggling costs") is now surfaced on the Digital
 Customer card's description (the E1–E3 prose card was dissolved into inline hints in the
 P7b restructure, so the caveat lives where the planner configures the chat queue).
+
+## 2026-08-08 — Volume & Map merged into one tab (owner request #6)
+Setup drops to six tabs. "Volume" is now **Volume & flow**: the cascade grid is
+unchanged as the spine, but each Process row carries a flow toggle (step count,
+right-hand column) that unfolds the journey in place — entry total chip, then
+per-step arrows labelled with the real volume that step receives
+(`total × split% × sampling%`, exactly as `model/propagate.js` computes it),
+sampling spelled out, governance queues visually distinct, terminal steps
+showing their ✓ outcome. The whole-estate map (generated SVG, node detail,
+validation panel with jump-links) moved into a "Whole estate map" drawer at the
+foot of the same tab; the Map tab is gone.
+Files: `ui/v2/SetupV3Page.jsx` (FlowStrip; VolRow 5th column; VolumePanel
+estate drawer; MapPanel → EstateMap, headless), `ui/v2/tokens.js` (.flowcell,
+.flowstrip, .jseg/.jdone, phone grid-areas). Gates: volume-ui +2 (flow strip
+computed + live), setup-v3-ui / map-defaults-ui reach the map via the estate
+drawer (idempotent openEstate helper), app-ui asserts six tabs. All 33 GREEN.

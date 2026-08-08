@@ -457,7 +457,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .famhead b{font-size:12.5px}
 .derived-strip{margin:6px 0 4px}
 .volgrid{min-width:560px}
-.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
+.volrow{display:grid; grid-template-columns:minmax(220px,1fr) 90px 100px 90px 84px; gap:10px; align-items:center; padding:3px 0; border-bottom:0.5px dashed var(--line)}
 .volrow.head{border-bottom:0.5px solid var(--line)}
 .volrow.head span{font-size:10.5px; color:var(--ink-3); font-weight:600}
 /* Weight must decrease with depth, or the request type outranks the brand that
@@ -491,6 +491,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .prov.scaled{background:var(--amber-bg); color:var(--amber-ink); font-weight:600}
 .prov.none{color:var(--ink-3)}
 .shapecell{text-align:left; font-size:11px}
+.flowcell{text-align:left; font-size:11px; white-space:nowrap}
+.flowstrip{display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; padding:7px 0 9px;
+  border-bottom:0.5px dashed var(--line)}
+.jseg{display:inline-flex; align-items:center; gap:4px 6px; flex-wrap:wrap}
+.jstep.entry{background:var(--canvas); border:0.5px solid var(--line)}
+.jdone{font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px;
+  background:var(--green-bg); color:var(--green-ink)}
 .shapecell.set{color:var(--purple); font-weight:600}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
@@ -510,7 +517,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
    control cannot ship without one — keyboard users get the same visible focus
    the v2.4 surfaces already had. */
 .linkbtn:focus-visible,.chip:focus-visible,.regdel:focus-visible,.chipx:focus-visible,
-.mdlist button:focus-visible,.shapecell:focus-visible,.outin:focus-visible,
+.mdlist button:focus-visible,.shapecell:focus-visible,.flowcell:focus-visible,.outin:focus-visible,
 .volrow input:focus-visible,.steprow input:focus-visible,.steprow select:focus-visible,
 .regmain input:focus-visible,.shapebox textarea:focus-visible,.famhead button:focus-visible{
   outline:2px solid var(--blue); outline-offset:2px; border-radius:6px}
@@ -577,14 +584,16 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
   .mdlist button .qstats{grid-row:auto; grid-column:1; margin-top:1px}
   .mddetail{padding:12px}
   .volgrid{min-width:0}
-  .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape shape"; gap:6px 8px; padding:6px 0}
+  .volrow{grid-template-columns:1fr 74px 84px; grid-template-areas:"name val prov" "shape shape flow"; gap:6px 8px; padding:6px 0}
   .volrow>.volname{grid-area:name}
   .volrow>input{grid-area:val}
   .volrow>.prov{grid-area:prov}
   .volrow>.shapecell{grid-area:shape; padding-left:0}
+  .volrow>.flowcell{grid-area:flow; text-align:right}
   /* The header row is the ONLY place the unit "Daily" appears — hiding it on
      the contributor's own tab invites weekly figures in a per-day box. */
   .volrow.head>span:nth-child(4){grid-area:shape; padding-left:0}
+  .volrow.head>span:nth-child(5){display:none}
   .volname{padding-left:calc(var(--lvl,0) * 9px)}
   .fam-sec{padding:8px 0 10px}
   .mddetail{scroll-margin-top:12px}

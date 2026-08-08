@@ -67,13 +67,13 @@ await t("Home → Open enters the Setup workspace", () => {
   eq(activeTab(), "Setup", "landed on Setup");
 });
 
-await t("the four tabs navigate across all surfaces (Setup is the seven-tab shell)", () => {
+await t("the four tabs navigate across all surfaces (Setup is the six-tab shell)", () => {
   navTab("Levers"); eq(activeTab(), "Levers", "→ Levers");
   ok($(".mx .cell"), "Levers matrix renders");
   navTab("Results"); eq(activeTab(), "Results", "→ Results");
   ok($(".sub"), "Results lenses render");
   navTab("Setup"); eq(activeTab(), "Setup", "→ Setup");
-  eq($$(".subtabs [role='tab']").length, 7, "Setup shows seven tabs (Processes is its own)");
+  eq($$(".subtabs [role='tab']").length, 6, "Setup shows six tabs (the map lives inside Volume & flow)");
   ok($('[data-testid="tab-note"]'), "the active tab explains itself");
   navTab("Home"); ok($(".grid .card"), "→ Home launcher");
 });
