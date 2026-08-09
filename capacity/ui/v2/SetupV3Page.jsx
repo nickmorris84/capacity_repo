@@ -1218,7 +1218,7 @@ function VolumePanel({ model, set, p, onJump }) {
         </div>
       ) : null}
       <Drawer title="Whole estate map" testid="estate-map"
-        info="A generated picture of the whole estate — nothing is authored here. Queues are placed by journey depth; solid arrows are routing from process steps, dashed lines are shared capacity. Every validation issue is listed beneath with a link to the tab that fixes it."
+        info="A generated picture of the whole estate — nothing is authored here. Read it left to right: each brand and business unit sends work over a channel into a process, and each process runs on through its queue journey with the daily volumes on every arrow. A queue shared by several processes appears once, so journeys converge on it. Dashed lines are shared capacity, not flow. Every validation issue is listed beneath with a link to the tab that fixes it."
         count={(() => { const n = p.validation.errors.length + p.validation.warnings.length + (p.notes || []).length; return n ? n + (n === 1 ? " issue" : " issues") : "no issues"; })()}>
         <EstateMap model={model} p={p} onJump={onJump} />
       </Drawer>
@@ -1228,44 +1228,74 @@ function VolumePanel({ model, set, p, onJump }) {
 
 // ---- 5 · Estate map — a pure generated artefact (U6), drawn at the foot of
 // the Volume & flow tab.
-// Nothing is authored here, ever. Queues are nodes placed by journey depth;
-// flow edges come entirely from process steps (split % · sampling); capacity-
-// sharing (supports, cross-skill, service teams) draws DASHED, visually
-// distinct from flow. The validation panel lives here, each issue with a
-// jump-link to the tab that fixes it.
+// Nothing is authored here, ever. It reads left to right the way the estate
+// actually works: WHO (brand · business unit) sends work over WHICH CHANNEL
+// into WHICH PROCESS, and each process chains on through its queue journey
+// with the real daily volumes on every arrow. Queues shared by several
+// processes appear once, so their journeys visibly converge on them.
+// Capacity-sharing (supports, cross-skill, service teams) draws DASHED,
+// visually distinct from flow. The validation panel lives here, each issue
+// with a jump-link to the tab that fixes it.
 const NODE_W = 168, NODE_H = 52, COL_W = 212, ROW_H = 76;
 // Node boxes are a fixed 168px with a 44px gutter — anything longer collides
 // with the next column rather than overflowing its own box.
 const trunc = (s, n = 22) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 function buildMap(model, p) {
+  // WHO: one node per brand · BU pair with any assigned demand. WHAT: one node
+  // per process actually in use, its total summed across every leaf that runs
+  // through it (the same figure the Volume grid shows).
+  const demands = new Map(), procs = new Map(), procTotals = new Map(), dEdges = new Map();
+  for (const leaf of p.leaves) {
+    const dId = "d:" + leaf.brandId + "|" + leaf.buId;
+    if (!demands.has(dId)) demands.set(dId, { id: dId, brandId: leaf.brandId, buId: leaf.buId });
+    const proc = leaf.process;
+    if (!procs.has(proc.id)) procs.set(proc.id, proc);
+    procTotals.set(proc.id, (procTotals.get(proc.id) || 0) + leaf.total);
+    const ek = dId + ">" + proc.id;
+    const e = dEdges.get(ek) || { from: dId, to: "p:" + proc.id, channelId: proc.channelId, vol: 0 };
+    e.vol += leaf.total;
+    dEdges.set(ek, e);
+  }
   const depth = new Map();
-  for (const rt of model.requestTypes || [])
-    for (const proc of processesOf(model, rt))
-      proc.steps.forEach((s, i) => {
-        if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
-      });
+  for (const pr of procs.values())
+    pr.steps.forEach((s, i) => {
+      if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
+    });
   const maxD = Math.max(0, ...depth.values());
   const cols = [];
   for (const q of model.queues || []) {
     const d = depth.has(q.id) ? depth.get(q.id) : maxD + 1;
     (cols[d] = cols[d] || []).push(q);
   }
+  // Columns: 0 demand, 1 processes, 2+ the queue journey by step depth.
   const pos = new Map();
-  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + d * COL_W, y: 24 + i * ROW_H })));
+  [...demands.values()].forEach((d, i) => pos.set(d.id, { x: 20, y: 24 + i * ROW_H }));
+  [...procs.values()].forEach((pr, i) => pos.set("p:" + pr.id, { x: 20 + COL_W, y: 24 + i * ROW_H }));
+  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + (d + 2) * COL_W, y: 24 + i * ROW_H })));
   const teams = (model.engineConfig && model.engineConfig.serviceTeams) || [];
-  const teamY = 24 + Math.max(1, ...cols.map((c) => (c || []).length)) * ROW_H + 10;
+  const nRows = Math.max(1, demands.size, procs.size, ...cols.map((c) => (c || []).length));
+  const teamY = 24 + nRows * ROW_H + 10;
   teams.forEach((tm, i) => pos.set("team:" + tm.id, { x: 20 + i * COL_W, y: teamY }));
 
+  // Demand → process, labelled channel · volume; then each process chains
+  // through its steps with the step's real volume (total × split × sampling —
+  // the same arithmetic as propagation and the flow strips above).
+  const demandFlow = [...dEdges.values()].map((e) => ({
+    from: e.from, to: e.to, label: nameOf(model.channels, e.channelId) + " · " + fmt(e.vol) + "/day",
+  }));
   const flow = [], seenF = new Set();
-  for (const rt of model.requestTypes || [])
-    for (const proc of processesOf(model, rt))
-      for (let i = 0; i + 1 < proc.steps.length; i++) {
-        const s = proc.steps[i + 1];
-        const label = s.splitPct + "%" + (s.samplingPct != null ? " · sample " + s.samplingPct + "%" : "");
-        const k = proc.steps[i].queueId + ">" + s.queueId + ">" + label;
-        if (!seenF.has(k)) { seenF.add(k); flow.push({ from: proc.steps[i].queueId, to: s.queueId, label }); }
-      }
+  for (const pr of procs.values()) {
+    const total = procTotals.get(pr.id) || 0;
+    let prev = "p:" + pr.id;
+    for (const st of pr.steps) {
+      const vol = total * (st.splitPct / 100) * ((st.samplingPct != null ? st.samplingPct : 100) / 100);
+      const label = fmt(vol) + "/day" + (st.samplingPct != null ? " (" + st.samplingPct + "% sample)" : "");
+      const k = prev + ">" + st.queueId + ">" + label;
+      if (!seenF.has(k)) { seenF.add(k); flow.push({ from: prev, to: st.queueId, label }); }
+      prev = st.queueId;
+    }
+  }
   const cap = [], seenC = new Set();
   for (const q of model.queues || []) {
     const st = q.staffing || {};
@@ -1277,9 +1307,9 @@ function buildMap(model, p) {
       if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
   // Teams lay out on their own row, so the viewBox must cover whichever is
   // wider — otherwise a fourth shared team is silently clipped.
-  const width = Math.max(40 + (maxD + 2) * COL_W, 40 + teams.length * COL_W);
+  const width = Math.max(40 + (Math.max(cols.length, 1) + 2) * COL_W, 40 + teams.length * COL_W);
   const height = teamY + (teams.length ? NODE_H + 30 : 6);
-  return { pos, flow, cap, teams, width, height };
+  return { pos, demands: [...demands.values()], procs: [...procs.values()], procTotals, demandFlow, flow, cap, teams, width, height };
 }
 
 function EstateMap({ model, p, onJump }) {
@@ -1315,16 +1345,40 @@ function EstateMap({ model, p, onJump }) {
           {/* No role="img": that would make the SVG an accessibility leaf and
               delete every node button from the tree. */}
           <svg className="mapsvg" data-testid="map-svg" aria-labelledby="mapttl" width={m.width} height={m.height} viewBox={`0 0 ${m.width} ${m.height}`}>
-            <title id="mapttl">Queue map</title>
-            <desc>{(model.queues || []).length} queues, {m.flow.length} routing links and {m.cap.length} capacity links, generated from the request-type processes.</desc>
+            <title id="mapttl">Estate map</title>
+            <desc>{m.demands.length} brand and business-unit pairs sending work into {m.procs.length} processes across {(model.queues || []).length} queues; {m.demandFlow.length + m.flow.length} routing links and {m.cap.length} capacity links, all generated from assignments and process steps.</desc>
             <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--ink-3)" /></marker></defs>
+            {m.demands.length ? <text className="mcolhead" x={20} y={14}>Brand · business unit</text> : null}
+            {m.procs.length ? <text className="mcolhead" x={20 + COL_W} y={14}>Process</text> : null}
+            <text className="mcolhead" x={20 + 2 * COL_W} y={14}>Queue journey →</text>
+            {m.demandFlow.map((e, i) => edge(e, "d" + i, false))}
             {m.flow.map((e, i) => edge(e, i, false))}
             {m.cap.map((e, i) => edge(e, i, true))}
+            {m.demands.map((d) => {
+              const c = m.pos.get(d.id);
+              return (
+                <g key={d.id} className="mnode demand" data-node={d.id}>
+                  <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" />
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{trunc(nameOf(model.brands, d.brandId))}</text>
+                  <text className="mmeta" x={c.x + 10} y={c.y + 38}>{trunc(nameOf(model.businessUnits, d.buId))}</text>
+                </g>
+              );
+            })}
+            {m.procs.map((pr) => {
+              const c = m.pos.get("p:" + pr.id);
+              return (
+                <g key={pr.id} className="mnode proc" data-node={"p:" + pr.id}>
+                  <rect x={c.x} y={c.y} width={NODE_W} height={NODE_H} rx="9" />
+                  <text className="mname" x={c.x + 10} y={c.y + 21}>{trunc(pr.name)}</text>
+                  <text className="mmeta" x={c.x + 10} y={c.y + 38}>{fmt(m.procTotals.get(pr.id) || 0)}/day · {nameOf(model.channels, pr.channelId)}</text>
+                </g>
+              );
+            })}
             {(model.queues || []).map((q) => {
               const c = m.pos.get(q.id);
               const d = p.queues.get(q.id);
               return (
-                <g key={q.id} className={"mnode" + (selQ === q.id ? " on" : "")} data-node={q.id}
+                <g key={q.id} className={"mnode queue" + (selQ === q.id ? " on" : "")} data-node={q.id}
                   tabIndex={0} role="button" aria-pressed={selQ === q.id}
                   aria-label={q.name + " — " + (QTYPE_LABELS[q.type] || q.type) + ", " + fmt(d ? d.volume : 0) + " per day"}
                   onClick={() => setSelQ(selQ === q.id ? null : q.id)}

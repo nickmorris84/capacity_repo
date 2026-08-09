@@ -1613,3 +1613,20 @@ estate drawer; MapPanel → EstateMap, headless), `ui/v2/tokens.js` (.flowcell,
 .flowstrip, .jseg/.jdone, phone grid-areas). Gates: volume-ui +2 (flow strip
 computed + live), setup-v3-ui / map-defaults-ui reach the map via the estate
 drawer (idempotent openEstate helper), app-ui asserts six tabs. All 33 GREEN.
+
+## 2026-08-09 — Estate map redrawn: demand → process → queue journey
+The owner: the map should be "an interconnected diagram of all the processes
+flows and how brand, bu and channel use them" — not queues with % labels.
+Rebuilt `buildMap`/`EstateMap` around three column groups with headers:
+**Brand · business unit** (one node per demand pair), **Process** (one node per
+process in use, showing its summed daily total and channel), then the
+**Queue journey** by step depth. Demand → process edges carry
+`channel · volume/day`; each process chains through its steps with the step's
+real volume (`total × split% × sampling%`, propagation's arithmetic) on every
+arrow. Shared queues still appear once, so journeys visibly converge; capacity
+links stay dashed; node tap/detail, validation panel and jump-links unchanged.
+Files: `ui/v2/SetupV3Page.jsx` (buildMap, EstateMap, drawer info),
+`ui/v2/tokens.js` (.mnode.demand/.proc, .mcolhead, queue-only cursor/hover).
+Gate: map-defaults-ui test 1 now proves the demand node, both process nodes
+(total + channel), channel-labelled demand edges and volume-labelled chain
+edges (48/day QA sample, 421/day verify split). All 33 GREEN.

@@ -502,10 +502,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
 .mapsvg{display:block}
-.mnode:not(.team) rect{cursor:pointer}
+.mnode.queue rect{cursor:pointer}
 .mnode rect{fill:#fff; stroke:var(--line); stroke-width:1}
 .mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
 .mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
+.mnode.demand rect{fill:var(--canvas)}
+.mnode.proc rect{stroke:var(--blue-mid)}
+.mcolhead{font-size:9px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; fill:var(--ink-3)}
 .mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
 .mnode .mmeta{font-size:9.5px; fill:var(--ink-3); pointer-events:none}
 .medge line{stroke:var(--ink-3); stroke-width:1}
@@ -525,7 +528,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mnode:focus-visible rect{stroke:var(--blue); stroke-width:2}
 .mnode rect{transition:stroke 0.12s}
 /* Team nodes are not selectable — they must not advertise that they are. */
-.mnode:not(.team):hover rect{stroke:var(--blue-mid)}
+.mnode.queue:hover rect{stroke:var(--blue-mid)}
 
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 .mdlist{display:flex; flex-direction:column; gap:4px}

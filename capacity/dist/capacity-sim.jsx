@@ -4305,10 +4305,13 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .shapebox{grid-column:1/-1; border:0.5px solid var(--line); border-radius:10px; background:var(--canvas); padding:10px 12px; margin:6px 0}
 .shapebox textarea{width:100%; border:0.5px solid var(--line); border-radius:8px; font:inherit; font-size:11.5px; padding:6px 8px; margin:8px 0}
 .mapsvg{display:block}
-.mnode:not(.team) rect{cursor:pointer}
+.mnode.queue rect{cursor:pointer}
 .mnode rect{fill:#fff; stroke:var(--line); stroke-width:1}
 .mnode.on rect{stroke:var(--blue); fill:var(--blue-tint)}
 .mnode.team rect{fill:var(--canvas); stroke:var(--purple)}
+.mnode.demand rect{fill:var(--canvas)}
+.mnode.proc rect{stroke:var(--blue-mid)}
+.mcolhead{font-size:9px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; fill:var(--ink-3)}
 .mnode .mname{font-size:11.5px; font-weight:600; fill:var(--ink); pointer-events:none}
 .mnode .mmeta{font-size:9.5px; fill:var(--ink-3); pointer-events:none}
 .medge line{stroke:var(--ink-3); stroke-width:1}
@@ -4328,7 +4331,7 @@ h2{font-size:20px; font-weight:600; letter-spacing:-0.015em}
 .mnode:focus-visible rect{stroke:var(--blue); stroke-width:2}
 .mnode rect{transition:stroke 0.12s}
 /* Team nodes are not selectable \u2014 they must not advertise that they are. */
-.mnode:not(.team):hover rect{stroke:var(--blue-mid)}
+.mnode.queue:hover rect{stroke:var(--blue-mid)}
 
 .md{display:grid; grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr); gap:12px; align-items:start}
 .mdlist{display:flex; flex-direction:column; gap:4px}
@@ -5902,7 +5905,7 @@ function VolumePanel({ model, set, p, onJump }) {
       {
         title: "Whole estate map",
         testid: "estate-map",
-        info: "A generated picture of the whole estate \u2014 nothing is authored here. Queues are placed by journey depth; solid arrows are routing from process steps, dashed lines are shared capacity. Every validation issue is listed beneath with a link to the tab that fixes it.",
+        info: "A generated picture of the whole estate \u2014 nothing is authored here. Read it left to right: each brand and business unit sends work over a channel into a process, and each process runs on through its queue journey with the daily volumes on every arrow. A queue shared by several processes appears once, so journeys converge on it. Dashed lines are shared capacity, not flow. Every validation issue is listed beneath with a link to the tab that fixes it.",
         count: (() => {
           const n = p.validation.errors.length + p.validation.warnings.length + (p.notes || []).length;
           return n ? n + (n === 1 ? " issue" : " issues") : "no issues";
@@ -5918,12 +5921,23 @@ var COL_W = 212;
 var ROW_H = 76;
 var trunc = (s, n = 22) => s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 function buildMap(model, p) {
+  const demands = /* @__PURE__ */ new Map(), procs = /* @__PURE__ */ new Map(), procTotals = /* @__PURE__ */ new Map(), dEdges = /* @__PURE__ */ new Map();
+  for (const leaf of p.leaves) {
+    const dId = "d:" + leaf.brandId + "|" + leaf.buId;
+    if (!demands.has(dId)) demands.set(dId, { id: dId, brandId: leaf.brandId, buId: leaf.buId });
+    const proc = leaf.process;
+    if (!procs.has(proc.id)) procs.set(proc.id, proc);
+    procTotals.set(proc.id, (procTotals.get(proc.id) || 0) + leaf.total);
+    const ek = dId + ">" + proc.id;
+    const e = dEdges.get(ek) || { from: dId, to: "p:" + proc.id, channelId: proc.channelId, vol: 0 };
+    e.vol += leaf.total;
+    dEdges.set(ek, e);
+  }
   const depth = /* @__PURE__ */ new Map();
-  for (const rt of model.requestTypes || [])
-    for (const proc of (0, import_domain.processesOf)(model, rt))
-      proc.steps.forEach((s, i) => {
-        if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
-      });
+  for (const pr of procs.values())
+    pr.steps.forEach((s, i) => {
+      if (!depth.has(s.queueId) || i < depth.get(s.queueId)) depth.set(s.queueId, i);
+    });
   const maxD = Math.max(0, ...depth.values());
   const cols = [];
   for (const q of model.queues || []) {
@@ -5931,22 +5945,33 @@ function buildMap(model, p) {
     (cols[d] = cols[d] || []).push(q);
   }
   const pos = /* @__PURE__ */ new Map();
-  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + d * COL_W, y: 24 + i * ROW_H })));
+  [...demands.values()].forEach((d, i) => pos.set(d.id, { x: 20, y: 24 + i * ROW_H }));
+  [...procs.values()].forEach((pr, i) => pos.set("p:" + pr.id, { x: 20 + COL_W, y: 24 + i * ROW_H }));
+  cols.forEach((col, d) => (col || []).forEach((q, i) => pos.set(q.id, { x: 20 + (d + 2) * COL_W, y: 24 + i * ROW_H })));
   const teams = model.engineConfig && model.engineConfig.serviceTeams || [];
-  const teamY = 24 + Math.max(1, ...cols.map((c) => (c || []).length)) * ROW_H + 10;
+  const nRows = Math.max(1, demands.size, procs.size, ...cols.map((c) => (c || []).length));
+  const teamY = 24 + nRows * ROW_H + 10;
   teams.forEach((tm, i) => pos.set("team:" + tm.id, { x: 20 + i * COL_W, y: teamY }));
+  const demandFlow = [...dEdges.values()].map((e) => ({
+    from: e.from,
+    to: e.to,
+    label: nameOf(model.channels, e.channelId) + " \xB7 " + fmt(e.vol) + "/day"
+  }));
   const flow = [], seenF = /* @__PURE__ */ new Set();
-  for (const rt of model.requestTypes || [])
-    for (const proc of (0, import_domain.processesOf)(model, rt))
-      for (let i = 0; i + 1 < proc.steps.length; i++) {
-        const s = proc.steps[i + 1];
-        const label = s.splitPct + "%" + (s.samplingPct != null ? " \xB7 sample " + s.samplingPct + "%" : "");
-        const k = proc.steps[i].queueId + ">" + s.queueId + ">" + label;
-        if (!seenF.has(k)) {
-          seenF.add(k);
-          flow.push({ from: proc.steps[i].queueId, to: s.queueId, label });
-        }
+  for (const pr of procs.values()) {
+    const total = procTotals.get(pr.id) || 0;
+    let prev = "p:" + pr.id;
+    for (const st of pr.steps) {
+      const vol = total * (st.splitPct / 100) * ((st.samplingPct != null ? st.samplingPct : 100) / 100);
+      const label = fmt(vol) + "/day" + (st.samplingPct != null ? " (" + st.samplingPct + "% sample)" : "");
+      const k = prev + ">" + st.queueId + ">" + label;
+      if (!seenF.has(k)) {
+        seenF.add(k);
+        flow.push({ from: prev, to: st.queueId, label });
       }
+      prev = st.queueId;
+    }
+  }
   const cap = [], seenC = /* @__PURE__ */ new Set();
   for (const q of model.queues || []) {
     const st = q.staffing || {};
@@ -5968,9 +5993,9 @@ function buildMap(model, p) {
   for (const tm of teams)
     for (const t of tm.coversQueues || [])
       if (pos.has(t)) cap.push({ from: "team:" + tm.id, to: t, label: "covers" });
-  const width = Math.max(40 + (maxD + 2) * COL_W, 40 + teams.length * COL_W);
+  const width = Math.max(40 + (Math.max(cols.length, 1) + 2) * COL_W, 40 + teams.length * COL_W);
   const height = teamY + (teams.length ? NODE_H + 30 : 6);
-  return { pos, flow, cap, teams, width, height };
+  return { pos, demands: [...demands.values()], procs: [...procs.values()], procTotals, demandFlow, flow, cap, teams, width, height };
 }
 function EstateMap({ model, p, onJump }) {
   const { ok, errors, warnings } = p.validation;
@@ -6002,25 +6027,53 @@ function EstateMap({ model, p, onJump }) {
   const selected = selQ && (model.queues || []).find((x) => x.id === selQ);
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     (model.queues || []).length === 0 ? /* @__PURE__ */ jsx("p", { className: "hint", children: "The map draws itself once queues and processes exist." }) : /* @__PURE__ */ jsx("div", { className: "scrollx", children: /* @__PURE__ */ jsxs("svg", { className: "mapsvg", "data-testid": "map-svg", "aria-labelledby": "mapttl", width: m.width, height: m.height, viewBox: `0 0 ${m.width} ${m.height}`, children: [
-      /* @__PURE__ */ jsx("title", { id: "mapttl", children: "Queue map" }),
+      /* @__PURE__ */ jsx("title", { id: "mapttl", children: "Estate map" }),
       /* @__PURE__ */ jsxs("desc", { children: [
+        m.demands.length,
+        " brand and business-unit pairs sending work into ",
+        m.procs.length,
+        " processes across ",
         (model.queues || []).length,
-        " queues, ",
-        m.flow.length,
+        " queues; ",
+        m.demandFlow.length + m.flow.length,
         " routing links and ",
         m.cap.length,
-        " capacity links, generated from the request-type processes."
+        " capacity links, all generated from assignments and process steps."
       ] }),
       /* @__PURE__ */ jsx("defs", { children: /* @__PURE__ */ jsx("marker", { id: "arr", markerWidth: "8", markerHeight: "8", refX: "7", refY: "3", orient: "auto", children: /* @__PURE__ */ jsx("path", { d: "M0,0 L7,3 L0,6 z", fill: "var(--ink-3)" }) }) }),
+      m.demands.length ? /* @__PURE__ */ jsx("text", { className: "mcolhead", x: 20, y: 14, children: "Brand \xB7 business unit" }) : null,
+      m.procs.length ? /* @__PURE__ */ jsx("text", { className: "mcolhead", x: 20 + COL_W, y: 14, children: "Process" }) : null,
+      /* @__PURE__ */ jsx("text", { className: "mcolhead", x: 20 + 2 * COL_W, y: 14, children: "Queue journey \u2192" }),
+      m.demandFlow.map((e, i) => edge(e, "d" + i, false)),
       m.flow.map((e, i) => edge(e, i, false)),
       m.cap.map((e, i) => edge(e, i, true)),
+      m.demands.map((d) => {
+        const c = m.pos.get(d.id);
+        return /* @__PURE__ */ jsxs("g", { className: "mnode demand", "data-node": d.id, children: [
+          /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
+          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: trunc(nameOf(model.brands, d.brandId)) }),
+          /* @__PURE__ */ jsx("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: trunc(nameOf(model.businessUnits, d.buId)) })
+        ] }, d.id);
+      }),
+      m.procs.map((pr) => {
+        const c = m.pos.get("p:" + pr.id);
+        return /* @__PURE__ */ jsxs("g", { className: "mnode proc", "data-node": "p:" + pr.id, children: [
+          /* @__PURE__ */ jsx("rect", { x: c.x, y: c.y, width: NODE_W, height: NODE_H, rx: "9" }),
+          /* @__PURE__ */ jsx("text", { className: "mname", x: c.x + 10, y: c.y + 21, children: trunc(pr.name) }),
+          /* @__PURE__ */ jsxs("text", { className: "mmeta", x: c.x + 10, y: c.y + 38, children: [
+            fmt(m.procTotals.get(pr.id) || 0),
+            "/day \xB7 ",
+            nameOf(model.channels, pr.channelId)
+          ] })
+        ] }, pr.id);
+      }),
       (model.queues || []).map((q) => {
         const c = m.pos.get(q.id);
         const d = p.queues.get(q.id);
         return /* @__PURE__ */ jsxs(
           "g",
           {
-            className: "mnode" + (selQ === q.id ? " on" : ""),
+            className: "mnode queue" + (selQ === q.id ? " on" : ""),
             "data-node": q.id,
             tabIndex: 0,
             role: "button",

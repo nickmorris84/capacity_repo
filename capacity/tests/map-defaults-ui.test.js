@@ -1,6 +1,8 @@
 /* U6 GATE — Estate map + Defaults (BUILD-PLAN U6). The map is a PURE generated
- * artefact: queue nodes by journey depth, flow edges entirely from process
- * steps (split % · sampling), capacity links dashed and distinct, always
+ * artefact reading demand → process → queue journey: brand · BU nodes send
+ * work over channel-labelled edges into process nodes, which chain through
+ * their queue steps with real daily volumes (total × split × sampling) on
+ * every arrow. Capacity links stay dashed and distinct, always
  * current, validation panel with jump-links, node tap → "Edit in Queues".
  * It lives in the "Whole estate map" drawer at the foot of Volume & flow.
  * Renders the sample AND an empty model clean. Defaults is the global form
@@ -67,17 +69,28 @@ const byLabel = (re, r) => $$("input,select", r).find((i) => re.test(i.getAttrib
 console.log("Estate map + Defaults gate — BUILD-PLAN U6");
 
 async function main() {
-await t("the estate map generates itself from the sample: nodes by depth, flow edges labelled", () => {
+await t("the estate map reads demand → process → queue journey, volumes on the arrows", () => {
   act(() => { new Function("module", "exports", "require", "__dirname", "__filename", built.outputFiles[0].text)(mod, mod.exports, require, path.join(__dirname, "../ui/v2"), path.join(__dirname, "../ui/v2/setup-v3-main.jsx")); });
   openEstate();
   const svg = $('[data-testid="map-svg"]');
   ok(svg, "svg rendered");
-  eq($$(".mnode:not(.team)", svg).length, 4, "four queue nodes");
+  eq($$(".mnode.queue", svg).length, 4, "four queue nodes");
+  // WHO: the brand · BU pair is a node of its own on the left
+  const demand = $$(".mnode.demand", svg);
+  eq(demand.length, 1, "one demand node for the sample's single brand · BU");
+  ok(/Acme/.test(demand[0].textContent) && /Customer Service/.test(demand[0].textContent), "brand and BU named");
+  // WHAT: each process in use is a node, carrying its total and channel
+  const procs = $$(".mnode.proc", svg);
+  eq(procs.length, 2, "both processes drawn");
+  ok(procs.some((n) => /Billing enquiry/.test(n.textContent) && /2,398\/day · Voice/.test(n.textContent)), "process node named with total and channel");
   const flows = $$(".medge.flow", svg);
-  ok(flows.length >= 3, "flow edges from process steps: " + flows.length);
-  ok(flows.some((f) => /100% · sample 2%/.test(f.textContent)), "sampling edge labelled");
-  ok(flows.some((f) => /60%/.test(f.textContent)), "the 60% split edge labelled");
-  ok($$(".mnode", svg).some((n) => /2,398\/day/.test(n.textContent)), "derived volume on the node");
+  // demand → process edges carry the channel and the daily volume
+  ok(flows.some((f) => /Voice · 2,398\/day/.test(f.textContent)), "demand edge labelled channel · volume");
+  ok(flows.some((f) => /Digital · 702\/day/.test(f.textContent)), "second demand edge labelled");
+  // process → step chains carry the step's REAL volume, propagation's arithmetic
+  ok(flows.some((f) => /48\/day \(2% sample\)/.test(f.textContent)), "sampled QA step: 2,398 × 100% × 2% ≈ 48");
+  ok(flows.some((f) => /421\/day/.test(f.textContent)), "the 60% verify split as volume: 702 × 60% ≈ 421");
+  ok($$(".mnode.queue", svg).some((n) => /2,398\/day/.test(n.textContent)), "derived volume on the queue node");
   eq(consoleEvents.length, 0, "mount noise: " + consoleEvents.join(" | "));
 });
 
